@@ -1,0 +1,28 @@
+Using device: cuda
+--- GPU DIAGNOSTICS ---
+Active GPU: Tesla V100-PCIE-16GB
+CUDA_VISIBLE_DEVICES: 0
+-----------------------
+Starting Compute Benchmark (Warming up GPU...)
+Benchmarking...
+------------------------------
+Total Time: 0.26 seconds
+Images Processed: 7800
+** Compute Throughput: 29916.93 images/sec **
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4241110
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: gpu02
+Nodes: 1
+Cores per node: 12
+Job started at: 2026-05-15 15:32:48
+Job ended at:   2026-05-15 15:32:59
+Job Wall-clock time: 00:00:11
+CPU Utilized: 00:00:05
+CPU Efficiency: 3.79% of 00:02:12 core-walltime
+Memory Utilized: 608.00 KB
+Memory Efficiency: 0.00% of 32.00 GB

@@ -1,0 +1,30 @@
+Found 500 source tar files. Starting conversion...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000000.tar 0 0.0 GB 0
+Processing 50/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A6H8M2K6.tar
+Processing 100/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_B1A2L5O5.tar
+Processing 150/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A8Q8U3T2.tar
+Processing 200/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_C6P9U3V6.tar
+Processing 250/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A7A6P4Q5.tar
+Processing 300/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A9A3G3F3.tar
+Processing 350/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_E9C3L3H8.tar
+Processing 400/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_B5W8X1Y3.tar
+Processing 450/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_G4L3C9Q0.tar
+Processing 500/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_C1W9K3X5.tar
+Conversion complete! Your WDS shards are ready.
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4241404
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n15
+Nodes: 1
+Cores per node: 4
+Job started at: 2026-05-15 16:45:15
+Job ended at:   2026-05-15 16:47:52
+Job Wall-clock time: 00:02:37
+CPU Utilized: 00:00:21
+CPU Efficiency: 3.34% of 00:10:28 core-walltime
+Memory Utilized: 317.40 MB
+Memory Efficiency: 1.94% of 16.00 GB
