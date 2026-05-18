@@ -1,0 +1,143 @@
+Starting array task 1 on n10 with 8 CPUs
+--- Slurm Task 1/4 ---
+Total dataset size: 5000
+Assigned to this node: 1000 subjects (indices 1000 to 1999)
+Using 8 local CPUs/Workers
+[Worker 9] Starting conversion of 125 subjects...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel/worker9_shard-000000.tar 0 0.0 GB 0
+[Worker 9] Processing 10/125
+[Worker 9] Processing 20/125
+[Worker 9] Processing 30/125
+[Worker 9] Processing 40/125
+[Worker 9] Processing 50/125
+[Worker 9] Processing 60/125
+[Worker 9] Processing 70/125
+[Worker 9] Processing 80/125
+[Worker 9] Processing 90/125
+[Worker 9] Processing 100/125
+[Worker 9] Processing 110/125
+[Worker 9] Processing 120/125
+[Worker 9] Complete!
+[Worker 10] Starting conversion of 125 subjects...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel/worker10_shard-000000.tar 0 0.0 GB 0
+[Worker 10] Processing 10/125
+[Worker 10] Processing 20/125
+[Worker 10] Processing 30/125
+[Worker 10] Processing 40/125
+[Worker 10] Processing 50/125
+[Worker 10] Processing 60/125
+[Worker 10] Processing 70/125
+[Worker 10] Processing 80/125
+[Worker 10] Processing 90/125
+[Worker 10] Processing 100/125
+[Worker 10] Processing 110/125
+[Worker 10] Processing 120/125
+[Worker 10] Complete!
+[Worker 11] Starting conversion of 125 subjects...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel/worker11_shard-000000.tar 0 0.0 GB 0
+[Worker 11] Processing 10/125
+[Worker 11] Processing 20/125
+[Worker 11] Processing 30/125
+[Worker 11] Processing 40/125
+[Worker 11] Processing 50/125
+[Worker 11] Processing 60/125
+[Worker 11] Processing 70/125
+[Worker 11] Processing 80/125
+[Worker 11] Processing 90/125
+[Worker 11] Processing 100/125
+[Worker 11] Processing 110/125
+[Worker 11] Processing 120/125
+[Worker 11] Complete!
+[Worker 13] Starting conversion of 125 subjects...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel/worker13_shard-000000.tar 0 0.0 GB 0
+[Worker 13] Processing 10/125
+[Worker 13] Processing 20/125
+[Worker 13] Processing 30/125
+[Worker 13] Processing 40/125
+[Worker 13] Processing 50/125
+[Worker 13] Processing 60/125
+[Worker 13] Processing 70/125
+[Worker 13] Processing 80/125
+[Worker 13] Processing 90/125
+[Worker 13] Processing 100/125
+[Worker 13] Processing 110/125
+[Worker 13] Processing 120/125
+[Worker 13] Complete!
+[Worker 14] Starting conversion of 125 subjects...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel/worker14_shard-000000.tar 0 0.0 GB 0
+[Worker 14] Processing 10/125
+[Worker 14] Processing 20/125
+[Worker 14] Processing 30/125
+[Worker 14] Processing 40/125
+[Worker 14] Processing 50/125
+[Worker 14] Processing 60/125
+[Worker 14] Processing 70/125
+[Worker 14] Processing 80/125
+[Worker 14] Processing 90/125
+[Worker 14] Processing 100/125
+[Worker 14] Processing 110/125
+[Worker 14] Processing 120/125
+[Worker 14] Complete!
+[Worker 12] Starting conversion of 125 subjects...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel/worker12_shard-000000.tar 0 0.0 GB 0
+[Worker 12] Processing 10/125
+[Worker 12] Processing 20/125
+[Worker 12] Processing 30/125
+[Worker 12] Processing 40/125
+[Worker 12] Processing 50/125
+[Worker 12] Processing 60/125
+[Worker 12] Processing 70/125
+[Worker 12] Processing 80/125
+[Worker 12] Processing 90/125
+[Worker 12] Processing 100/125
+[Worker 12] Processing 110/125
+[Worker 12] Processing 120/125
+[Worker 12] Complete!
+[Worker 15] Starting conversion of 125 subjects...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel/worker15_shard-000000.tar 0 0.0 GB 0
+[Worker 15] Processing 10/125
+[Worker 15] Processing 20/125
+[Worker 15] Processing 30/125
+[Worker 15] Processing 40/125
+[Worker 15] Processing 50/125
+[Worker 15] Processing 60/125
+[Worker 15] Processing 70/125
+[Worker 15] Processing 80/125
+[Worker 15] Processing 90/125
+[Worker 15] Processing 100/125
+[Worker 15] Processing 110/125
+[Worker 15] Processing 120/125
+[Worker 15] Complete!
+[Worker 8] Starting conversion of 125 subjects...
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel/worker8_shard-000000.tar 0 0.0 GB 0
+[Worker 8] Processing 10/125
+[Worker 8] Processing 20/125
+[Worker 8] Processing 30/125
+[Worker 8] Processing 40/125
+[Worker 8] Processing 50/125
+[Worker 8] Processing 60/125
+[Worker 8] Processing 70/125
+[Worker 8] Processing 80/125
+[Worker 8] Processing 90/125
+[Worker 8] Processing 100/125
+[Worker 8] Processing 110/125
+[Worker 8] Processing 120/125
+[Worker 8] Complete!
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4243910
+Array Job ID: 4243907_1
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n10
+Nodes: 1
+Cores per node: 8
+Job started at: 2026-05-16 16:37:47
+Job ended at:   2026-05-16 16:40:09
+Job Wall-clock time: 00:02:22
+CPU Utilized: 00:06:57
+CPU Efficiency: 36.71% of 00:18:56 core-walltime
+Memory Utilized: 526.89 MB
+Memory Efficiency: 1.61% of 32.00 GB

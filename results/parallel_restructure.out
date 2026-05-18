@@ -1,0 +1,41 @@
+Starting array task 4 on n12 with 8 CPUs
+--- Slurm Task 4/4 ---
+Total dataset size: 5000
+Assigned to this node: 1000 subjects (indices 4000 to 4999)
+Using 8 local CPUs/Workers
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4243895
+Array Job ID: 4243891_3
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n11
+Nodes: 1
+Cores per node: 8
+Job started at: 2026-05-16 16:36:00
+Job ended at:   2026-05-16 16:36:22
+Job Wall-clock time: 00:00:22
+CPU Utilized: 00:01:06
+CPU Efficiency: 37.50% of 00:02:56 core-walltime
+Memory Utilized: 478.88 MB
+Memory Efficiency: 1.46% of 32.00 GB
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4243893
+Array Job ID: 4243891_1
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n09
+Nodes: 1
+Cores per node: 8
+Job started at: 2026-05-16 16:36:00
+Job ended at:   2026-05-16 16:36:22
+Job Wall-clock time: 00:00:22
+CPU Utilized: 00:01:00
+CPU Efficiency: 34.09% of 00:02:56 core-walltime
+Memory Utilized: 460.84 MB
+Memory Efficiency: 1.41% of 32.00 GB

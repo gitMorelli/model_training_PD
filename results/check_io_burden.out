@@ -1,28 +1,68 @@
-Using device: cuda
---- GPU DIAGNOSTICS ---
-Active GPU: Tesla V100-PCIE-16GB
-CUDA_VISIBLE_DEVICES: 0
------------------------
-Starting Compute Benchmark (Warming up GPU...)
-Benchmarking...
-------------------------------
-Total Time: 0.26 seconds
-Images Processed: 7800
-** Compute Throughput: 29916.93 images/sec **
+Setting up WebDataset pipeline with 32 workers...
+Found 'resize' in the immediate parent folder!
+🧠 Loading all shards into RAM (Decode: pil, Transform: no_transform)...
+✅ Successfully cached 500 sequences in RAM!
+##################################################
+🚀 Starting WebDataset I/O Benchmark for pattern=/mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_resized/dataset_shard-*.tar 🚀
+Loading Approach: In-Memory
+Decoding Approach: pil, Transform: no_transform
+Worker Splitting: Enabled
+Prefetch Factor: 2
+Found 50 shard files matching the pattern.
+
+--- Benchmarking with num_workers=2 ---
+Starting WDS I/O Benchmark...
+Total Time:           8.63 seconds
+Batches Processed:    125
+Images Processed:     19500
+** I/O Throughput:    2260.06 images/sec **
+----------------------------------------
+
+--- Benchmarking with num_workers=4 ---
+Starting WDS I/O Benchmark...
+Total Time:           4.56 seconds
+Batches Processed:    125
+Images Processed:     19500
+** I/O Throughput:    4277.47 images/sec **
+----------------------------------------
+
+--- Benchmarking with num_workers=8 ---
+Starting WDS I/O Benchmark...
+Total Time:           2.50 seconds
+Batches Processed:    125
+Images Processed:     19500
+** I/O Throughput:    7787.01 images/sec **
+----------------------------------------
+
+--- Benchmarking with num_workers=16 ---
+Starting WDS I/O Benchmark...
+Total Time:           2.46 seconds
+Batches Processed:    125
+Images Processed:     19500
+** I/O Throughput:    7938.89 images/sec **
+----------------------------------------
+
+--- Benchmarking with num_workers=32 ---
+Starting WDS I/O Benchmark...
+Total Time:           3.20 seconds
+Batches Processed:    125
+Images Processed:     19500
+** I/O Throughput:    6094.25 images/sec **
+----------------------------------------
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4241110
+Job ID: 4244620
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: gpu02
+Nodelist: n01
 Nodes: 1
-Cores per node: 12
-Job started at: 2026-05-15 15:32:48
-Job ended at:   2026-05-15 15:32:59
-Job Wall-clock time: 00:00:11
-CPU Utilized: 00:00:05
-CPU Efficiency: 3.79% of 00:02:12 core-walltime
-Memory Utilized: 608.00 KB
-Memory Efficiency: 0.00% of 32.00 GB
+Cores per node: 34
+Job started at: 2026-05-16 18:25:31
+Job ended at:   2026-05-16 18:26:25
+Job Wall-clock time: 00:00:54
+CPU Utilized: 00:16:55
+CPU Efficiency: 55.28% of 00:30:36 core-walltime
+Memory Utilized: 3.07 GB
+Memory Efficiency: 4.79% of 64.00 GB

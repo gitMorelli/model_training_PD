@@ -5,22 +5,30 @@ import os
 import json
 import pandas as pd
 import torchvision.transforms as T
+from PIL import Image
+import io
 
 from src.utils.file_utils import recreate_dir
+
+CONVERT_TO_JPG = False # Set to True to convert PNGs to JPEGs during the WDS conversion process
+RESIZE = False
 
 # --- CONFIGURATION ---
 SOURCE_folder = "/mnt/beegfs01/scratch/a_morelli/extraction/final/data"
 LIST_OF_IDS_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/progress.csv"
-OUTPUT_PATH = "/mnt/beegfs01/scratch/a_morelli/model_training/sharded_test"
+if CONVERT_TO_JPG:
+    OUTPUT_PATH = "/mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_jpeg"
+else:
+    OUTPUT_PATH = "/mnt/beegfs01/scratch/a_morelli/model_training/sharded_test"
+if RESIZE:
+    OUTPUT_PATH += "_resized"
 OUTPUT_PATTERN = OUTPUT_PATH+"/dataset_shard-%06d.tar" # The output format
-MAX_SHARD_SIZE = 0.5e9 #1e9 ~1 GB per shard is Optimal for WDS
-MAX_SHARD_COUNT = 10000 # Max items per shard
+MAX_SHARD_SIZE = 1e9 #1e9 ~1 GB per shard is Optimal for WDS
+MAX_SHARD_COUNT = 10 # Max items per shard
 
-
-def convert_to_wds():
+def convert_to_wds(num_test_ids=50):
     recreate_dir(OUTPUT_PATH) # Clear output directory before writing new shards
 
-    num_test_ids = 500
     id_list =  pd.read_csv(LIST_OF_IDS_PATH)["id"].tolist()  # Assuming 'id' column contains the subject IDs
     id_list = id_list[:num_test_ids]
     print(f"Found {len(id_list)} source tar files. Starting conversion...")
@@ -71,7 +79,7 @@ def convert_to_wds():
                     "__key__": subject_id,
                     "json": json.dumps({
                         "subject": subject_id, 
-                        "page_dimensions": page_dimensions
+                        #"page_dimensions": page_dimensions
                     }).encode("utf-8")
                 }
                 
@@ -82,14 +90,38 @@ def convert_to_wds():
                     
                     for m in files:
                         # Apply your filename filter
-                        if os.path.basename(m.name) in ["hand.png", "number_radom.png", "X.png"]:
+                        if os.path.basename(m.name) in ["hand.png", "number_random.png", "X.png"]:
                             # Read raw bytes directly from old tar
                             file_bytes = old_tar.extractfile(m).read() 
                             clean_name = os.path.basename(m.name).split('.')[0]
+                            img = Image.open(io.BytesIO(file_bytes))
+                            
+                            if RESIZE:
+                                img = img.resize((224, 224), Image.Resampling.LANCZOS)
+
+                            
+                            if CONVERT_TO_JPG:
+                                # --- NEW: Convert PNG bytes to JPEG bytes ---
+                                
+                                # JPEG doesn't support RGBA/transparency, convert to RGB
+                                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                                    img = img.convert("RGB")
+                                
+                                # Save to an in-memory bytes buffer as JPEG
+                                buffer = io.BytesIO()
+                                img.save(buffer, format="JPEG", quality=90)  # Adjust quality (1-100) as needed
+                                file_bytes = buffer.getvalue()
+                                extension_out='jpg'
+                            else:
+                                buffer = io.BytesIO()
+                                img.save(buffer, format="PNG") 
+                                file_bytes = buffer.getvalue()
+                                extension_out='png'
+                            
                             
                             # Use format: timestep.index.png (e.g., "q1.0.png", "q1.1.png")
                             # This prevents 'q2' files from overwriting 'q1' files in the dictionary
-                            file_key = f"{timestep}.{clean_name}.png"
+                            file_key = f"{timestep}.{clean_name}.{extension_out}"
                             sample[file_key] = file_bytes
                             
                 # 4. Write the massive subject sample to the shard
@@ -139,7 +171,7 @@ def run_checks():
         
         # Print out exactly what WebDataset grouped together
         for key, value in sample.items():
-            if key == "__key__":
+            if key.startswith("__"):
                 continue
                 
             if key == "json":
@@ -155,4 +187,5 @@ def run_checks():
         print(f"❌ Failed to decode sample: {e}")
 
 if __name__ == "__main__":
-    convert_to_wds()
+    convert_to_wds(num_test_ids=500)
+    run_checks()

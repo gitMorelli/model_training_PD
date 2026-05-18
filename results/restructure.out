@@ -1,30 +1,129 @@
 Found 500 source tar files. Starting conversion...
 # writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000000.tar 0 0.0 GB 0
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000001.tar 10 0.0 GB 10
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000002.tar 10 0.0 GB 20
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000003.tar 10 0.0 GB 30
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000004.tar 10 0.0 GB 40
 Processing 50/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A6H8M2K6.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000005.tar 10 0.0 GB 50
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000006.tar 10 0.0 GB 60
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000007.tar 10 0.0 GB 70
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000008.tar 10 0.0 GB 80
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000009.tar 10 0.0 GB 90
 Processing 100/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_B1A2L5O5.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000010.tar 10 0.0 GB 100
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000011.tar 10 0.0 GB 110
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000012.tar 10 0.0 GB 120
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000013.tar 10 0.0 GB 130
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000014.tar 10 0.0 GB 140
 Processing 150/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A8Q8U3T2.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000015.tar 10 0.0 GB 150
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000016.tar 10 0.0 GB 160
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000017.tar 10 0.0 GB 170
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000018.tar 10 0.0 GB 180
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000019.tar 10 0.0 GB 190
 Processing 200/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_C6P9U3V6.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000020.tar 10 0.0 GB 200
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000021.tar 10 0.0 GB 210
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000022.tar 10 0.0 GB 220
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000023.tar 10 0.0 GB 230
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000024.tar 10 0.0 GB 240
 Processing 250/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A7A6P4Q5.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000025.tar 10 0.0 GB 250
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000026.tar 10 0.0 GB 260
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000027.tar 10 0.0 GB 270
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000028.tar 10 0.0 GB 280
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000029.tar 10 0.0 GB 290
 Processing 300/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A9A3G3F3.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000030.tar 10 0.0 GB 300
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000031.tar 10 0.0 GB 310
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000032.tar 10 0.0 GB 320
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000033.tar 10 0.0 GB 330
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000034.tar 10 0.0 GB 340
 Processing 350/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_E9C3L3H8.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000035.tar 10 0.0 GB 350
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000036.tar 10 0.0 GB 360
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000037.tar 10 0.0 GB 370
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000038.tar 10 0.0 GB 380
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000039.tar 10 0.0 GB 390
 Processing 400/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_B5W8X1Y3.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000040.tar 10 0.0 GB 400
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000041.tar 10 0.0 GB 410
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000042.tar 10 0.0 GB 420
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000043.tar 10 0.0 GB 430
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000044.tar 10 0.0 GB 440
 Processing 450/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_G4L3C9Q0.tar
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000045.tar 10 0.0 GB 450
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000046.tar 10 0.0 GB 460
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000047.tar 10 0.0 GB 470
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000048.tar 10 0.0 GB 480
+# writing /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000049.tar 10 0.0 GB 490
 Processing 500/500: /mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_C1W9K3X5.tar
 Conversion complete! Your WDS shards are ready.
+==================================================
+🔍 Inspecting: /mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-000000.tar
+==================================================
+
+[Test 1] Raw Tar Archive Contents (First 15 files):
+  - B6S9B6X9.json (23 bytes)
+  - B6S9B6X9.q1.X.png (6684 bytes)
+  - B6S9B6X9.q1.hand.png (1585 bytes)
+  - B6S9B6X9.q1.number_random.png (2488 bytes)
+  - B6S9B6X9.q10.X.png (13911 bytes)
+  - B6S9B6X9.q10.hand.png (1905 bytes)
+  - B6S9B6X9.q10.number_random.png (21684 bytes)
+  - B6S9B6X9.q11.X.png (17757 bytes)
+  - B6S9B6X9.q11.hand.png (1177 bytes)
+  - B6S9B6X9.q11.number_random.png (10546 bytes)
+  - B6S9B6X9.q2.X.png (6269 bytes)
+  - B6S9B6X9.q2.hand.png (90 bytes)
+  - B6S9B6X9.q2.number_random.png (914 bytes)
+  - B6S9B6X9.q3.X.png (1945 bytes)
+  - B6S9B6X9.q3.hand.png (2552 bytes)
+  ... and 280 more files.
+
+[Test 2] WebDataset Dictionary Grouping:
+✅ Successfully loaded Sample Key: B6S9B6X9
+Dictionary Contents:
+  - json: {'subject': 'B6S9B6X9'}
+  - q1.x.png: Valid Image -> Tensor Shape: [3, 346, 609]
+  - q1.hand.png: Valid Image -> Tensor Shape: [3, 151, 218]
+  - q1.number_random.png: Valid Image -> Tensor Shape: [3, 249, 207]
+  - q10.x.png: Valid Image -> Tensor Shape: [3, 639, 786]
+  - q10.hand.png: Valid Image -> Tensor Shape: [3, 187, 325]
+  - q10.number_random.png: Valid Image -> Tensor Shape: [3, 1042, 933]
+  - q11.x.png: Valid Image -> Tensor Shape: [3, 774, 867]
+  - q11.hand.png: Valid Image -> Tensor Shape: [3, 168, 162]
+  - q11.number_random.png: Valid Image -> Tensor Shape: [3, 727, 652]
+  - q2.x.png: Valid Image -> Tensor Shape: [3, 386, 609]
+  - q2.hand.png: Valid Image -> Tensor Shape: [3, 100, 100]
+  - q2.number_random.png: Valid Image -> Tensor Shape: [3, 145, 136]
+  - q3.x.png: Valid Image -> Tensor Shape: [3, 203, 355]
+  - q3.hand.png: Valid Image -> Tensor Shape: [3, 220, 274]
+  - q3.number_random.png: Valid Image -> Tensor Shape: [3, 262, 234]
+  - q4.x.png: Valid Image -> Tensor Shape: [3, 303, 336]
+  - q4.hand.png: Valid Image -> Tensor Shape: [3, 364, 400]
+  - q4.number_random.png: Valid Image -> Tensor Shape: [3, 389, 319]
+  - q5.x.png: Valid Image -> Tensor Shape: [3, 355, 354]
+  - q5.hand.png: Valid Image -> Tensor Shape: [3, 502, 578]
+  - q5.number_random.png: Valid Image -> Tensor Shape: [3, 395, 372]
+  - q9.x.png: Valid Image -> Tensor Shape: [3, 235, 249]
+  - q9.hand.png: Valid Image -> Tensor Shape: [3, 396, 635]
+  - q9.number_random.png: Valid Image -> Tensor Shape: [3, 620, 516]
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4241404
+Job ID: 4243842
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n15
+Nodelist: n10
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-05-15 16:45:15
-Job ended at:   2026-05-15 16:47:52
-Job Wall-clock time: 00:02:37
-CPU Utilized: 00:00:21
-CPU Efficiency: 3.34% of 00:10:28 core-walltime
-Memory Utilized: 317.40 MB
-Memory Efficiency: 1.94% of 16.00 GB
+Job started at: 2026-05-16 16:28:18
+Job ended at:   2026-05-16 16:36:00
+Job Wall-clock time: 00:07:42
+CPU Utilized: 00:02:55
+CPU Efficiency: 9.47% of 00:30:48 core-walltime
+Memory Utilized: 362.57 MB
+Memory Efficiency: 2.21% of 16.00 GB
