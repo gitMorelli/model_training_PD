@@ -1,0 +1,18 @@
+Starting array task  on n02 with 10 CPUs
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4270319
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n02
+Nodes: 1
+Cores per node: 10
+Job started at: 2026-05-18 15:43:52
+Job ended at:   2026-05-18 15:44:05
+Job Wall-clock time: 00:00:13
+CPU Utilized: 00:00:06
+CPU Efficiency: 4.62% of 00:02:10 core-walltime
+Memory Utilized: 4.41 MB
+Memory Efficiency: 0.01% of 32.00 GB

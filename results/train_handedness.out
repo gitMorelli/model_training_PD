@@ -1,0 +1,35 @@
+Total training samples: 42681
+Training samples with at least 1 X modality: 42641
+Reading from /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/val/worker*_shard-*.tar with decode approach 'pil' and load_in_memory=False
+Sample 0: Label tensor([0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+Sample 1: Label tensor([1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+Sample 2: Label tensor([0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+Sample 3: Label tensor([1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+Sample 4: Label tensor([1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0.])
+Sample 5: Label tensor([0., 1., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+Sample 6: Label tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0.])
+Sample 7: Label tensor([0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.])
+Sample 8: Label tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0.])
+Sample 9: Label tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.])
+Sample 10: Label tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0.])
+Sample 11: Label tensor([0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
+Raccolta di 16 immagini dal WebDataset...
+Dimensione del batch di immagini raccolte: torch.Size([16, 3, 224, 224])
+Anteprima salvata con successo in: anteprima_dataset.png
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4282610
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n17
+Nodes: 1
+Cores per node: 6
+Job started at: 2026-05-19 17:26:37
+Job ended at:   2026-05-19 17:26:58
+Job Wall-clock time: 00:00:21
+CPU Utilized: 00:00:18
+CPU Efficiency: 14.29% of 00:02:06 core-walltime
+Memory Utilized: 270.46 MB
+Memory Efficiency: 1.65% of 16.00 GB

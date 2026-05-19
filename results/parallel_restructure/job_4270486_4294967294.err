@@ -1,0 +1,26 @@
+concurrent.futures.process._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/concurrent/futures/process.py", line 246, in _process_worker
+    r = call_item.fn(*call_item.args, **call_item.kwargs)
+  File "/home/a_morelli/vscode_projects/model_training/src/scripts/parallel_restructure_to_shards.py", line 192, in process_chunk_handedness
+    sequences[folder].append(m)
+KeyError: 'q1'
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/a_morelli/vscode_projects/model_training/src/scripts/parallel_restructure_to_shards.py", line 355, in <module>
+    convert_to_wds_parallel(output_path,id_list,function=process_chunk_handedness,num_test_ids=None) 
+  File "/home/a_morelli/vscode_projects/model_training/src/scripts/parallel_restructure_to_shards.py", line 293, in convert_to_wds_parallel
+    future.result() 
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/concurrent/futures/_base.py", line 451, in result
+    return self.__get_result()
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/concurrent/futures/_base.py", line 403, in __get_result
+    raise self._exception
+KeyError: 'q1'

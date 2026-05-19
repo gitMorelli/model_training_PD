@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=par_restructure_to_shards
-#SBATCH --array=0-4
+#--array=0-4
 #SBATCH --nodes=1                     # 1 Node per array task
-#SBATCH --cpus-per-task=8           
-#SBATCH --mem=32G                     # Request enough RAM for 16 parallel processes
-#SBATCH --time=01:00:00               # Estimated time for 500 images
+#SBATCH --cpus-per-task=32           
+#SBATCH --mem=64G                     # Request enough RAM for 16 parallel processes
+#SBATCH --time=02:00:00               # Estimated time for 500 images
 #SBATCH --partition=shortq
 #SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/parallel_restructure/job_%A_%a.out
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/parallel_restructure/job_%A_%a.err
@@ -19,7 +19,7 @@
 PROJECT_ROOT="/home/a_morelli/vscode_projects/model_training"
 ENV_PYTHON="/home/a_morelli/.conda/envs/torch_gpu/bin/python"
 
-export SLURM_ARRAY_COUNT=5
+#export SLURM_ARRAY_COUNT=5
 # Add this line to resolve the libiomp5 conflict
 export KMP_DUPLICATE_LIB_OK=TRUE
 #export OMP_NUM_THREADS=1

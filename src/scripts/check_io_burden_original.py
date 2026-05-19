@@ -13,6 +13,9 @@ import webdataset as wds
 import glob
 from tqdm import tqdm
 
+from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset
+from src.utils.model_utils import SimpleMockModel
+
 LIST_OF_IDS_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/progress.csv"
 DATA_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/final/data"
 #SHARD_PATTERN = "/mnt/beegfs01/scratch/a_morelli/model_training/sharded_test/dataset_shard-{000000..000000}.tar"
@@ -27,57 +30,6 @@ resize_transform = T.Compose([
 ])
 resize_transform_no_to_tensor = T.Resize((224, 224)) # For WebDataset, we decode to PIL first, then resize, then convert to tensor in the process_wds_sample function
 
-class MultiTarSequenceDataset(Dataset):
-    def __init__(self, sequence_list, max_open_tars=20, transform=None):
-        """
-        sequence_list: A list of tuples -> (tar_file_path, [list_of_6_png_paths])
-        max_open_tars: How many tar files to keep open per worker to prevent OS file limit errors.
-        """
-        self.sequence_list = sequence_list
-        self.max_open_tars = max_open_tars
-        self.transform = transform or T.ToTensor()
-        self.blank_image = torch.zeros(3, 224, 224)
-        
-        # Dictionary to cache open tarfile objects locally per worker
-        self.open_tars = {} 
-
-    def __len__(self):
-        return len(self.sequence_list)
-
-    def _get_tar_obj(self, tar_path):
-        """Manages an LRU-style cache of open tar files."""
-        if tar_path not in self.open_tars:
-            # If cache is full, close and remove the oldest opened tar file
-            if len(self.open_tars) >= self.max_open_tars:
-                oldest_tar_path = next(iter(self.open_tars))
-                self.open_tars[oldest_tar_path].close()
-                del self.open_tars[oldest_tar_path]
-            
-            # Open the new tar file and add to cache
-            self.open_tars[tar_path] = tarfile.open(tar_path, 'r')
-            
-        return self.open_tars[tar_path]
-
-    def __getitem__(self, idx):
-        tar_path, internal_filenames = self.sequence_list[idx]
-        images = []
-        
-        tar_obj = self._get_tar_obj(tar_path)
-        
-        for fname in internal_filenames:
-            try:
-                member = tar_obj.getmember(fname)
-                f = tar_obj.extractfile(member)
-                img = Image.open(f).convert('RGB')
-                img = self.transform(img)
-                images.append(img)
-            except KeyError:
-                #print(f"Warning: {fname} not found in {tar_path}.")
-                # Handle missing data or pad with zeros as needed
-                images.append(self.blank_image)
-                
-        # Stack the 6 images: [6, Channels, Height, Width]
-        return torch.stack(images)
 
 def io_benchmark():
     args = get_args()
@@ -146,27 +98,7 @@ def io_benchmark():
         print(f"Images Processed: {total_images_processed}")
         print(f"** I/O Throughput: {io_throughput:.2f} images/sec **")
 
-# --- A MOCK MODEL ---
-# Replace this with your actual model class
-class SimpleMockModel(nn.Module):
-    def __init__(self,seq_length=13*3):
-        super().__init__()
-        self.conv = nn.Conv2d(seq_length*3, 64, kernel_size=3, padding=1)
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(64, 10) # 10 output classes
-        self.seq_length = seq_length
 
-    def forward(self, x):
-        # x shape: [Batch, 6, 3, H, W]
-        batch_size = x.shape[0]
-        channels = x.shape[2] # Extract the channel dimension (3)
-        # Flatten the time and channel dimensions: [Batch, 18, H, W]
-        x = x.view(batch_size, -1, x.shape[3], x.shape[4]) 
-        x = torch.relu(self.conv(x))
-        x = self.pool(x)
-        x = x.view(batch_size, -1)
-        return self.fc(x)
-    
 def gpu_dummy_benchmark():
     # Ensure GPU is available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -232,40 +164,6 @@ def gpu_dummy_benchmark():
     print(f"Images Processed: {total_images_processed}")
     print(f"** Compute Throughput: {compute_throughput:.2f} images/sec **")
 
-#to test loading all images in memory and then feeding them to the model 
-class InMemoryWdsDataset(torch.utils.data.Dataset):
-    def __init__(self, shard_files, decode_approach, transform, seq_length=39):
-        self.samples = []
-        self.keys = []
-
-        # 1. Build the unbatched pipeline strictly for loading data into RAM
-        loading_pipeline = (
-            wds.WebDataset(shard_files)  # No shardshuffle needed for the initial cache load
-            .decode(decode_approach)
-            .map(lambda sample: process_wds_sample(sample, transform, seq_length))
-        )
-
-        print(f"🧠 Loading all shards into RAM (Decode: {decode_approach}, Transform: {transform})...")
-        
-        # 2. Iterate through the pipeline and store samples
-        for img_tensor, key in tqdm(loading_pipeline, desc="Caching to RAM"):
-            # CRITICAL OPTIMIZATION: Convert float32 [0.0, 1.0] to uint8 [0, 255]
-            # This makes the memory footprint 4x smaller!
-            img_tensor_uint8 = (img_tensor * 255).to(torch.uint8)
-            
-            self.samples.append(img_tensor_uint8)
-            self.keys.append(key)
-
-        print(f"✅ Successfully cached {len(self.samples)} sequences in RAM!")
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        # 3. Restore to float32 dynamically right before it goes to the model
-        img_tensor = self.samples[idx].to(torch.float32) / 255.0
-        key = self.keys[idx]
-        return img_tensor, key
 
 def process_wds_sample(sample,transform='no_transform',seq_length=13*3):
     """

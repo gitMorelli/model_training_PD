@@ -1,0 +1,22 @@
+Starting array task  on n16 with 10 CPUs
+--- Slurm Task 0/0 ---
+Total dataset size: 42641
+Assigned to this node: 42641 subjects (indices 0 to 42640)
+Using 10 local CPUs/Workers
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4270768
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n16
+Nodes: 1
+Cores per node: 10
+Job started at: 2026-05-18 16:20:25
+Job ended at:   2026-05-18 17:16:29
+Job Wall-clock time: 00:56:04
+CPU Utilized: 07:24:04
+CPU Efficiency: 79.20% of 09:20:40 core-walltime
+Memory Utilized: 1.16 GB
+Memory Efficiency: 3.62% of 32.00 GB

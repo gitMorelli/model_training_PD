@@ -1,0 +1,42 @@
+Starting array task  on n01 with 10 CPUs
+--- Slurm Task 0/0 ---
+Total dataset size: 42641
+Assigned to this node: 42641 subjects (indices 0 to 42640)
+Using 10 local CPUs/Workers
+[Worker 9] Starting conversion of 4256 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker9_shard-000000.tar 0 0.0 GB 0
+[Worker 1] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker1_shard-000000.tar 0 0.0 GB 0
+[Worker 6] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker6_shard-000000.tar 0 0.0 GB 0
+[Worker 5] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker5_shard-000000.tar 0 0.0 GB 0
+[Worker 8] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker8_shard-000000.tar 0 0.0 GB 0
+[Worker 7] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker7_shard-000000.tar 0 0.0 GB 0
+[Worker 2] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker2_shard-000000.tar 0 0.0 GB 0
+[Worker 3] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker3_shard-000000.tar 0 0.0 GB 0
+[Worker 0] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker0_shard-000000.tar 0 0.0 GB 0
+[Worker 4] Starting conversion of 4265 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker4_shard-000000.tar 0 0.0 GB 0
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4270486
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n01
+Nodes: 1
+Cores per node: 10
+Job started at: 2026-05-18 16:00:24
+Job ended at:   2026-05-18 16:00:38
+Job Wall-clock time: 00:00:14
+CPU Utilized: 00:00:08
+CPU Efficiency: 5.71% of 00:02:20 core-walltime
+Memory Utilized: 10.66 MB
+Memory Efficiency: 0.03% of 32.00 GB
