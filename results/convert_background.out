@@ -1,0 +1,18 @@
+Success! Image saved to data/X_white_bg.png
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4367891
+Cluster: flamingo
+User/Group: a_morelli/root
+Nodelist: n12
+Nodes: 1
+Cores per node: 2
+Job started at: 2026-05-26 11:15:43
+Job ended at:   2026-05-26 11:15:44
+Job Wall-clock time: 00:00:01
+CPU Utilized: 00:00:01
+CPU Efficiency: 50.00% of 00:00:02 core-walltime
+Memory Utilized: 580.00 KB
+Memory Efficiency: 0.01% of 4.00 GB

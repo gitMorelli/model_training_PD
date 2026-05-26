@@ -1,35 +1,63 @@
+Columns in the CSV: ['ident_projet', 'lateralite', 'q_5_num_X', 'q_5_num_text', 'q_5_num_digit', 'split']
 Total training samples: 42681
-Training samples with at least 1 X modality: 42641
+Training samples with at least 1 chunck for modality X: 42641
+Class distribution in training set (after filtering for modality X):
+lateralite
+0.0    39271
+1.0     3370
+Name: count, dtype: int64
+--- GPU DIAGNOSTICS ---
+Active GPU: Tesla P40
+CUDA_VISIBLE_DEVICES: 0
 Reading from /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/train/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/handedness/png_resized_padded/val/worker*_shard-*.tar with decode approach 'pil' and load_in_memory=False
-Sample 0: Label tensor([0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-Sample 1: Label tensor([1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-Sample 2: Label tensor([0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-Sample 3: Label tensor([1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-Sample 4: Label tensor([1., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0.])
-Sample 5: Label tensor([0., 1., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-Sample 6: Label tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0.])
-Sample 7: Label tensor([0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.])
-Sample 8: Label tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0.])
-Sample 9: Label tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.])
-Sample 10: Label tensor([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0.])
-Sample 11: Label tensor([0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-Raccolta di 16 immagini dal WebDataset...
-Dimensione del batch di immagini raccolte: torch.Size([16, 3, 224, 224])
-Anteprima salvata con successo in: anteprima_dataset.png
+
+--- Starting Validation Evaluation ---
+The best model was saved at epoch: 0
+Predicting ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 304/-- 0:00:03 • -:--:-- 85.51it/s 
+
+--- Sample Predictions ---
+Probs: [0.5081602931022644, 0.49183976650238037] | Predicted: 0 | True Label: 0
+Probs: [0.5405188202857971, 0.4594811201095581] | Predicted: 0 | True Label: 0
+Probs: [0.6361438632011414, 0.36385616660118103] | Predicted: 0 | True Label: 0
+Probs: [0.6552115082740784, 0.34478849172592163] | Predicted: 0 | True Label: 0
+Probs: [0.5903136134147644, 0.4096863865852356] | Predicted: 0 | True Label: 0
+Probs: [0.6688011288642883, 0.33119887113571167] | Predicted: 0 | True Label: 0
+Probs: [0.601850688457489, 0.3981492817401886] | Predicted: 0 | True Label: 0
+Probs: [0.6235237717628479, 0.3764761984348297] | Predicted: 0 | True Label: 0
+Probs: [0.6337484121322632, 0.3662516474723816] | Predicted: 0 | True Label: 0
+Probs: [0.6215186715126038, 0.37848135828971863] | Predicted: 0 | True Label: 0
+
+================ VALIDATION STATISTICS ================
+
+--- Classification Report ---
+              precision    recall  f1-score   support
+
+       Right       0.92      0.98      0.95      4369
+        Left       0.03      0.01      0.01       371
+
+    accuracy                           0.90      4740
+   macro avg       0.48      0.49      0.48      4740
+weighted avg       0.85      0.90      0.88      4740
+
+
+--- Confusion Matrix ---
+[[4281   88]
+ [ 368    3]]
+=======================================================
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4282610
+Job ID: 4376665
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n17
+Nodelist: gpu04
 Nodes: 1
-Cores per node: 6
-Job started at: 2026-05-19 17:26:37
-Job ended at:   2026-05-19 17:26:58
-Job Wall-clock time: 00:00:21
-CPU Utilized: 00:00:18
-CPU Efficiency: 14.29% of 00:02:06 core-walltime
-Memory Utilized: 270.46 MB
-Memory Efficiency: 1.65% of 16.00 GB
+Cores per node: 20
+Job started at: 2026-05-26 15:43:08
+Job ended at:   2026-05-26 15:43:28
+Job Wall-clock time: 00:00:20
+CPU Utilized: 00:00:46
+CPU Efficiency: 11.50% of 00:06:40 core-walltime
+Memory Utilized: 2.28 MB
+Memory Efficiency: 0.01% of 32.00 GB
