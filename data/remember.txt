@@ -1,0 +1,22 @@
+Shard structure:
+B6S9B6X9.json (23 bytes)
+  - B6S9B6X9.q1.X.png (6684 bytes)
+  - B6S9B6X9.q1.hand.png (1585 bytes)
+  - B6S9B6X9.q1.number_random.png (2488 bytes)
+  - B6S9B6X9.q10.X.png (13911 bytes)
+  - B6S9B6X9.q10.hand.png (1905 bytes)
+  ....
+
+Modalities:
+x
+hand
+number_random
+
+I test sul modello resnet18
+Ho capito il modo corretto per bilanciare i dati il pomeriggio del 27/05 -> dati prima e dopo non sono comparabili
+(nei dati prima facevo rebalancing on-the-fly)
+
+keys when you read shards in webdataset -> q5.number_random.png
+
+
+

@@ -13,6 +13,8 @@ import concurrent.futures
 import numpy as np
 import cv2
 
+from src.utils.image_processing import convert_background_to_white
+
 # from src.utils.file_utils import recreate_dir 
 # NOTE: Avoid clearing directories programmatically in a distributed environment 
 # to prevent race conditions. Clear the output directory manually before running the Slurm array.
@@ -20,6 +22,7 @@ import cv2
 CONVERT_TO_JPG = False
 RESIZE = True
 PADDED = True
+CONVERT_TO_WHITE = True
 
 # --- CONFIGURATION ---
 SOURCE_folder = "/mnt/beegfs01/scratch/a_morelli/extraction/final/data"
@@ -41,13 +44,15 @@ if RESIZE:
     OUTPUT_PATH += "_resized"
 if PADDED:
     OUTPUT_PATH += "_padded"
+if CONVERT_TO_WHITE:
+    OUTPUT_PATH += "_whitebg"
 
 MAX_SHARD_SIZE = 1e9 # 1e9 ~1 GB per shard
 MAX_SHARD_COUNT = 1000 # Max items per shard
 
 CODE_TO_RUN = "for_handedness" #for_PD or for_handedness or for_PD_test
 
-def preprocess_image(img_source,resize=False,padded=False):
+def preprocess_image(img_source,resize=False,padded=False, convert_bg_to_white=False):
     img = img_source.copy()
 
     if len(img.shape) == 2:  # If it only has height and width (1 channel)
@@ -66,6 +71,8 @@ def preprocess_image(img_source,resize=False,padded=False):
         img = padded_img
     if resize:
         img = cv2.resize(img, (224, 224), interpolation=cv2.INTER_LANCZOS4)
+    if convert_bg_to_white:
+        img = convert_background_to_white(img)
     return img
 
 def process_chunk_PD_test(output_path,worker_id, id_chunk,data=None):
@@ -223,7 +230,7 @@ def process_chunk_handedness(output_path,worker_id, id_chunk,data=None):
                             np_arr = np.frombuffer(file_bytes, np.uint8)
                             img = cv2.imdecode(np_arr, cv2.IMREAD_UNCHANGED)
                             
-                            img = preprocess_image(img,RESIZE,PADDED)
+                            img = preprocess_image(img,RESIZE,PADDED, CONVERT_TO_WHITE)
                             
                             if CONVERT_TO_JPG:
                                 # 3. Check for alpha channel (4 channels: BGRA) and drop it for JPEG conversion

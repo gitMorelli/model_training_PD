@@ -1,0 +1,2 @@
+/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/webdataset/compat.py:379: UserWarning: WebDataset(shardshuffle=...) is None; set explicitly to False or a number
+  warnings.warn("WebDataset(shardshuffle=...) is None; set explicitly to False or a number")
