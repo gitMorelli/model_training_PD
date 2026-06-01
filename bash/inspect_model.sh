@@ -1,16 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=train_handedness
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train_handedness.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_handedness.err
+#SBATCH --job-name=inspect_model
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/inspect_models.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/inspect_models.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=20              # Number of CPU cores per task
+#SBATCH --cpus-per-task=4              # Number of CPU cores per task
 #SBATCH --mem=32G                      # Job memory request
-#SBATCH --time=04:00:00                # Time limit hrs:min:sec
-#--partition=shortq
-#SBATCH --partition=visuq,gpgpuq
-#SBATCH --gres=gpu:1
-#--gres=gpu:a100:1
+#SBATCH --time=00:10:00                # Time limit hrs:min:sec
+#SBATCH --partition=shortq
+#--partition=visuq,gpgpuq
+#--gres=gpu:1
 #--gres=gpu:p40:1
 #--nodelist=gpu04
 #--gres=gpu:t4:1
@@ -32,5 +31,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 
 cd $HOME_DIR
 # --- Execution ---
-$ENV_PYTHON -m src.scripts.train_handedness_model \
-    --num_workers 18
+$ENV_PYTHON -m src.scripts.inspect_model

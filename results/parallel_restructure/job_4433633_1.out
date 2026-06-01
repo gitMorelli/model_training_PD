@@ -1,0 +1,1111 @@
+Starting array task 1 on n10 with 32 CPUs
+--- Slurm Task 1/3 ---
+Total dataset size: 26788
+Assigned to this node: 6697 subjects (indices 6697 to 13393)
+Using 32 local CPUs/Workers
+[Worker 47] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker47_shard-000000.tar 0 0.0 GB 0
+[Worker 47] Processing 10/210
+[Worker 47] Processing 20/210
+[Worker 47] Processing 30/210
+[Worker 47] Processing 40/210
+[Worker 47] Processing 50/210
+[Worker 47] Processing 60/210
+[Worker 47] Processing 70/210
+[Worker 47] Processing 80/210
+[Worker 47] Processing 90/210
+[Worker 47] Processing 100/210
+[Worker 47] Processing 110/210
+[Worker 47] Processing 120/210
+[Worker 47] Processing 130/210
+[Worker 47] Processing 140/210
+[Worker 47] Processing 150/210
+[Worker 47] Processing 160/210
+[Worker 47] Processing 170/210
+[Worker 47] Processing 180/210
+[Worker 47] Processing 190/210
+[Worker 47] Processing 200/210
+[Worker 47] Processing 210/210
+[Worker 47] Complete!
+[Worker 57] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker57_shard-000000.tar 0 0.0 GB 0
+[Worker 57] Processing 10/210
+[Worker 57] Processing 20/210
+[Worker 57] Processing 30/210
+[Worker 57] Processing 40/210
+[Worker 57] Processing 50/210
+[Worker 57] Processing 60/210
+[Worker 57] Processing 70/210
+[Worker 57] Processing 80/210
+[Worker 57] Processing 90/210
+[Worker 57] Processing 100/210
+[Worker 57] Processing 110/210
+[Worker 57] Processing 120/210
+[Worker 57] Processing 130/210
+[Worker 57] Processing 140/210
+[Worker 57] Processing 150/210
+[Worker 57] Processing 160/210
+[Worker 57] Processing 170/210
+[Worker 57] Processing 180/210
+[Worker 57] Processing 190/210
+[Worker 57] Processing 200/210
+[Worker 57] Processing 210/210
+[Worker 57] Complete!
+[Worker 42] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker42_shard-000000.tar 0 0.0 GB 0
+[Worker 42] Processing 10/210
+[Worker 42] Processing 20/210
+[Worker 42] Processing 30/210
+[Worker 42] Processing 40/210
+[Worker 42] Processing 50/210
+[Worker 42] Processing 60/210
+[Worker 42] Processing 70/210
+[Worker 42] Processing 80/210
+[Worker 42] Processing 90/210
+[Worker 42] Processing 100/210
+[Worker 42] Processing 110/210
+[Worker 42] Processing 120/210
+[Worker 42] Processing 130/210
+[Worker 42] Processing 140/210
+[Worker 42] Processing 150/210
+[Worker 42] Processing 160/210
+[Worker 42] Processing 170/210
+[Worker 42] Processing 180/210
+[Worker 42] Processing 190/210
+[Worker 42] Processing 200/210
+[Worker 42] Processing 210/210
+[Worker 42] Complete!
+[Worker 44] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker44_shard-000000.tar 0 0.0 GB 0
+[Worker 44] Processing 10/210
+[Worker 44] Processing 20/210
+[Worker 44] Processing 30/210
+[Worker 44] Processing 40/210
+[Worker 44] Processing 50/210
+[Worker 44] Processing 60/210
+[Worker 44] Processing 70/210
+[Worker 44] Processing 80/210
+[Worker 44] Processing 90/210
+[Worker 44] Processing 100/210
+[Worker 44] Processing 110/210
+[Worker 44] Processing 120/210
+[Worker 44] Processing 130/210
+[Worker 44] Processing 140/210
+[Worker 44] Processing 150/210
+[Worker 44] Processing 160/210
+[Worker 44] Processing 170/210
+[Worker 44] Processing 180/210
+[Worker 44] Processing 190/210
+[Worker 44] Processing 200/210
+[Worker 44] Processing 210/210
+[Worker 44] Complete!
+[Worker 37] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker37_shard-000000.tar 0 0.0 GB 0
+[Worker 37] Processing 10/210
+[Worker 37] Processing 20/210
+[Worker 37] Processing 30/210
+[Worker 37] Processing 40/210
+[Worker 37] Processing 50/210
+[Worker 37] Processing 60/210
+[Worker 37] Processing 70/210
+[Worker 37] Processing 80/210
+[Worker 37] Processing 90/210
+[Worker 37] Processing 100/210
+[Worker 37] Processing 110/210
+[Worker 37] Processing 120/210
+[Worker 37] Processing 130/210
+[Worker 37] Processing 140/210
+[Worker 37] Processing 150/210
+[Worker 37] Processing 160/210
+[Worker 37] Processing 170/210
+[Worker 37] Processing 180/210
+[Worker 37] Processing 190/210
+[Worker 37] Processing 200/210
+[Worker 37] Processing 210/210
+[Worker 37] Complete!
+[Worker 49] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker49_shard-000000.tar 0 0.0 GB 0
+[Worker 49] Processing 10/210
+[Worker 49] Processing 20/210
+[Worker 49] Processing 30/210
+[Worker 49] Processing 40/210
+[Worker 49] Processing 50/210
+[Worker 49] Processing 60/210
+[Worker 49] Processing 70/210
+[Worker 49] Processing 80/210
+[Worker 49] Processing 90/210
+[Worker 49] Processing 100/210
+[Worker 49] Processing 110/210
+[Worker 49] Processing 120/210
+[Worker 49] Processing 130/210
+[Worker 49] Processing 140/210
+[Worker 49] Processing 150/210
+[Worker 49] Processing 160/210
+[Worker 49] Processing 170/210
+[Worker 49] Processing 180/210
+[Worker 49] Processing 190/210
+[Worker 49] Processing 200/210
+[Worker 49] Processing 210/210
+[Worker 49] Complete!
+[Worker 52] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker52_shard-000000.tar 0 0.0 GB 0
+[Worker 52] Processing 10/210
+[Worker 52] Processing 20/210
+[Worker 52] Processing 30/210
+[Worker 52] Processing 40/210
+[Worker 52] Processing 50/210
+[Worker 52] Processing 60/210
+[Worker 52] Processing 70/210
+[Worker 52] Processing 80/210
+[Worker 52] Processing 90/210
+[Worker 52] Processing 100/210
+[Worker 52] Processing 110/210
+[Worker 52] Processing 120/210
+[Worker 52] Processing 130/210
+[Worker 52] Processing 140/210
+[Worker 52] Processing 150/210
+[Worker 52] Processing 160/210
+[Worker 52] Processing 170/210
+[Worker 52] Processing 180/210
+[Worker 52] Processing 190/210
+[Worker 52] Processing 200/210
+[Worker 52] Processing 210/210
+[Worker 52] Complete!
+[Worker 54] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker54_shard-000000.tar 0 0.0 GB 0
+[Worker 54] Processing 10/210
+[Worker 54] Processing 20/210
+[Worker 54] Processing 30/210
+[Worker 54] Processing 40/210
+[Worker 54] Processing 50/210
+[Worker 54] Processing 60/210
+[Worker 54] Processing 70/210
+[Worker 54] Processing 80/210
+[Worker 54] Processing 90/210
+[Worker 54] Processing 100/210
+[Worker 54] Processing 110/210
+[Worker 54] Processing 120/210
+[Worker 54] Processing 130/210
+[Worker 54] Processing 140/210
+[Worker 54] Processing 150/210
+[Worker 54] Processing 160/210
+[Worker 54] Processing 170/210
+[Worker 54] Processing 180/210
+[Worker 54] Processing 190/210
+[Worker 54] Processing 200/210
+[Worker 54] Processing 210/210
+[Worker 54] Complete!
+[Worker 33] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker33_shard-000000.tar 0 0.0 GB 0
+[Worker 33] Processing 10/210
+[Worker 33] Processing 20/210
+[Worker 33] Processing 30/210
+[Worker 33] Processing 40/210
+[Worker 33] Processing 50/210
+[Worker 33] Processing 60/210
+[Worker 33] Processing 70/210
+[Worker 33] Processing 80/210
+[Worker 33] Processing 90/210
+[Worker 33] Processing 100/210
+[Worker 33] Processing 110/210
+[Worker 33] Processing 120/210
+[Worker 33] Processing 130/210
+[Worker 33] Processing 140/210
+[Worker 33] Processing 150/210
+[Worker 33] Processing 160/210
+[Worker 33] Processing 170/210
+[Worker 33] Processing 180/210
+[Worker 33] Processing 190/210
+[Worker 33] Processing 200/210
+[Worker 33] Processing 210/210
+[Worker 33] Complete!
+[Worker 34] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker34_shard-000000.tar 0 0.0 GB 0
+[Worker 34] Processing 10/210
+[Worker 34] Processing 20/210
+[Worker 34] Processing 30/210
+[Worker 34] Processing 40/210
+[Worker 34] Processing 50/210
+[Worker 34] Processing 60/210
+[Worker 34] Processing 70/210
+[Worker 34] Processing 80/210
+[Worker 34] Processing 90/210
+[Worker 34] Processing 100/210
+[Worker 34] Processing 110/210
+[Worker 34] Processing 120/210
+[Worker 34] Processing 130/210
+[Worker 34] Processing 140/210
+[Worker 34] Processing 150/210
+[Worker 34] Processing 160/210
+[Worker 34] Processing 170/210
+[Worker 34] Processing 180/210
+[Worker 34] Processing 190/210
+[Worker 34] Processing 200/210
+[Worker 34] Processing 210/210
+[Worker 34] Complete!
+[Worker 43] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker43_shard-000000.tar 0 0.0 GB 0
+[Worker 43] Processing 10/210
+[Worker 43] Processing 20/210
+[Worker 43] Processing 30/210
+[Worker 43] Processing 40/210
+[Worker 43] Processing 50/210
+[Worker 43] Processing 60/210
+[Worker 43] Processing 70/210
+[Worker 43] Processing 80/210
+[Worker 43] Processing 90/210
+[Worker 43] Processing 100/210
+[Worker 43] Processing 110/210
+[Worker 43] Processing 120/210
+[Worker 43] Processing 130/210
+[Worker 43] Processing 140/210
+[Worker 43] Processing 150/210
+[Worker 43] Processing 160/210
+[Worker 43] Processing 170/210
+[Worker 43] Processing 180/210
+[Worker 43] Processing 190/210
+[Worker 43] Processing 200/210
+[Worker 43] Processing 210/210
+[Worker 43] Complete!
+[Worker 35] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker35_shard-000000.tar 0 0.0 GB 0
+[Worker 35] Processing 10/210
+[Worker 35] Processing 20/210
+[Worker 35] Processing 30/210
+[Worker 35] Processing 40/210
+[Worker 35] Processing 50/210
+[Worker 35] Processing 60/210
+[Worker 35] Processing 70/210
+[Worker 35] Processing 80/210
+[Worker 35] Processing 90/210
+[Worker 35] Processing 100/210
+[Worker 35] Processing 110/210
+[Worker 35] Processing 120/210
+[Worker 35] Processing 130/210
+[Worker 35] Processing 140/210
+[Worker 35] Processing 150/210
+[Worker 35] Processing 160/210
+[Worker 35] Processing 170/210
+[Worker 35] Processing 180/210
+[Worker 35] Processing 190/210
+[Worker 35] Processing 200/210
+[Worker 35] Processing 210/210
+[Worker 35] Complete!
+[Worker 53] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker53_shard-000000.tar 0 0.0 GB 0
+[Worker 53] Processing 10/210
+[Worker 53] Processing 20/210
+[Worker 53] Processing 30/210
+[Worker 53] Processing 40/210
+[Worker 53] Processing 50/210
+[Worker 53] Processing 60/210
+[Worker 53] Processing 70/210
+[Worker 53] Processing 80/210
+[Worker 53] Processing 90/210
+[Worker 53] Processing 100/210
+[Worker 53] Processing 110/210
+[Worker 53] Processing 120/210
+[Worker 53] Processing 130/210
+[Worker 53] Processing 140/210
+[Worker 53] Processing 150/210
+[Worker 53] Processing 160/210
+[Worker 53] Processing 170/210
+[Worker 53] Processing 180/210
+[Worker 53] Processing 190/210
+[Worker 53] Processing 200/210
+[Worker 53] Processing 210/210
+[Worker 53] Complete!
+[Worker 41] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker41_shard-000000.tar 0 0.0 GB 0
+[Worker 41] Processing 10/210
+[Worker 41] Processing 20/210
+[Worker 41] Processing 30/210
+[Worker 41] Processing 40/210
+[Worker 41] Processing 50/210
+[Worker 41] Processing 60/210
+[Worker 41] Processing 70/210
+[Worker 41] Processing 80/210
+[Worker 41] Processing 90/210
+[Worker 41] Processing 100/210
+[Worker 41] Processing 110/210
+[Worker 41] Processing 120/210
+[Worker 41] Processing 130/210
+[Worker 41] Processing 140/210
+[Worker 41] Processing 150/210
+[Worker 41] Processing 160/210
+[Worker 41] Processing 170/210
+[Worker 41] Processing 180/210
+[Worker 41] Processing 190/210
+[Worker 41] Processing 200/210
+[Worker 41] Processing 210/210
+[Worker 41] Complete!
+[Worker 62] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker62_shard-000000.tar 0 0.0 GB 0
+[Worker 62] Processing 10/210
+[Worker 62] Processing 20/210
+[Worker 62] Processing 30/210
+[Worker 62] Processing 40/210
+[Worker 62] Processing 50/210
+[Worker 62] Processing 60/210
+[Worker 62] Processing 70/210
+[Worker 62] Processing 80/210
+[Worker 62] Processing 90/210
+[Worker 62] Processing 100/210
+[Worker 62] Processing 110/210
+[Worker 62] Processing 120/210
+[Worker 62] Processing 130/210
+[Worker 62] Processing 140/210
+[Worker 62] Processing 150/210
+[Worker 62] Processing 160/210
+[Worker 62] Processing 170/210
+[Worker 62] Processing 180/210
+[Worker 62] Processing 190/210
+[Worker 62] Processing 200/210
+[Worker 62] Processing 210/210
+[Worker 62] Complete!
+[Worker 51] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker51_shard-000000.tar 0 0.0 GB 0
+[Worker 51] Processing 10/210
+[Worker 51] Processing 20/210
+[Worker 51] Processing 30/210
+[Worker 51] Processing 40/210
+[Worker 51] Processing 50/210
+[Worker 51] Processing 60/210
+[Worker 51] Processing 70/210
+[Worker 51] Processing 80/210
+[Worker 51] Processing 90/210
+[Worker 51] Processing 100/210
+[Worker 51] Processing 110/210
+[Worker 51] Processing 120/210
+[Worker 51] Processing 130/210
+[Worker 51] Processing 140/210
+[Worker 51] Processing 150/210
+[Worker 51] Processing 160/210
+[Worker 51] Processing 170/210
+[Worker 51] Processing 180/210
+[Worker 51] Processing 190/210
+[Worker 51] Processing 200/210
+[Worker 51] Processing 210/210
+[Worker 51] Complete!
+[Worker 40] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker40_shard-000000.tar 0 0.0 GB 0
+[Worker 40] Processing 10/210
+[Worker 40] Processing 20/210
+[Worker 40] Processing 30/210
+[Worker 40] Processing 40/210
+[Worker 40] Processing 50/210
+[Worker 40] Processing 60/210
+[Worker 40] Processing 70/210
+[Worker 40] Processing 80/210
+[Worker 40] Processing 90/210
+[Worker 40] Processing 100/210
+[Worker 40] Processing 110/210
+[Worker 40] Processing 120/210
+[Worker 40] Processing 130/210
+[Worker 40] Processing 140/210
+[Worker 40] Processing 150/210
+[Worker 40] Processing 160/210
+[Worker 40] Processing 170/210
+[Worker 40] Processing 180/210
+[Worker 40] Processing 190/210
+[Worker 40] Processing 200/210
+[Worker 40] Processing 210/210
+[Worker 40] Complete!
+[Worker 39] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker39_shard-000000.tar 0 0.0 GB 0
+[Worker 39] Processing 10/210
+[Worker 39] Processing 20/210
+[Worker 39] Processing 30/210
+[Worker 39] Processing 40/210
+[Worker 39] Processing 50/210
+[Worker 39] Processing 60/210
+[Worker 39] Processing 70/210
+[Worker 39] Processing 80/210
+[Worker 39] Processing 90/210
+[Worker 39] Processing 100/210
+[Worker 39] Processing 110/210
+[Worker 39] Processing 120/210
+[Worker 39] Processing 130/210
+[Worker 39] Processing 140/210
+[Worker 39] Processing 150/210
+[Worker 39] Processing 160/210
+[Worker 39] Processing 170/210
+[Worker 39] Processing 180/210
+[Worker 39] Processing 190/210
+[Worker 39] Processing 200/210
+[Worker 39] Processing 210/210
+[Worker 39] Complete!
+[Worker 32] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker32_shard-000000.tar 0 0.0 GB 0
+[Worker 32] Processing 10/210
+[Worker 32] Processing 20/210
+[Worker 32] Processing 30/210
+[Worker 32] Processing 40/210
+[Worker 32] Processing 50/210
+[Worker 32] Processing 60/210
+[Worker 32] Processing 70/210
+[Worker 32] Processing 80/210
+[Worker 32] Processing 90/210
+[Worker 32] Processing 100/210
+[Worker 32] Processing 110/210
+[Worker 32] Processing 120/210
+[Worker 32] Processing 130/210
+[Worker 32] Processing 140/210
+[Worker 32] Processing 150/210
+[Worker 32] Processing 160/210
+[Worker 32] Processing 170/210
+[Worker 32] Processing 180/210
+[Worker 32] Processing 190/210
+[Worker 32] Processing 200/210
+[Worker 32] Processing 210/210
+[Worker 32] Complete!
+[Worker 55] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker55_shard-000000.tar 0 0.0 GB 0
+[Worker 55] Processing 10/210
+[Worker 55] Processing 20/210
+[Worker 55] Processing 30/210
+[Worker 55] Processing 40/210
+[Worker 55] Processing 50/210
+[Worker 55] Processing 60/210
+[Worker 55] Processing 70/210
+[Worker 55] Processing 80/210
+[Worker 55] Processing 90/210
+[Worker 55] Processing 100/210
+[Worker 55] Processing 110/210
+[Worker 55] Processing 120/210
+[Worker 55] Processing 130/210
+[Worker 55] Processing 140/210
+[Worker 55] Processing 150/210
+[Worker 55] Processing 160/210
+[Worker 55] Processing 170/210
+[Worker 55] Processing 180/210
+[Worker 55] Processing 190/210
+[Worker 55] Processing 200/210
+[Worker 55] Processing 210/210
+[Worker 55] Complete!
+[Worker 45] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker45_shard-000000.tar 0 0.0 GB 0
+[Worker 45] Processing 10/210
+[Worker 45] Processing 20/210
+[Worker 45] Processing 30/210
+[Worker 45] Processing 40/210
+[Worker 45] Processing 50/210
+[Worker 45] Processing 60/210
+[Worker 45] Processing 70/210
+[Worker 45] Processing 80/210
+[Worker 45] Processing 90/210
+[Worker 45] Processing 100/210
+[Worker 45] Processing 110/210
+[Worker 45] Processing 120/210
+[Worker 45] Processing 130/210
+[Worker 45] Processing 140/210
+[Worker 45] Processing 150/210
+[Worker 45] Processing 160/210
+[Worker 45] Processing 170/210
+[Worker 45] Processing 180/210
+[Worker 45] Processing 190/210
+[Worker 45] Processing 200/210
+[Worker 45] Processing 210/210
+[Worker 45] Complete!
+[Worker 36] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker36_shard-000000.tar 0 0.0 GB 0
+[Worker 36] Processing 10/210
+[Worker 36] Processing 20/210
+[Worker 36] Processing 30/210
+[Worker 36] Processing 40/210
+[Worker 36] Processing 50/210
+[Worker 36] Processing 60/210
+[Worker 36] Processing 70/210
+[Worker 36] Processing 80/210
+[Worker 36] Processing 90/210
+[Worker 36] Processing 100/210
+[Worker 36] Processing 110/210
+[Worker 36] Processing 120/210
+[Worker 36] Processing 130/210
+[Worker 36] Processing 140/210
+[Worker 36] Processing 150/210
+[Worker 36] Processing 160/210
+[Worker 36] Processing 170/210
+[Worker 36] Processing 180/210
+[Worker 36] Processing 190/210
+[Worker 36] Processing 200/210
+[Worker 36] Processing 210/210
+[Worker 36] Complete!
+[Worker 38] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker38_shard-000000.tar 0 0.0 GB 0
+[Worker 38] Processing 10/210
+[Worker 38] Processing 20/210
+[Worker 38] Processing 30/210
+[Worker 38] Processing 40/210
+[Worker 38] Processing 50/210
+[Worker 38] Processing 60/210
+[Worker 38] Processing 70/210
+[Worker 38] Processing 80/210
+[Worker 38] Processing 90/210
+[Worker 38] Processing 100/210
+[Worker 38] Processing 110/210
+[Worker 38] Processing 120/210
+[Worker 38] Processing 130/210
+[Worker 38] Processing 140/210
+[Worker 38] Processing 150/210
+[Worker 38] Processing 160/210
+[Worker 38] Processing 170/210
+[Worker 38] Processing 180/210
+[Worker 38] Processing 190/210
+[Worker 38] Processing 200/210
+[Worker 38] Processing 210/210
+[Worker 38] Complete!
+[Worker 50] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker50_shard-000000.tar 0 0.0 GB 0
+[Worker 50] Processing 10/210
+[Worker 50] Processing 20/210
+[Worker 50] Processing 30/210
+[Worker 50] Processing 40/210
+[Worker 50] Processing 50/210
+[Worker 50] Processing 60/210
+[Worker 50] Processing 70/210
+[Worker 50] Processing 80/210
+[Worker 50] Processing 90/210
+[Worker 50] Processing 100/210
+[Worker 50] Processing 110/210
+[Worker 50] Processing 120/210
+[Worker 50] Processing 130/210
+[Worker 50] Processing 140/210
+[Worker 50] Processing 150/210
+[Worker 50] Processing 160/210
+[Worker 50] Processing 170/210
+[Worker 50] Processing 180/210
+[Worker 50] Processing 190/210
+[Worker 50] Processing 200/210
+[Worker 50] Processing 210/210
+[Worker 50] Complete!
+[Worker 48] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker48_shard-000000.tar 0 0.0 GB 0
+[Worker 48] Processing 10/210
+[Worker 48] Processing 20/210
+[Worker 48] Processing 30/210
+[Worker 48] Processing 40/210
+[Worker 48] Processing 50/210
+[Worker 48] Processing 60/210
+[Worker 48] Processing 70/210
+[Worker 48] Processing 80/210
+[Worker 48] Processing 90/210
+[Worker 48] Processing 100/210
+[Worker 48] Processing 110/210
+[Worker 48] Processing 120/210
+[Worker 48] Processing 130/210
+[Worker 48] Processing 140/210
+[Worker 48] Processing 150/210
+[Worker 48] Processing 160/210
+[Worker 48] Processing 170/210
+[Worker 48] Processing 180/210
+[Worker 48] Processing 190/210
+[Worker 48] Processing 200/210
+[Worker 48] Processing 210/210
+[Worker 48] Complete!
+[Worker 46] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker46_shard-000000.tar 0 0.0 GB 0
+[Worker 46] Processing 10/210
+[Worker 46] Processing 20/210
+[Worker 46] Processing 30/210
+[Worker 46] Processing 40/210
+[Worker 46] Processing 50/210
+[Worker 46] Processing 60/210
+[Worker 46] Processing 70/210
+[Worker 46] Processing 80/210
+[Worker 46] Processing 90/210
+[Worker 46] Processing 100/210
+[Worker 46] Processing 110/210
+[Worker 46] Processing 120/210
+[Worker 46] Processing 130/210
+[Worker 46] Processing 140/210
+[Worker 46] Processing 150/210
+[Worker 46] Processing 160/210
+[Worker 46] Processing 170/210
+[Worker 46] Processing 180/210
+[Worker 46] Processing 190/210
+[Worker 46] Processing 200/210
+[Worker 46] Processing 210/210
+[Worker 46] Complete!
+[Worker 58] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker58_shard-000000.tar 0 0.0 GB 0
+[Worker 58] Processing 10/210
+[Worker 58] Processing 20/210
+[Worker 58] Processing 30/210
+[Worker 58] Processing 40/210
+[Worker 58] Processing 50/210
+[Worker 58] Processing 60/210
+[Worker 58] Processing 70/210
+[Worker 58] Processing 80/210
+[Worker 58] Processing 90/210
+[Worker 58] Processing 100/210
+[Worker 58] Processing 110/210
+[Worker 58] Processing 120/210
+[Worker 58] Processing 130/210
+[Worker 58] Processing 140/210
+[Worker 58] Processing 150/210
+[Worker 58] Processing 160/210
+[Worker 58] Processing 170/210
+[Worker 58] Processing 180/210
+[Worker 58] Processing 190/210
+[Worker 58] Processing 200/210
+[Worker 58] Processing 210/210
+[Worker 58] Complete!
+[Worker 63] Starting conversion of 187 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker63_shard-000000.tar 0 0.0 GB 0
+[Worker 63] Processing 10/187
+[Worker 63] Processing 20/187
+[Worker 63] Processing 30/187
+[Worker 63] Processing 40/187
+[Worker 63] Processing 50/187
+[Worker 63] Processing 60/187
+[Worker 63] Processing 70/187
+[Worker 63] Processing 80/187
+[Worker 63] Processing 90/187
+[Worker 63] Processing 100/187
+[Worker 63] Processing 110/187
+[Worker 63] Processing 120/187
+[Worker 63] Processing 130/187
+[Worker 63] Processing 140/187
+[Worker 63] Processing 150/187
+[Worker 63] Processing 160/187
+[Worker 63] Processing 170/187
+[Worker 63] Processing 180/187
+[Worker 63] Complete!
+[Worker 60] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker60_shard-000000.tar 0 0.0 GB 0
+[Worker 60] Processing 10/210
+[Worker 60] Processing 20/210
+[Worker 60] Processing 30/210
+[Worker 60] Processing 40/210
+[Worker 60] Processing 50/210
+[Worker 60] Processing 60/210
+[Worker 60] Processing 70/210
+[Worker 60] Processing 80/210
+[Worker 60] Processing 90/210
+[Worker 60] Processing 100/210
+[Worker 60] Processing 110/210
+[Worker 60] Processing 120/210
+[Worker 60] Processing 130/210
+[Worker 60] Processing 140/210
+[Worker 60] Processing 150/210
+[Worker 60] Processing 160/210
+[Worker 60] Processing 170/210
+[Worker 60] Processing 180/210
+[Worker 60] Processing 190/210
+[Worker 60] Processing 200/210
+[Worker 60] Processing 210/210
+[Worker 60] Complete!
+[Worker 61] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker61_shard-000000.tar 0 0.0 GB 0
+[Worker 61] Processing 10/210
+[Worker 61] Processing 20/210
+[Worker 61] Processing 30/210
+[Worker 61] Processing 40/210
+[Worker 61] Processing 50/210
+[Worker 61] Processing 60/210
+[Worker 61] Processing 70/210
+[Worker 61] Processing 80/210
+[Worker 61] Processing 90/210
+[Worker 61] Processing 100/210
+[Worker 61] Processing 110/210
+[Worker 61] Processing 120/210
+[Worker 61] Processing 130/210
+[Worker 61] Processing 140/210
+[Worker 61] Processing 150/210
+[Worker 61] Processing 160/210
+[Worker 61] Processing 170/210
+[Worker 61] Processing 180/210
+[Worker 61] Processing 190/210
+[Worker 61] Processing 200/210
+[Worker 61] Processing 210/210
+[Worker 61] Complete!
+[Worker 59] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker59_shard-000000.tar 0 0.0 GB 0
+[Worker 59] Processing 10/210
+[Worker 59] Processing 20/210
+[Worker 59] Processing 30/210
+[Worker 59] Processing 40/210
+[Worker 59] Processing 50/210
+[Worker 59] Processing 60/210
+[Worker 59] Processing 70/210
+[Worker 59] Processing 80/210
+[Worker 59] Processing 90/210
+[Worker 59] Processing 100/210
+[Worker 59] Processing 110/210
+[Worker 59] Processing 120/210
+[Worker 59] Processing 130/210
+[Worker 59] Processing 140/210
+[Worker 59] Processing 150/210
+[Worker 59] Processing 160/210
+[Worker 59] Processing 170/210
+[Worker 59] Processing 180/210
+[Worker 59] Processing 190/210
+[Worker 59] Processing 200/210
+[Worker 59] Processing 210/210
+[Worker 59] Complete!
+[Worker 56] Starting conversion of 210 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/train/worker56_shard-000000.tar 0 0.0 GB 0
+[Worker 56] Processing 10/210
+[Worker 56] Processing 20/210
+[Worker 56] Processing 30/210
+[Worker 56] Processing 40/210
+[Worker 56] Processing 50/210
+[Worker 56] Processing 60/210
+[Worker 56] Processing 70/210
+[Worker 56] Processing 80/210
+[Worker 56] Processing 90/210
+[Worker 56] Processing 100/210
+[Worker 56] Processing 110/210
+[Worker 56] Processing 120/210
+[Worker 56] Processing 130/210
+[Worker 56] Processing 140/210
+[Worker 56] Processing 150/210
+[Worker 56] Processing 160/210
+[Worker 56] Processing 170/210
+[Worker 56] Processing 180/210
+[Worker 56] Processing 190/210
+[Worker 56] Processing 200/210
+[Worker 56] Processing 210/210
+[Worker 56] Complete!
+--- Slurm Task 1/3 ---
+Total dataset size: 2975
+Assigned to this node: 744 subjects (indices 744 to 1487)
+Using 32 local CPUs/Workers
+[Worker 54] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker54_shard-000000.tar 0 0.0 GB 0
+[Worker 54] Processing 10/24
+[Worker 54] Processing 20/24
+[Worker 54] Complete!
+[Worker 46] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker46_shard-000000.tar 0 0.0 GB 0
+[Worker 46] Processing 10/24
+[Worker 46] Processing 20/24
+[Worker 46] Complete!
+[Worker 47] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker47_shard-000000.tar 0 0.0 GB 0
+[Worker 47] Processing 10/24
+[Worker 47] Processing 20/24
+[Worker 47] Complete!
+[Worker 35] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker35_shard-000000.tar 0 0.0 GB 0
+[Worker 35] Processing 10/24
+[Worker 35] Processing 20/24
+[Worker 35] Complete!
+[Worker 40] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker40_shard-000000.tar 0 0.0 GB 0
+[Worker 40] Processing 10/24
+[Worker 40] Processing 20/24
+[Worker 40] Complete!
+[Worker 52] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker52_shard-000000.tar 0 0.0 GB 0
+[Worker 52] Processing 10/24
+[Worker 52] Processing 20/24
+[Worker 52] Complete!
+[Worker 42] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker42_shard-000000.tar 0 0.0 GB 0
+[Worker 42] Processing 10/24
+[Worker 42] Processing 20/24
+[Worker 42] Complete!
+[Worker 49] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker49_shard-000000.tar 0 0.0 GB 0
+[Worker 49] Processing 10/24
+[Worker 49] Processing 20/24
+[Worker 49] Complete!
+[Worker 43] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker43_shard-000000.tar 0 0.0 GB 0
+[Worker 43] Processing 10/24
+[Worker 43] Processing 20/24
+[Worker 43] Complete!
+[Worker 50] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker50_shard-000000.tar 0 0.0 GB 0
+[Worker 50] Processing 10/24
+[Worker 50] Processing 20/24
+[Worker 50] Complete!
+[Worker 33] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker33_shard-000000.tar 0 0.0 GB 0
+[Worker 33] Processing 10/24
+[Worker 33] Processing 20/24
+[Worker 33] Complete!
+[Worker 37] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker37_shard-000000.tar 0 0.0 GB 0
+[Worker 37] Processing 10/24
+[Worker 37] Processing 20/24
+[Worker 37] Complete!
+[Worker 57] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker57_shard-000000.tar 0 0.0 GB 0
+[Worker 57] Processing 10/24
+[Worker 57] Processing 20/24
+[Worker 57] Complete!
+[Worker 48] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker48_shard-000000.tar 0 0.0 GB 0
+[Worker 48] Processing 10/24
+[Worker 48] Processing 20/24
+[Worker 48] Complete!
+[Worker 36] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker36_shard-000000.tar 0 0.0 GB 0
+[Worker 36] Processing 10/24
+[Worker 36] Processing 20/24
+[Worker 36] Complete!
+[Worker 51] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker51_shard-000000.tar 0 0.0 GB 0
+[Worker 51] Processing 10/24
+[Worker 51] Processing 20/24
+[Worker 51] Complete!
+[Worker 38] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker38_shard-000000.tar 0 0.0 GB 0
+[Worker 38] Processing 10/24
+[Worker 38] Processing 20/24
+[Worker 38] Complete!
+[Worker 44] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker44_shard-000000.tar 0 0.0 GB 0
+[Worker 44] Processing 10/24
+[Worker 44] Processing 20/24
+[Worker 44] Complete!
+[Worker 32] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker32_shard-000000.tar 0 0.0 GB 0
+[Worker 32] Processing 10/24
+[Worker 32] Processing 20/24
+[Worker 32] Complete!
+[Worker 34] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker34_shard-000000.tar 0 0.0 GB 0
+[Worker 34] Processing 10/24
+[Worker 34] Processing 20/24
+[Worker 34] Complete!
+[Worker 45] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker45_shard-000000.tar 0 0.0 GB 0
+[Worker 45] Processing 10/24
+[Worker 45] Processing 20/24
+[Worker 45] Complete!
+[Worker 39] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker39_shard-000000.tar 0 0.0 GB 0
+[Worker 39] Processing 10/24
+[Worker 39] Processing 20/24
+[Worker 39] Complete!
+[Worker 56] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker56_shard-000000.tar 0 0.0 GB 0
+[Worker 56] Processing 10/24
+[Worker 56] Processing 20/24
+[Worker 56] Complete!
+[Worker 53] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker53_shard-000000.tar 0 0.0 GB 0
+[Worker 53] Processing 10/24
+[Worker 53] Processing 20/24
+[Worker 53] Complete!
+[Worker 60] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker60_shard-000000.tar 0 0.0 GB 0
+[Worker 60] Processing 10/24
+[Worker 60] Processing 20/24
+[Worker 60] Complete!
+[Worker 58] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker58_shard-000000.tar 0 0.0 GB 0
+[Worker 58] Processing 10/24
+[Worker 58] Processing 20/24
+[Worker 58] Complete!
+[Worker 62] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker62_shard-000000.tar 0 0.0 GB 0
+[Worker 62] Processing 10/24
+[Worker 62] Processing 20/24
+[Worker 62] Complete!
+[Worker 41] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker41_shard-000000.tar 0 0.0 GB 0
+[Worker 41] Processing 10/24
+[Worker 41] Processing 20/24
+[Worker 41] Complete!
+[Worker 61] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker61_shard-000000.tar 0 0.0 GB 0
+[Worker 61] Processing 10/24
+[Worker 61] Processing 20/24
+[Worker 61] Complete!
+[Worker 59] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker59_shard-000000.tar 0 0.0 GB 0
+[Worker 59] Processing 10/24
+[Worker 59] Processing 20/24
+[Worker 59] Complete!
+[Worker 55] Starting conversion of 24 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/val/worker55_shard-000000.tar 0 0.0 GB 0
+[Worker 55] Processing 10/24
+[Worker 55] Processing 20/24
+[Worker 55] Complete!
+--- Slurm Task 1/3 ---
+Total dataset size: 3309
+Assigned to this node: 828 subjects (indices 828 to 1655)
+Using 32 local CPUs/Workers
+[Worker 39] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker39_shard-000000.tar 0 0.0 GB 0
+[Worker 39] Processing 10/26
+[Worker 39] Processing 20/26
+[Worker 39] Complete!
+[Worker 43] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker43_shard-000000.tar 0 0.0 GB 0
+[Worker 43] Processing 10/26
+[Worker 43] Processing 20/26
+[Worker 43] Complete!
+[Worker 35] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker35_shard-000000.tar 0 0.0 GB 0
+[Worker 35] Processing 10/26
+[Worker 35] Processing 20/26
+[Worker 35] Complete!
+[Worker 34] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker34_shard-000000.tar 0 0.0 GB 0
+[Worker 34] Processing 10/26
+[Worker 34] Processing 20/26
+[Worker 34] Complete!
+[Worker 40] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker40_shard-000000.tar 0 0.0 GB 0
+[Worker 40] Processing 10/26
+[Worker 40] Processing 20/26
+[Worker 40] Complete!
+[Worker 52] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker52_shard-000000.tar 0 0.0 GB 0
+[Worker 52] Processing 10/26
+[Worker 52] Processing 20/26
+[Worker 52] Complete!
+[Worker 55] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker55_shard-000000.tar 0 0.0 GB 0
+[Worker 55] Processing 10/26
+[Worker 55] Processing 20/26
+[Worker 55] Complete!
+[Worker 41] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker41_shard-000000.tar 0 0.0 GB 0
+[Worker 41] Processing 10/26
+[Worker 41] Processing 20/26
+[Worker 41] Complete!
+[Worker 51] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker51_shard-000000.tar 0 0.0 GB 0
+[Worker 51] Processing 10/26
+[Worker 51] Processing 20/26
+[Worker 51] Complete!
+[Worker 49] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker49_shard-000000.tar 0 0.0 GB 0
+[Worker 49] Processing 10/26
+[Worker 49] Processing 20/26
+[Worker 49] Complete!
+[Worker 56] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker56_shard-000000.tar 0 0.0 GB 0
+[Worker 56] Processing 10/26
+[Worker 56] Processing 20/26
+[Worker 56] Complete!
+[Worker 33] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker33_shard-000000.tar 0 0.0 GB 0
+[Worker 33] Processing 10/26
+[Worker 33] Processing 20/26
+[Worker 33] Complete!
+[Worker 48] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker48_shard-000000.tar 0 0.0 GB 0
+[Worker 48] Processing 10/26
+[Worker 48] Processing 20/26
+[Worker 48] Complete!
+[Worker 47] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker47_shard-000000.tar 0 0.0 GB 0
+[Worker 47] Processing 10/26
+[Worker 47] Processing 20/26
+[Worker 47] Complete!
+[Worker 45] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker45_shard-000000.tar 0 0.0 GB 0
+[Worker 45] Processing 10/26
+[Worker 45] Processing 20/26
+[Worker 45] Complete!
+[Worker 38] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker38_shard-000000.tar 0 0.0 GB 0
+[Worker 38] Processing 10/26
+[Worker 38] Processing 20/26
+[Worker 38] Complete!
+[Worker 57] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker57_shard-000000.tar 0 0.0 GB 0
+[Worker 57] Processing 10/26
+[Worker 57] Processing 20/26
+[Worker 57] Complete!
+[Worker 63] Starting conversion of 22 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker63_shard-000000.tar 0 0.0 GB 0
+[Worker 63] Processing 10/22
+[Worker 63] Processing 20/22
+[Worker 63] Complete!
+[Worker 32] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker32_shard-000000.tar 0 0.0 GB 0
+[Worker 32] Processing 10/26
+[Worker 32] Processing 20/26
+[Worker 32] Complete!
+[Worker 36] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker36_shard-000000.tar 0 0.0 GB 0
+[Worker 36] Processing 10/26
+[Worker 36] Processing 20/26
+[Worker 36] Complete!
+[Worker 42] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker42_shard-000000.tar 0 0.0 GB 0
+[Worker 42] Processing 10/26
+[Worker 42] Processing 20/26
+[Worker 42] Complete!
+[Worker 50] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker50_shard-000000.tar 0 0.0 GB 0
+[Worker 50] Processing 10/26
+[Worker 50] Processing 20/26
+[Worker 50] Complete!
+[Worker 37] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker37_shard-000000.tar 0 0.0 GB 0
+[Worker 37] Processing 10/26
+[Worker 37] Processing 20/26
+[Worker 37] Complete!
+[Worker 46] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker46_shard-000000.tar 0 0.0 GB 0
+[Worker 46] Processing 10/26
+[Worker 46] Processing 20/26
+[Worker 46] Complete!
+[Worker 53] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker53_shard-000000.tar 0 0.0 GB 0
+[Worker 53] Processing 10/26
+[Worker 53] Processing 20/26
+[Worker 53] Complete!
+[Worker 58] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker58_shard-000000.tar 0 0.0 GB 0
+[Worker 58] Processing 10/26
+[Worker 58] Processing 20/26
+[Worker 58] Complete!
+[Worker 44] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker44_shard-000000.tar 0 0.0 GB 0
+[Worker 44] Processing 10/26
+[Worker 44] Processing 20/26
+[Worker 44] Complete!
+[Worker 59] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker59_shard-000000.tar 0 0.0 GB 0
+[Worker 59] Processing 10/26
+[Worker 59] Processing 20/26
+[Worker 59] Complete!
+[Worker 54] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker54_shard-000000.tar 0 0.0 GB 0
+[Worker 54] Processing 10/26
+[Worker 54] Processing 20/26
+[Worker 54] Complete!
+[Worker 60] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker60_shard-000000.tar 0 0.0 GB 0
+[Worker 60] Processing 10/26
+[Worker 60] Processing 20/26
+[Worker 60] Complete!
+[Worker 62] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker62_shard-000000.tar 0 0.0 GB 0
+[Worker 62] Processing 10/26
+[Worker 62] Processing 20/26
+[Worker 62] Complete!
+[Worker 61] Starting conversion of 26 subjects...
+# writing /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all/_png_resized_padded/test/worker61_shard-000000.tar 0 0.0 GB 0
+[Worker 61] Processing 10/26
+[Worker 61] Processing 20/26
+[Worker 61] Complete!
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4433635
+Array Job ID: 4433633_1
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n10
+Nodes: 1
+Cores per node: 32
+Job started at: 2026-05-29 12:35:08
+Job ended at:   2026-05-29 13:17:14
+Job Wall-clock time: 00:42:06
+CPU Utilized: 22:07:55
+CPU Efficiency: 98.57% of 22:27:12 core-walltime
+Memory Utilized: 3.05 GB
+Memory Efficiency: 4.76% of 64.00 GB

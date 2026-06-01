@@ -159,29 +159,31 @@ class Custom1DCNN(nn.Module):
     def forward(self, x):
         return self.model(x.unsqueeze(1))  # Add channel dimension
 class CustomLogreg(nn.Module):
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, output_size,**kwargs):
         super(CustomLogreg, self).__init__()
-        self.linear = nn.Linear(input_size, output_size)
+        layers = []
+        dropout = kwargs.get('dropout', None)
+        batchnorm = kwargs.get('batchnorm', False)
+        with_input_norm = kwargs.get('with_input_norm', None)
+        if with_input_norm is None:
+            pass
+        elif with_input_norm=='batch_norm':
+            layers.append(nn.BatchNorm1d(input_size))
+        if dropout is not None:
+            if isinstance(dropout, float):
+                layers.append(nn.Dropout(dropout))
+            else:
+                raise ValueError("Dropout should be a float value.")
+        layers.append(nn.Linear(input_size, output_size))
+        self.model = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.linear(x)
+        return self.model(x)
 
 #Pretrained CNN models
 def get_resnet(name,mode, pretrained, **kwargs):
     from torchvision.models import resnet50, ResNet50_Weights, resnet18, ResNet18_Weights, resnet34, ResNet34_Weights, resnet101, ResNet101_Weights
-    if name=='resnet50':
-        weights = ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
-        model = resnet50(weights=weights)
-    elif name=='resnet18':
-        weights = ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
-        model = resnet18(weights=weights)
-    elif name=='resnet34':
-        weights = ResNet34_Weights.IMAGENET1K_V1 if pretrained else None
-        model = resnet34(weights=weights)
-    elif name=='resnet101':
-        weights = ResNet101_Weights.IMAGENET1K_V1 if pretrained else None
-        model = resnet101(weights=weights)
-    elif name in ['resnet34_layer1','resnet34_layer2','resnet34_layer3']:
+    if name in ['resnet34_layer1','resnet34_layer2','resnet34_layer3']:
         weights = ResNet34_Weights.IMAGENET1K_V1 if pretrained else None
         full_model = resnet34(weights=weights)
         if name=='resnet34_layer1':
@@ -211,6 +213,7 @@ def get_resnet(name,mode, pretrained, **kwargs):
                 full_model.layer2,
                 full_model.layer3
             )
+            
         class WrappedResNet(nn.Module):
             def __init__(self, layers):
                 super().__init__()
@@ -223,23 +226,23 @@ def get_resnet(name,mode, pretrained, **kwargs):
                 x = torch.flatten(x, 1)
                 return x
         model = WrappedResNet(layers)
+        return model
+    elif name in ['resnet50','resnet18','resnet34','resnet101']:
+        if name=='resnet50':
+            weights = ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
+            model = resnet50(weights=weights)
+        elif name=='resnet18':
+            weights = ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
+            model = resnet18(weights=weights)
+        elif name=='resnet34':
+            weights = ResNet34_Weights.IMAGENET1K_V1 if pretrained else None
+            model = resnet34(weights=weights)
+        elif name=='resnet101':
+            weights = ResNet101_Weights.IMAGENET1K_V1 if pretrained else None
+            model = resnet101(weights=weights)
+        model.fc = torch.nn.Identity()
     else:
         raise ValueError(f"Model {name} is not supported. Choose from ['resnet50', 'resnet18']")
-    if mode=='classification head':
-        num_classes=kwargs.get('num_classes', 2)
-        hidden_sizes=kwargs.get('hidden_sizes', [128])
-        in_features = model.fc.in_features
-        mlp=CustomMLP(input_size=in_features, hidden_sizes=hidden_sizes, output_size=num_classes)
-        model.fc = mlp
-    elif mode=='as is':
-        pass
-    elif mode=='truncated':
-        truncation=kwargs.get('truncation', 'remove head')
-        if truncation=='remove head':
-            if name not in ['resnet34_layer1','resnet34_layer2','resnet34_layer3']:
-                model.fc = torch.nn.Identity()
-        else:
-            raise ValueError(f"Truncation {truncation} is not supported. Choose from ['remove head']")
     return model
 def get_resnet_transforms(**kwargs):
     """
@@ -261,6 +264,11 @@ def get_resnet_transforms(**kwargs):
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
     return transform
+def simple_resize_transform(size):
+    return transforms.Compose([
+        transforms.Resize((size, size), interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.ToTensor(),
+    ])
 
 #Pretrained transformer models
 def get_clip_vit(name, mode, **kwargs):
@@ -333,28 +341,11 @@ def get_clip_vit(name, mode, **kwargs):
     #model = WrappedHuggingfaceModel(model.vision_model) 
     #remove pixel_values argument; returns the output of the last layernorm (no pooling) 1,578,384
     
-    if mode=='classification head':
-        num_classes=kwargs.get('num_classes', 2)
-        hidden_sizes=kwargs.get('hidden_sizes', [128])
-        how_to_read=kwargs.get('how_to_read', 'cls')
-        if how_to_read=='cls':
-            in_features = 384
-        else:
-            print('still no support for pooling or other averaging techniques')
-        mlp=CustomMLP(input_size=in_features, hidden_sizes=hidden_sizes, output_size=num_classes)
-    elif mode=='as is':
-        return model
-    elif mode=='truncated':
-        truncation=kwargs.get('truncation', 'remove head')
-        if truncation=='remove head':
-            if 'inter' in name:
-                return WrappedModelInter(model, layer_index=12)
-            else:
-                return WrappedModel(model,'cls',normalization) #add an option for other ways of reading the output
-        else:
-            raise ValueError(f"Truncation {truncation} is not supported. Choose from ['remove head']")
-    elif mode=='exp':
-        return WrappedVisionModelExpl(model.vision_model, type_of_output=kwargs.get('type_of_output', 'cls'),normalization=normalization)
+    if 'inter' in name:
+        return WrappedModelInter(model, layer_index=12)
+    else:
+        return WrappedModel(model,'cls',normalization) #add an option for other ways of reading the output
+    #return WrappedVisionModelExpl(model.vision_model, type_of_output=kwargs.get('type_of_output', 'cls'),normalization=normalization)
 def get_clip_vit_transforms(name, **kwargs):
     from transformers import CLIPImageProcessor
     if name == "clip-vit-large-patch14-un":
@@ -378,7 +369,11 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         transform = get_resnet_transforms(**kwargs)
     elif name.startswith('clip-vit'):
         model = get_clip_vit(name, mode, pretrained, **kwargs)
-        transform = get_clip_vit_transforms(name, **kwargs)  
+        transform = get_clip_vit_transforms(name, **kwargs) 
+    elif name == 'custom_cnn':
+        model = CustomBinaryCNN() 
+        input_size = kwargs.get('input_size', 224)
+        transform = simple_resize_transform(input_size)
     else:
         raise ValueError(f"Model {name} is not supported.")
     #pretrained_modality = kwargs.get('custom_pretrained','original')
@@ -387,9 +382,9 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         model.load_state_dict(checkpoint['model_state_dict'])
     return model, transform
 def get_classification_head(name='MLPClassifier1',in_features=512,num_classes=2,**kwargs):
-    dropout = kwargs.get('dropout', None)
+    dropout = kwargs.get('dropout', 0.5)
     activation = kwargs.get('activation', 'relu')
-    n_neurons = kwargs.get('n_neurons', 128)
+    n_neurons = kwargs.get('n_neurons', 64)
     with_input_norm = kwargs.get('with_input_norm', None)
     scale = kwargs.get('scale', 1.0)
     mean = kwargs.get('mean', 0.0)
@@ -417,10 +412,48 @@ def get_classification_head(name='MLPClassifier1',in_features=512,num_classes=2,
     elif name == '1DCNNClassifier':
         hidden_sizes = kwargs.get('hidden_sizes',[n_neurons])
         return Custom1DCNN(input_size=in_features, hidden_sizes=hidden_sizes, output_size=num_classes)
-    elif name == 'logreg':
+    elif name in ['logreg','linear']:
         return CustomLogreg(input_size=in_features, output_size=num_classes)
+    elif name=='regularized_linear':
+        return CustomLogreg(input_size=in_features, output_size=num_classes, dropout=dropout, batchnorm=True, with_input_norm='batch_norm')
     else:
         raise ValueError(f"Classification head {name} is not supported. Choose from ['MLPClassifier1', 'MLPClassifier2', 'TransformerClassifier']")
+def unfreeze_layers(model,layer_names=['all']):
+    if len(layer_names) == 0:
+        layer_names = ['frozen']
+    for name, param in model.named_parameters():
+        if layer_names[0]=='all' or any(layer_name in name for layer_name in layer_names):
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
+    return model
+def load_backbone_from_lightning_ckpt(backbone, ckpt_path):
+    # 1. Load the checkpoint file
+    # Using map_location='cpu' prevents out-of-memory errors if loading a GPU model on CPU
+    checkpoint = torch.load(ckpt_path, map_location=torch.device('cpu'))
+    
+    # 2. Extract the state dictionary
+    full_state_dict = checkpoint['state_dict']
+    
+    # 3. Create a new dictionary for just the backbone weights
+    backbone_state_dict = {}
+    
+    for key, weight in full_state_dict.items():
+        # Look for keys that belong to your backbone
+        if 'vision_model' in key:
+            # PyTorch Lightning usually adds prefixes (e.g., "model.vision_model.layer1...").
+            # Your standalone backbone just expects "layer1...".
+            # We split by 'vision_model.' and take the right side to strip all prefixes.
+            clean_key = key.split('vision_model.')[-1]
+            
+            backbone_state_dict[clean_key] = weight
+
+    # 4. Load the filtered weights into your backbone
+    # strict=True ensures that all keys match perfectly without any missing or extra weights.
+    backbone.load_state_dict(backbone_state_dict, strict=True)
+    
+    print(f"Successfully loaded {len(backbone_state_dict)} tensors into the backbone.")
+    return backbone
 
 #Wrappers
 class JoinedModels(nn.Module):

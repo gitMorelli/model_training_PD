@@ -22,39 +22,44 @@ import random
 import shutil
 #from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks import Callback
+import re
 
 from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP
-from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels
+from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
 
-LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-data_folder = "png_resized_padded_whitebg"
+#LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
+LIST_OF_IDS_HANDEDNESS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
+
+#data_folder = "png_resized_padded_whitebg"
+data_folder = "all_png_resized_padded"
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
 
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 
 
-QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = ['5']
+#QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = ['5']
+QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(q) for q in range(1,14)]
 
 #Model definition
 MODEL = 'resnet18' #'resnet18', 'custom_cnn'
-MODEL_MODE = 'truncated' # 'truncated', 'full'
-CLASSIFICATION_HEAD = 'regularized_linear' # 'linear', 'mlp', 'regularized_linear'
+CLASSIFICATION_HEAD = 'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
+layers_to_unfreeze = ['all','classifier']#['layer4','classifier'] #Update it for every model
+input_size = 224
 
-TEST = 'balanced_data_mlp_classifier' #'balanced_loss', 'balanced_data', 'balanced_data_and_loss'
-EXPERIMENT_NAME = f"{MODEL}_{TEST}_{data_folder}"
+TEST = 'all_Qs_balanced' #'balanced_loss', 'balanced_data', 'balanced_data_and_loss'
+EXPERIMENT_NAME = f"{MODEL}_{data_folder}"
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
 TRAIN = True  # Set to False to skip training and only run validation evaluation
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
-checkpoint_to_load='v_13/best-epoch=04-val_loss=0.70.ckpt'#best.ckpt , None last.ckpt
+checkpoint_to_load='v_17/best-epoch=03-val_loss=0.69.ckpt'#best.ckpt , None last.ckpt
 DEBUG_IMGS = True
 GET_STATISTICS = False
 SEED=42
 DATA_MODALITY = 'digit' # 'X', 'text', 'digit'
-MODEL_MODALITY = 'partial_unfr' # 'full', 'feature_ext', 'partial_unfr' 
 
 BALANCED_DATA = True
 USE_BALANCED_WEIGHTS = False
@@ -118,11 +123,11 @@ def prepare_handedness_dataset(shard_pattern, decode_approach='pil',load_in_memo
                 
         # If we are missing either the image or the label, return the filter flag (-1)
         if img_tensor is None or label is None:
-            return blank_image, torch.tensor(-1, dtype=torch.long) , subject_id
+            return blank_image, torch.tensor(-1, dtype=torch.long) , subject_id,0,0
         
         # Return the image directly. 
         # Shape will be (Channels, Height, Width) instead of (1, Channels, Height, Width)
-        return img_tensor, label , subject_id
+        return img_tensor, label , subject_id,0,0
     
     # 1. Use glob to find all files matching the pattern
     shard_files = glob.glob(shard_pattern)
@@ -147,6 +152,89 @@ def prepare_handedness_dataset(shard_pattern, decode_approach='pil',load_in_memo
             .select(filter) # to filter missing data (labelled as -1)
             .batched(batch_size,partial=False) 
         )
+    return dataset
+
+def prepare_handedness_dataset_all(shard_pattern, decode_approach='pil', load_in_memory=False, 
+                               split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X'):
+    if modality == 'X':
+        modality_string = 'X'
+    elif modality == 'text':
+        modality_string = 'hand'
+    elif modality == 'digit':
+        modality_string = 'number_random'
+    
+    # 1. Create a closure to pass arguments into the compose function
+    def create_flattener(transform_func):
+        def flatten_samples(src):
+            """Takes an iterator of samples and yields multiple individual images."""
+            for sample in src:
+                label = None
+                subject_id = "unknown"
+                
+                # Step A: Find the JSON file first to get the label and subject
+                for key, value in sample.items():
+                    if key.endswith("json"):
+                        label = torch.tensor(value.get("label", -1), dtype=torch.long)
+                        subject_id = value.get("subject", "unknown")
+                        break # Found it, no need to keep checking other keys for json
+                        
+                # Step B: Filter at the sample level
+                # If the sample is missing a label or has a -1 label, skip the whole sample
+                if label is None or label.item() == -1:
+                    continue
+                    
+                # Step C: Process and YIELD images one by one
+                for key, value in sample.items():
+                    if key.endswith((".png", ".jpg", ".jpeg")):
+                        parts = key.split('.')
+                        
+                        # Expected format: q5.number_random.png
+                        if len(parts) == 3 and parts[1].lower() == modality_string.lower():
+                            questionnaire = parts[0]
+                            modality_type = parts[1]
+
+                            complete_example_id = f"{subject_id}_{questionnaire[1:]}"
+                            if complete_example_id in exclusion_set: #the exclusion set ids are the subjects_id + the questionnaire number
+                                #since the exclusion is specific for the questionnaire, no tfor the subject 
+                                continue
+                            
+                            try:
+                                # Apply transformations
+                                if transform_func is not None:
+                                    img_tensor = transform_func(value) 
+                                elif isinstance(value, torch.Tensor):
+                                    img_tensor = value
+                                else:
+                                    img_tensor = T.ToTensor()(value)
+                                
+                                # YIELD ONE ROW AT A TIME
+                                yield img_tensor, label, subject_id, questionnaire, modality_type
+                                
+                            except Exception as e:
+                                print(f"Skipping corrupted image {key}: {e}")
+                                
+        return flatten_samples
+
+    # 2. File gathering
+    shard_files = glob.glob(shard_pattern)
+    shard_files.sort()
+
+    if load_in_memory:
+        return 0 # Handle your in-memory logic here
+        
+    # 3. Build the WebDataset Pipeline
+    dataset = wds.WebDataset(shard_files, shardshuffle=100)
+
+    if split_workers:
+        dataset = dataset.select(wds.split_by_worker)
+
+    # 4. Apply the flattening and batching
+    dataset = (dataset
+        .decode(decode_approach)
+        .compose(create_flattener(transform)) # This replaces .map() and .select()
+        .batched(batch_size,partial=False)
+    )
+    
     return dataset
 
 # --- 5. Training & Validation Loop ---
@@ -328,7 +416,7 @@ class LitModel(L.LightningModule):
         self.train_sample_count = 0
 
     def training_step(self, batch, batch_idx):
-        inputs, labels, _ = batch
+        inputs, labels, *_ = batch
 
         outputs = self(inputs)
 
@@ -347,7 +435,7 @@ class LitModel(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        inputs, labels, _ = batch
+        inputs, labels, *_ = batch
         outputs = self(inputs)
         loss = self.criterion(outputs, labels)
         
@@ -399,7 +487,7 @@ class LitModel(L.LightningModule):
         return torch.optim.Adam(trainable_parameters, lr=self.lr)
 
     def predict_step(self, batch, batch_idx):
-        inputs, labels, _ = batch
+        inputs, labels, *_ = batch
         outputs = self(inputs)
         _, preds = torch.max(outputs, 1)
 
@@ -450,17 +538,42 @@ class BestMetricTracker(L.Callback):
 
 def generate_exclusion_set_val(csv_data, data_modality):
     train_data = csv_data[csv_data['split'] == 'val']
-    print(f"Total training samples: {len(train_data)}")
-    train_data_without_X =train_data[train_data[f'q_{QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS[0]}_num_{data_modality}'] >= 1]
-    class_counts = train_data_without_X['lateralite'].value_counts()
-    print(f"Class distribution in training set (after filtering for modality {data_modality}):\n{class_counts}")
+    class_counts = train_data['lateralite'].value_counts()
+    print(f"Class distribution in val set (after filtering for modality {data_modality}):\n{class_counts}")
     num_0 = class_counts.get(0.0, 0)  # Count of class 0 (e.g., right-handed)
     num_1 = class_counts.get(1.0, 0)  # Count of class 1 (e.g., left-handed)
-    majority_class_ids = train_data_without_X[train_data_without_X['lateralite'] == MAJORITY_CLASS_ID]['ident_projet'].unique()
+    majority_class_ids = train_data[train_data['lateralite'] == MAJORITY_CLASS_ID]['ident_projet'].unique()
     # randomly select a fraction of those ids based on the balancing factor
     majority_ids_to_include = random.sample(list(majority_class_ids), min(int(num_1*BALANCING_FACTOR), len(majority_class_ids)))
     exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
     return exclusion_set
+
+def melt_df(df,modality):
+    avail_columns=[f'q_{q}_num_{modality}' for q in QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS]
+    df_source = df[['ident_projet', 'lateralite','split'] + avail_columns]
+    df_long = df_source.melt(
+        id_vars=['ident_projet', 'lateralite','split'], 
+        value_vars=avail_columns,
+        var_name='original_col', 
+        value_name='score'
+    )
+    print(f"Length of melted df before filtering: {len(df_long)}")
+
+    # 2. Filter rows where the score/value is >= 1
+    df_long = df_long[df_long['score'] >= 1]
+
+    print(f"Length of melted df after filtering: {len(df_long)}")
+
+    # 3. Extract the 'q' number from the column name
+    # This regex looks for 'q_' followed by digits at the start of the string
+    df_long['questionnaire'] = df_long['original_col'].str.extract(r'^q_(\d+)_').astype(int)
+
+    df_long['ident_projet'] = df_long['ident_projet'].astype(str) + '_' + df_long['questionnaire'].astype(str)
+
+    # 4. Drop the temporary columns to get your final desired structure
+    new_df = df_long[['ident_projet', 'lateralite','split']].reset_index(drop=True)
+
+    return new_df
 
 def main():
     args = get_args()
@@ -473,20 +586,20 @@ def main():
     transform = None
     lr=1e-4
     num_classes=2
-    num_epochs = 50
-    patience = 5
+    num_epochs = 100
+    patience = 50
     exclusion_set = set() # you can add here the ids you want to exclude from the dataset (for example because they are corrupted or for debugging purposes)
 
     csv_data = pd.read_csv(LIST_OF_IDS_HANDEDNESS_PATH)
     print("Columns in the CSV:", csv_data.columns.tolist())
+    csv_data = melt_df(csv_data, modality=DATA_MODALITY)
+    print("CSV after melting:", csv_data.head())
     #cols: 'ident_projet', 'lateralite', 'q_5_num_X', 'q_5_num_text', 'q_5_num_digit', 'split']
     train_data = csv_data[csv_data['split'] == 'train']
-    print(f"Total training samples: {len(train_data)}")
-    train_data_without_X =train_data[train_data[f'q_{QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS[0]}_num_{DATA_MODALITY}'] >= 1]
-    print(f"Training samples with at least 1 chunck for modality {DATA_MODALITY}: {len(train_data_without_X)}")
+    print(f"Training samples with at least 1 chunck for modality {DATA_MODALITY}: {len(train_data)}")
 
     #get the number of samples for each class
-    class_counts = train_data_without_X['lateralite'].value_counts()
+    class_counts = train_data['lateralite'].value_counts()
     print(f"Class distribution in training set (after filtering for modality {DATA_MODALITY}):\n{class_counts}")
 
     num_0 = class_counts.get(0.0, 0)  # Count of class 0 (e.g., right-handed)
@@ -503,10 +616,11 @@ def main():
     
     if BALANCED_DATA:
         # get a list of unique ids for the majority class
-        majority_class_ids = train_data_without_X[train_data_without_X['lateralite'] == MAJORITY_CLASS_ID]['ident_projet'].unique()
+        majority_class_ids = train_data[train_data['lateralite'] == MAJORITY_CLASS_ID]['ident_projet'].unique()
         # randomly select a fraction of those ids based on the balancing factor
         majority_ids_to_include = random.sample(list(majority_class_ids), min(int(num_1*BALANCING_FACTOR), len(majority_class_ids)))
         exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
+    print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
 
     #read the current version number (starts from 1)
     current_version=1
@@ -529,73 +643,40 @@ def main():
         print(f"CUDA_VISIBLE_DEVICES: {visible}")
 
 
-    backbone,transform = get_model(name=MODEL, mode=MODEL_MODE, pretrained=True, truncation='remove head')
-    out=test_output(224,transform, backbone)
+    backbone,transform = get_model(name=MODEL, pretrained=True)
+    out=test_output(input_size, backbone)
     in_features = out.shape[1]
-    classificaton_head = get_classification_head(name=CLASSIFICATION_HEAD,in_features=in_features)
+    classificaton_head = get_classification_head(name=CLASSIFICATION_HEAD,in_features=in_features,num_classes=num_classes)
     model = JoinedModels(backbone, classificaton_head)
-    
-    if MODEL in ['resnet18']:
-        # 1. Load the pre-trained model
-        model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-
-        # 2. Modify the final layer first
-        num_features = model.fc.in_features
-        if CLASSIFICATION_HEAD == 'linear':
-            model.fc = nn.Linear(num_features, num_classes)
-        elif CLASSIFICATION_HEAD == 'regularized_linear':
-            model.fc = nn.Sequential(
-                nn.BatchNorm1d(num_features),    # Normalize the activations from the previous layer
-                nn.Dropout(p=0.5),               # Randomly zero out 50% of the neurons to prevent overfitting
-                nn.Linear(num_features, num_classes) # Final classification layer
-            )
-        elif CLASSIFICATION_HEAD == 'mlp':
-            model.fc = CustomMLP(input_size=num_features, hidden_sizes=[16], output_size=num_classes, 
-                                 activation='relu', dropout=0.5, batchnorm=True, with_input_norm='batch_norm')
-
-        # Determine layers to unfreeze based on modality
-        if MODEL_MODALITY == 'feature_ext':
-            list_layers = ['fc']
-        elif MODEL_MODALITY == 'partial_unfr':
-            list_layers = ['layer4', 'fc']
-        else:
-            list_layers = None  # Flag to indicate EVERYTHING should be trainable
-
-        # 3. Dynamic Selective Freezing Loop
-        for name, param in model.named_parameters():
-            # If list_layers is None, the 'or' statement short-circuits and sets True for all parameters
-            if list_layers is None or any(layer in name for layer in list_layers):
-                param.requires_grad = True
-            else:
-                param.requires_grad = False
-    elif MODEL == 'custom_cnn':
-        model = CustomBinaryCNN()
-
-
-    #define a transform that normalize to the imagenet mean and std
-    transform = T.Compose([
-        #T.Resize((224, 224)),  # ResNet18 expects 224x224 input; in this case data ia already resized
-        T.ToTensor(),
-        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # ImageNet normalization
-    ])
+    unfreeze_layers(model,layer_names=layers_to_unfreeze)
 
     print(f"Reading from {SHARD_PATTERN_train} and {SHARD_PATTERN_val} with decode approach '{decode_approach}' and load_in_memory={load_in_memory}")
     if TRAIN:
-        train_dataset = prepare_handedness_dataset(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
-                                                split_workers=split_workers, batch_size=batch_size, 
-                                                transform=transform, modality=DATA_MODALITY, 
-                                                rate=rate, balanced_data=BALANCED_DATA, exclusion_set=exclusion_set)
+        if 'all' in EXPERIMENT_NAME:
+            train_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
+                                                    split_workers=split_workers, batch_size=batch_size, 
+                                                    transform=transform, modality=DATA_MODALITY, exclusion_set=exclusion_set)
+        else:
+            train_dataset = prepare_handedness_dataset(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
+                                                    split_workers=split_workers, batch_size=batch_size, 
+                                                    transform=transform, modality=DATA_MODALITY, 
+                                                    rate=rate, balanced_data=BALANCED_DATA, exclusion_set=exclusion_set)
     if DEBUG_IMGS and TRAIN:
         # Iterate through the first few items to see what labels are coming out
-        for i, (img, label, key) in enumerate(train_dataset):
-            print(f"Sample {i}: Label {label}, Key {key}")
+        for i, (img, label, id,q,mode) in enumerate(train_dataset):
+            print(f"Sample {i}: Label {label}, ID {id}, Q {q}, Mode {mode}")
             if i > 10: break
     
     #print(f"Number of dataset samples (train): {len(train_dataset)}")
     val_exclusion_set = generate_exclusion_set_val(csv_data, data_modality=DATA_MODALITY)
-    val_dataset = prepare_handedness_dataset(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
-                                                split_workers=split_workers, batch_size=batch_size, 
-                                                transform=transform, modality=DATA_MODALITY, balanced_data=False, exclusion_set=val_exclusion_set)
+    if 'all' in EXPERIMENT_NAME:
+        val_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
+                                                     split_workers=split_workers, batch_size=batch_size,
+                                                     transform=transform, modality=DATA_MODALITY, exclusion_set=val_exclusion_set)
+    else:
+        val_dataset = prepare_handedness_dataset(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
+                                                    split_workers=split_workers, batch_size=batch_size, 
+                                                    transform=transform, modality=DATA_MODALITY, balanced_data=False, exclusion_set=val_exclusion_set)
     if DEBUG_IMGS and TRAIN:
         #sample N data points at random from the train dataset, save them in an image with the corresponding label
         mean=[0.485, 0.456, 0.406]
@@ -698,7 +779,7 @@ def main():
             "TEST": TEST,
             "EXPERIMENT_NAME": EXPERIMENT_NAME,
             "DATA_MODALITY": DATA_MODALITY,
-            "MODEL_MODALITY": MODEL_MODALITY,
+            "MODEL_MODALITY": layers_to_unfreeze, #which layers were unfreezed before training (All=all layers, [] or [frozen]=no layers)
             "BALANCED_DATA": BALANCED_DATA,
             "USE_BALANCED_WEIGHTS": USE_BALANCED_WEIGHTS,
             "NUM_0": num_0,

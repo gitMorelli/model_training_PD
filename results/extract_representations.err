@@ -1,0 +1,24 @@
+Traceback (most recent call last):
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/a_morelli/vscode_projects/model_training/src/scripts/extract_and_store_representations.py", line 286, in <module>
+    main()
+  File "/home/a_morelli/vscode_projects/model_training/src/scripts/extract_and_store_representations.py", line 279, in main
+    final_df.to_parquet(os.path.join(OUTPUT_PATH,f"{EXPERIMENT_NAME}_results.parquet"))
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/pandas/util/_decorators.py", line 333, in wrapper
+    return func(*args, **kwargs)
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/pandas/core/frame.py", line 3124, in to_parquet
+    return to_parquet(
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/pandas/io/parquet.py", line 482, in to_parquet
+    impl.write(
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/pandas/io/parquet.py", line 199, in write
+    path_or_handle, handles, filesystem = _get_path_or_handle(
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/pandas/io/parquet.py", line 141, in _get_path_or_handle
+    handles = get_handle(
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/pandas/io/common.py", line 749, in get_handle
+    check_parent_directory(str(handle))
+  File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/pandas/io/common.py", line 616, in check_parent_directory
+    raise OSError(rf"Cannot save file into a non-existent directory: '{parent}'")
+OSError: Cannot save file into a non-existent directory: '/mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet18_extracted_features'

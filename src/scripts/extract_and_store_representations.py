@@ -24,33 +24,34 @@ import shutil
 from lightning.pytorch.callbacks import Callback
 
 from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset
-from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP
+from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, get_model, test_output, get_classification_head
+from src.utils.model_utils import JoinedModels, unfreeze_layers, load_backbone_from_lightning_ckpt
 from src.utils.visualization import debug_images_dataset
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
 
 LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-folder_name = "png_resized_padded"
+#folder_name = "png_resized_padded"
+folder_name = "png_resized_padded_whitebg"
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,folder_name)
 
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 
-
-QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = ['5']
-
 MODEL = 'resnet18' #'resnet18', 'custom_cnn'
+input_size = 224
+LOAD_FROM_CHECKPOINT = False
+#MODEL_LOAD_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
+#CHECKPOINT_PATH = os.path.join(MODEL_LOAD_PATH, "checkpoints")
+checkpoint_to_load='v_11/best-epoch=00-val_loss=0.81.ckpt'#best.ckpt , None last.ckpt
+
 unique_name = "test"
 EXPERIMENT_NAME = f"{unique_name}_{MODEL}_{folder_name}"
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_extracted_features")
-MODEL_LOAD_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
-CHECKPOINT_PATH = os.path.join(MODEL_LOAD_PATH, "checkpoints")
-checkpoint_to_load='v_11/best-epoch=00-val_loss=0.81.ckpt'#best.ckpt , None last.ckpt
 DEBUG_IMGS = True
 GET_STATISTICS = False
 SEED=42
-MODEL_MODALITY = 'feature_ext' # 'full', 'feature_ext', 'partial_unfr' 
-CLASSIFICATION_HEAD = 'mlp' # 'linear', 'mlp', 'regularized_linear'
+
 
 def prepare_handedness_dataset(shard_pattern, decode_approach='pil', load_in_memory=False, 
                                split_workers=True, batch_size=4, transform=None):
@@ -132,44 +133,6 @@ def get_args():
     parser.add_argument("--batches_to_test", type=int, default=50, help="Number of batches to process for benchmark")
     return parser.parse_args()
 
-
-def model_selection(model,classification_head,model_modality,num_classes=2):
-    if model in ['resnet18']:
-        # 1. Load the pre-trained model
-        model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-
-        # 2. Modify the final layer first
-        num_features = model.fc.in_features
-        if classification_head == 'linear':
-            model.fc = nn.Linear(num_features, num_classes)
-        elif classification_head == 'regularized_linear':
-            model.fc = nn.Sequential(
-                nn.BatchNorm1d(num_features),    # Normalize the activations from the previous layer
-                nn.Dropout(p=0.5),               # Randomly zero out 50% of the neurons to prevent overfitting
-                nn.Linear(num_features, num_classes) # Final classification layer
-            )
-        elif classification_head == 'mlp':
-            model.fc = CustomMLP(input_size=num_features, hidden_sizes=[16], output_size=num_classes, 
-                                 activation='relu', dropout=0.5, batchnorm=True, with_input_norm='batch_norm')
-
-        # Determine layers to unfreeze based on modality
-        if model_modality == 'feature_ext':
-            list_layers = ['fc']
-        elif model_modality == 'partial_unfr':
-            list_layers = ['layer4', 'fc']
-        else:
-            list_layers = None  # Flag to indicate EVERYTHING should be trainable
-
-        # 3. Dynamic Selective Freezing Loop
-        for name, param in model.named_parameters():
-            # If list_layers is None, the 'or' statement short-circuits and sets True for all parameters
-            if list_layers is None or any(layer in name for layer in list_layers):
-                param.requires_grad = True
-            else:
-                param.requires_grad = False
-    elif model == 'custom_cnn':
-        model = CustomBinaryCNN()
-
 def prepare_dataloaders(decode_approach='pil',load_in_memory=False, split_workers=True, batch_size=4, transform = None, prefetch_factor=2, worker=8):
     data_loaders = {'train': None, 'val': None, 'test': None}
     datasets = {'train': None, 'val': None, 'test': None}
@@ -248,10 +211,6 @@ def run_inference_to_dataframe(model, dataloader, device):
         'true_label': final_targets.numpy(),
         'model_output': final_results.numpy().tolist() 
     })
-    
-    # Optional: If this is classification, you probably want the argmax prediction as its own column
-    if final_results.ndim > 1 and final_results.shape[1] > 1:
-        df['predicted_label'] = final_results.argmax(dim=1).numpy()
 
     return df
 
@@ -265,7 +224,6 @@ def main():
     load_in_memory = False
     split_workers = True
     transform = None
-    num_classes=2
 
     # Automatically use GPU if available
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -277,41 +235,30 @@ def main():
         print(f"Active GPU: {gpu}")
         print(f"CUDA_VISIBLE_DEVICES: {visible}")
 
-    #define a transform that normalize to the imagenet mean and std
-    transform = T.Compose([
-        #T.Resize((224, 224)),  # ResNet18 expects 224x224 input; in this case data ia already resized
-        T.ToTensor(),
-        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # ImageNet normalization
-    ])
-
     print(f"Reading from {SHARD_PATTERN_train} and {SHARD_PATTERN_val} with decode approach '{decode_approach}' and load_in_memory={load_in_memory}")
     
-    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model,transform = get_model(name=MODEL, pretrained=True)
+
     data_loaders,datasets = prepare_dataloaders(decode_approach=decode_approach, load_in_memory=load_in_memory, split_workers=split_workers, 
                         batch_size=batch_size, transform=transform, prefetch_factor=prefetch_factor, worker=worker)
     if DEBUG_IMGS:
         # Iterate through the first few items to see what labels are coming out
-        for i, (img, label, key) in enumerate(datasets['train']):
+        for i, (img, label, key, *_) in enumerate(datasets['train']):
             print(f"Sample {i}: Label {label}, Key {key}")
             if i > 10: break
         mean=[0.485, 0.456, 0.406]
         std=[0.229, 0.224, 0.225]
         debug_images_dataset(datasets['train'], output_path="data/anteprima_dataset.png", num_immagini=16, mean=None, std=None)
     
-    #raise Exception("Debugging: Stopping after dataset preparation and image debugging. Check 'anteprima_dataset.png' for a visual preview of the data and verify labels in the console output.")
+    #raise Exception("Debugging: Stopping after dataset preparation and image debugging. onsole output.")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model_selection(MODEL,CLASSIFICATION_HEAD,MODEL_MODALITY,num_classes=num_classes)
+    if LOAD_FROM_CHECKPOINT:
+        # if you want you can set anothr kind of logger (not tensorboard but csv ..)
+        ckpt_path=os.path.join(checkpoint_to_load) 
+        load_backbone_from_lightning_ckpt(model, ckpt_path)
+    
     model.to(device)
-    # if you want you can set anothr kind of logger (not tensorboard but csv ..)
-    ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
-    # 3. Load the checkpoint file (weights are skipped, only reading metadata)
-    checkpoint = torch.load(ckpt_path, map_location=device, weigthts_only=True)
-    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['state_dict'])
-    else:
-        # If it's just the raw weights
-        model.load_state_dict(checkpoint)
     model.eval()  # Set the model to evaluation mode
     
     splits = ['train', 'val']
@@ -319,12 +266,14 @@ def main():
     for split in splits:
         print(f"Extracting representations for {split} set...")
         dataloader = data_loaders[split]
-        df = run_inference_to_dataframe(dataloader, device, model)
+        df = run_inference_to_dataframe(model,dataloader, device)
         df['split'] = split
         dataframes.append(df.copy())
         del df
     final_df = pd.concat(dataframes, ignore_index=True)
 
+    if not os.path.exists(OUTPUT_PATH):
+        os.makedirs(OUTPUT_PATH)
     final_df.to_parquet(os.path.join(OUTPUT_PATH,f"{EXPERIMENT_NAME}_results.parquet"))
 
     #merge with the original csv data

@@ -2,8 +2,9 @@
 GPU available: True (cuda), used: True
 TPU available: False, using: 0 TPU cores
 💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/lightning/pytorch/callbacks/model_checkpoint.py:881: Checkpoint directory /mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet18_model_results/checkpoints/v_17 exists and is not empty.
 LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
 SLURM auto-requeueing enabled. Setting signal handlers.
 /home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/lightning/pytorch/utilities/data.py:79: Trying to infer the `batch_size` from an ambiguous collection. The batch size we found is 16. To avoid any miscalculations, use `self.log(..., batch_size=batch_size)`.
-Metric val_loss improved. New best score: 0.748
-Monitored metric val_loss did not improve in the last 5 records. Best score: 0.748. Signaling Trainer to stop.
+Metric val_loss improved. New best score: 0.695
+Monitored metric val_loss did not improve in the last 50 records. Best score: 0.695. Signaling Trainer to stop.

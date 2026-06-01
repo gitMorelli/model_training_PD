@@ -7,16 +7,50 @@ B6S9B6X9.json (23 bytes)
   - B6S9B6X9.q10.hand.png (1905 bytes)
   ....
 
-Modalities:
+Note su preparazione degli shard
+(per HANDEDNESS) Le immagini con num_modality<1 sono rimosse durante la preparazione degli shards 
+(per PD) Salvo quanti chunks ci sono in un immagine nel json per ogni questionario e modalità, ma lascio anche le immagini vuote
+
+Nomenclatura ->
+Data modalities:
 x
 hand
 number_random
 
-I test sul modello resnet18
-Ho capito il modo corretto per bilanciare i dati il pomeriggio del 27/05 -> dati prima e dopo non sono comparabili
-(nei dati prima facevo rebalancing on-the-fly)
-
+######################
+Data loading information:
 keys when you read shards in webdataset -> q5.number_random.png
 
+Struttura del json per dataset PD ->
+"subject": subject_id, XXXX_YY (id_matchgroup)
+"label": label, (0 or 1 , PD label)
+"at_least_warning": at_least_warning, (0 or 1, 1 means the control was selected with fallback)
+"questionnaire_info": questionnaire_info,
+X : Y, 
+
+Ognuna di queste variabili ['etudegp', 'profq2', 'lateralite', 'relative_age', 'birth_date', 'follow_up_time'] è aggiunta 
+come X:y mantenendo lo stesso nome
+Struttura di questionnaire_info ->
+1: 'to_rescale':x, 'rescale_factor':(rescalex,rescaley),'case_dt_dateq': -dt
+2:
+...
+13:
+with x=0/1 telling if te image was rescaled
+with rescalex and rescaley being the rescaling factors applied (1,1) if no rescaling
+case_dt_dateq how many year (float) before the censoring for the case the questionnaire n for the case was filled 
+#############################
 
 
+Informazioni su addestramento modelli:
+- I test sul modello resnet18 per handedness -> Ho capito il modo corretto per bilanciare i dati il pomeriggio del 27/05 -> dati prima e dopo non sono comparabili
+(nei dati prima facevo rebalancing on-the-fly)
+ 
+Altre informazioni
+q1 and q1_v2 templates have the same size for each page
+q8 and q8_v2 differ in the first two pages
+Q8
+Page: 1 | Expected Dimension: (1664, 2365)
+Page: 2 | Expected Dimension: (1664, 2363)
+q8_v2
+Page: 1 | Expected Dimension: (1664, 1624)
+Page: 2 | Expected Dimension: (1664, 1658)
