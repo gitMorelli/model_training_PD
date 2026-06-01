@@ -53,7 +53,7 @@ input_size = 224
 TEST = 'all_Qs_balanced' #'balanced_loss', 'balanced_data', 'balanced_data_and_loss'
 EXPERIMENT_NAME = f"{MODEL}_{data_folder}"
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
-TRAIN = True  # Set to False to skip training and only run validation evaluation
+TRAIN = False  # Set to False to skip training and only run validation evaluation
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
 checkpoint_to_load='v_17/best-epoch=03-val_loss=0.69.ckpt'#best.ckpt , None last.ckpt
 DEBUG_IMGS = True

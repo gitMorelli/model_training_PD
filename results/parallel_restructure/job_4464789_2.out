@@ -1,0 +1,5 @@
+Starting array task 2 on n20 with 32 CPUs
+--- Slurm Task 2/3 ---
+Total dataset size: 26788
+Assigned to this node: 6697 subjects (indices 13394 to 20090)
+Using 32 local CPUs/Workers

@@ -1,0 +1,5 @@
+Starting array task 0 on n23 with 32 CPUs
+--- Slurm Task 0/3 ---
+Total dataset size: 26788
+Assigned to this node: 6697 subjects (indices 0 to 6696)
+Using 32 local CPUs/Workers
