@@ -10,6 +10,8 @@ import numpy as np
 import cv2
 import re
 
+from src.utils.file_utils import get_id_data_from_h5_file
+
 def test_read_json(tar_path="/mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A0C5I2D5.tar"):
 
     scale_tolerance = 0.1 
@@ -126,11 +128,147 @@ def get_page_dimensions(json_data, target_page_number):
     return None
 
 
+def get_h5_data():
+    id = "A0C5I2D5"
+    h5_path = "/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5"
+    id_data = get_id_data_from_h5_file(h5_path, id)
+    print(f"Data for ID {id}:")
+    for q_name, classes in id_data.items():
+        print(f"  Questionnaire: {q_name}")
+        for class_key, (scalar_val, array_val) in classes.items():
+            print(f"    Class: {class_key} | Scalar Value: {scalar_val} | Array Shape: {array_val.shape}")
+    #save an example image for a specific questionnaire and modality
+    array_val = id_data['q6']['number'][1] #get the array value for q6 number class
+    num_tiles = id_data['q6']['number'][0]
+    img = save_class_image('q6','number','/home/a_morelli/vscode_projects/model_training/data',array_val,id)
+    coords = get_tiles(img,array_val,num_tiles)
+    img_processed = recolor_border_via_profiles(img, coords)
+    print(f"Image size is {img.shape} and number of tiles is {num_tiles}")
+    #save the processed image
+    save_image_path = os.path.join('/home/a_morelli/vscode_projects/model_training/data', f"{id}_q6_number_processed.png")
+    cv2.imwrite(save_image_path, img_processed)
+
+def save_class_image(q_name, class_key, subfolder,array_val,id):
+    folder_path_id = os.path.join('/mnt/beegfs01/scratch/a_morelli/extraction/final/data', f"id_{id}")
+    if not os.path.exists(folder_path_id+'.tar'):
+        print(f"Tar file not found for ID {id} at expected path: {folder_path_id+'.tar'}")
+        return
+
+    with tarfile.open(folder_path_id+'.tar', 'r') as tar:
+        #print the filenames in the tar to check the structure
+        '''for member in tar.getmembers():
+            print(member.name)'''
+        image_path_in_tar = os.path.join(f"id_{id}", f"{q_name}",f"{class_key}.png")
+        if image_path_in_tar in tar.getnames():
+            image_file = tar.extractfile(image_path_in_tar)
+            if image_file is not None:
+                image_data = image_file.read()
+                img = Image.open(io.BytesIO(image_data)).convert("RGB")
+                img_cv2 = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+                #draw the coordinates on the image
+                img_with_coords = draw_coordinates_on_image(img_cv2, array_val)
+                #save the image
+                save_image_path = os.path.join(subfolder, f"{id}_{q_name}_{class_key}_with_coords.png")
+                cv2.imwrite(save_image_path, img_with_coords)
+            else:
+                print(f"Could not extract {image_path_in_tar} from tar archive {folder_path_id+'.tar'}")
+        else:
+            print(f"Image {image_path_in_tar} not found in tar archive {folder_path_id+'.tar'}")
+    return img_cv2
+
+def draw_coordinates_on_image(image, coords, color=(0, 255, 0), thickness=1):
+    """
+    Draws vertical and horizontal lines based on a (2, N) array.
+    
+    Args:
+        image (np.ndarray): The input image.
+        coords (np.ndarray): Array of shape (2, N). 
+                             coords[0, :] contains x-coordinates.
+                             coords[1, :] contains y-coordinates.
+        color (tuple): BGR color of the lines.
+        thickness (int): Thickness of the lines.
+    """
+    # Create a copy to avoid modifying the original image array
+    output_img = image.copy()
+    h, w = output_img.shape[:2]
+    
+    # Iterate through the N columns
+    num_points = coords.shape[1]
+    
+    for i in range(num_points):
+        # 1. Draw Vertical Line at x = coords[0, i]
+        x = int(coords[0, i])
+        # Line from (x, 0) to (x, height)
+        cv2.line(output_img, (x, 0), (x, h), color, thickness)
+        
+        # 2. Draw Horizontal Line at y = coords[1, i]
+        y = int(coords[1, i])
+        # Line from (0, y) to (width, y)
+        cv2.line(output_img, (0, y), (w, y), color, thickness)
+        
+    return output_img
 
 
+def get_tiles(image,coords,num_tiles):
+    # Create a copy to avoid modifying the original image array
+    h, w = image.shape[:2]
+    #identify all the tiles defined by the coordinates
+    #build the list of UL coordinates
+    new_coords = []
+    x_coords = [0]+sorted(list(coords[0, :]))+[w]
+    y_coords = [0]+sorted(list(coords[1, :]))+[h]
+    size = len(x_coords)-1
+    processed_tiles=0
+    for i in range(size):
+        for j in range(size):
+            processed_tiles+=1
+            if processed_tiles<=num_tiles:
+                new_coords.append([(int(x_coords[j]), int(y_coords[i]),int(x_coords[j+1]), int(y_coords[i+1])),processed_tiles])
+            else:
+                new_coords.append([(int(x_coords[j]), int(y_coords[i]),int(x_coords[j+1]), int(y_coords[i+1])),-1]) #empty tiles
+    return new_coords
 
 
+def recolor_border_via_profiles(image, coords, black_tolerance=5):
+    img = image.copy()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    _, thresh = cv2.threshold(gray, black_tolerance, 255, cv2.THRESH_BINARY)
+
+    
+    for tile in coords:
+        x1, y1, x2, y2 = tile[0]
+        tile_num = tile[1]
+        tile_img = thresh[y1:y2, x1:x2]
+        # Compute the sum of pixel values along rows and columns
+        x_profile = np.sum(tile_img, axis=0)
+        y_profile = np.sum(tile_img, axis=1)
+
+        # 4. Find the indices where the profiles are greater than 0
+        # This means there is at least one non-black pixel in that row/column
+        x_content_indices = np.where(x_profile > 0)[0]
+        y_content_indices = np.where(y_profile > 0)[0]
+
+        # Handle the edge case where the image is entirely black
+        if len(x_content_indices) == 0 or len(y_content_indices) == 0 or tile_num==-1:
+            #set the tile to white
+            image[y1:y2, x1:x2] = 255
+        
+        # 5. Identify the bounding box coordinates
+        # The first and last indices represent the edges of the core content
+        x_min, x_max = x_content_indices[0], x_content_indices[-1]
+        y_min, y_max = y_content_indices[0], y_content_indices[-1]
+
+        # 7. Create a white background of the original image size
+        white_background = np.full_like(img[y1:y2,x1:x2], 255)
+
+        # 8. Paste the core image into the exact same position on the white canvas
+        white_background[y_min:y_max+1, x_min:x_max+1] = img[y1+y_min:y1+y_max+1, x1+x_min:x1+x_max+1].copy()
+
+        image[y1:y2, x1:x2] = white_background.copy()
+    return image
 
 if __name__ == "__main__":
-    test_read_json()
+    get_h5_data()
+    #test_read_json()
     #test_read_templates()

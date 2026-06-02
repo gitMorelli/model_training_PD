@@ -13,15 +13,16 @@ import concurrent.futures
 import numpy as np
 import cv2
 
-from src.utils.image_processing import convert_background_to_white
+from src.utils.image_processing import convert_background_to_white, get_tiles, recolor_border_via_profiles
+from src.utils.file_utils import get_id_data_from_h5_file
 
 # from src.utils.file_utils import recreate_dir 
 # NOTE: Avoid clearing directories programmatically in a distributed environment 
 # to prevent race conditions. Clear the output directory manually before running the Slurm array.
 
 CONVERT_TO_JPG = False
-RESIZE = True
-PADDED = True
+RESIZE = False
+PADDED = False
 CONVERT_TO_WHITE = True
 SCALE_TOLERANCE = 0.1 # Tolerance for detecting if an image needs rescaling based on template dimensions
 
@@ -65,9 +66,6 @@ CODE_TO_RUN = "for_handedness" #for_PD or for_handedness or for_PD_test
 def preprocess_image(img_source,resize=False,padded=False, convert_bg_to_white=False):
     img = img_source.copy()
 
-    if len(img.shape) == 2:  # If it only has height and width (1 channel)
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-
     h, w, c = img.shape  # height, width, channels
 
     if padded:
@@ -81,8 +79,8 @@ def preprocess_image(img_source,resize=False,padded=False, convert_bg_to_white=F
         img = padded_img
     if resize:
         img = cv2.resize(img, (224, 224), interpolation=cv2.INTER_LANCZOS4)
-    if convert_bg_to_white:
-        img = convert_background_to_white(img)
+    '''if convert_bg_to_white:
+        img = convert_background_to_white(img)'''
     return img
 
 def process_chunk_PD_test(output_path,worker_id, id_chunk,data=None):
@@ -195,6 +193,8 @@ def process_chunk_handedness(output_path,worker_id, id_chunk,data=None):
                 print(f"[Worker {worker_id}] Processing {i+1}/{len(source_tars)}")
             
             subject_id = os.path.basename(tar_path).split('.')[0].split('_')[1]
+
+            id_data = get_id_data_from_h5_file(hd5_FILE_PATH, subject_id)
             
             with tarfile.open(tar_path, 'r') as old_tar:
                 members = old_tar.getmembers()
@@ -211,20 +211,17 @@ def process_chunk_handedness(output_path,worker_id, id_chunk,data=None):
                 
 
                 # 2. Build ONE single WDS sample dictionary for the subject
-                sample = {
-                    "__key__": subject_id,
-                    "json": json.dumps({
-                        "subject": subject_id, 
-                        "label": data[data['ident_projet'] == subject_id]['lateralite'].values[0],
-                    }).encode("utf-8")
-                }
+                sample = {}
+                tile_coords = {}
                 
                 # 3. Add images
                 for timestep, files in sequences.items():
                     files.sort(key=lambda x: x.name) 
+                    tile_coords[timestep] = {}
                     
                     for m in files:
-                        if os.path.basename(m.name) in ["hand.png", "number_random.png", "X.png"]: 
+                        base_name = os.path.basename(m.name).split('.')[0]
+                        if base_name in ["hand", "number_random", "X"]: 
                             clean_name = os.path.basename(m.name).split('.')[0]
 
                             if clean_name == "X":
@@ -239,6 +236,16 @@ def process_chunk_handedness(output_path,worker_id, id_chunk,data=None):
                             file_bytes = old_tar.extractfile(m).read()
                             np_arr = np.frombuffer(file_bytes, np.uint8)
                             img = cv2.imdecode(np_arr, cv2.IMREAD_UNCHANGED)
+                            if len(img.shape) == 2:  # If it only has height and width (1 channel)
+                                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+                            array_val = id_data[timestep][base_name][1] #get the array value for q6 number class
+                            num_tiles = id_data[timestep][base_name][0]
+                            coords = get_tiles(img,array_val,num_tiles) #returns a list of [(xtl, ytl, xbr, ybr),x] 
+                            #with x=tile number if tile contains a mark, -1 otherwise 
+                            tile_coords[timestep][clean_name] = coords[:]
+                            if CONVERT_TO_WHITE:
+                                img = recolor_border_via_profiles(img, coords)
                             
                             img = preprocess_image(img,RESIZE,PADDED, CONVERT_TO_WHITE)
                             
@@ -262,6 +269,13 @@ def process_chunk_handedness(output_path,worker_id, id_chunk,data=None):
                             
                             file_key = f"{timestep}.{clean_name}.{extension_out}"
                             sample[file_key] = file_bytes
+                
+                sample["__key__"] = subject_id,
+                sample["json"]= json.dumps({
+                        "subject": subject_id, 
+                        "label": data[data['ident_projet'] == subject_id]['lateralite'].values[0],
+                        "tile_coords": tile_coords,
+                    }).encode("utf-8")
                             
                 # 4. Write the massive subject sample to the shard
                 sink.write(sample)
@@ -309,6 +323,8 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
             
             tar_path, subject_id = tar_pair
             original_id = os.path.basename(tar_path).split('.')[0].split('_')[1]
+
+            sample = {}
             
             with tarfile.open(tar_path, 'r') as old_tar:
                 members = old_tar.getmembers()
@@ -423,10 +439,8 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                 for var in variables_to_add:
                     inner_data[var] = id_row[var]
                 # 4. Serialize and encode exactly once
-                sample = {
-                    "__key__": subject_id,
-                    "json": json.dumps(inner_data).encode("utf-8")
-                }    
+                sample["__key__"]=subject_id,
+                sample["json"] = json.dumps(inner_data).encode("utf-8")
                 # 4. Write the massive subject sample to the shard
                 sink.write(sample)
 

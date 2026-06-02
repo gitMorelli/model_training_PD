@@ -15,23 +15,23 @@ lateralite
 Name: count, dtype: int64
 Number of samples per class: Class 0 = 248234, Class 1 = 48893; Total = 297127
 199341 samples will be excluded from the training set to achieve balancing.
-Current experiment version: 17
+Current experiment version: 3
 --- GPU DIAGNOSTICS ---
 Active GPU: Tesla P40
 CUDA_VISIBLE_DEVICES: 0
 Reading from /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_png_resized_padded/train/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_png_resized_padded/val/worker*_shard-*.tar with decode approach 'pil' and load_in_memory=False
-Sample 0: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]), ID ['K6N6K1G2', 'A9K3N0C1', 'A9K3N0C1', 'A9K3N0C1', 'E2A4X8D1', 'E2A4X8D1', 'E2A4X8D1', 'A0A4W8V0', 'A0A4W8V0', 'F5P8D8J1', 'A9W3A4G7', 'A9W3A4G7', 'A9W3A4G7', 'A9W3A4G7', 'A9W3A4G7', 'A9W3A4G7'], Q ['q11', 'q1', 'q6', 'q7', 'q3', 'q5', 'q9', 'q2', 'q7', 'q4', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 1: Label tensor([1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1]), ID ['A9W3A4G7', 'A9W3A4G7', 'A9W3A4G7', 'A9W3A4G7', 'A9W3A4G7', 'A9W3A4G7', 'A0G2R8R3', 'A0G2R8R3', 'A0G2R8R3', 'F4J9D8X3', 'F4J9D8X3', 'F4J9D8X3', 'F4J9D8X3', 'F4J9D8X3', 'F4J9D8X3', 'F4J9D8X3'], Q ['q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q2', 'q3', 'q6', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 2: Label tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['F4J9D8X3', 'F4J9D8X3', 'F4J9D8X3', 'F4J9D8X3', 'F4J9D8X3', 'A8G7B8Y5', 'A8G7B8Y5', 'C3W4Q5U4', 'D4K0M4D3', 'D4K0M4D3', 'D4K0M4D3', 'G6G8W8V6', 'G6G8W8V6', 'G6G8W8V6', 'G6G8W8V6', 'B3U2I2I3'], Q ['q4', 'q6', 'q7', 'q8', 'q9', 'q5', 'q8', 'q13', 'q2', 'q4', 'q6', 'q11', 'q13', 'q5', 'q7', 'q12'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 3: Label tensor([0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0]), ID ['D6X6U4K3', 'D6X6U4K3', 'B0G6W6U2', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'A4N9V9V5', 'C1N1V2N8'], Q ['q5', 'q9', 'q13', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q2'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 4: Label tensor([0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), ID ['C1N1V2N8', 'C1N1V2N8', 'C5T9W7Q6', 'C5A6F4S9', 'C5A6F4S9', 'C5A6F4S9', 'D4Y9U2U9', 'D4Y9U2U9', 'D4Y9U2U9', 'D4Y9U2U9', 'D4Y9U2U9', 'D4Y9U2U9', 'D4Y9U2U9', 'D4Y9U2U9', 'D4Y9U2U9', 'D4Y9U2U9'], Q ['q6', 'q7', 'q3', 'q13', 'q4', 'q5', 'q1', 'q10', 'q11', 'q12', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 5: Label tensor([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['D4Y9U2U9', 'D4Y9U2U9', 'D3G2A0Z8', 'D3G2A0Z8', 'D3G2A0Z8', 'D3G2A0Z8', 'D5V0G9T5', 'D5V0G9T5', 'D5V0G9T5', 'D5V0G9T5', 'A0E6A8J2', 'A0E6A8J2', 'A0E6A8J2', 'G7R8O3F6', 'G7R8O3F6', 'G9J6F8H3'], Q ['q8', 'q9', 'q10', 'q2', 'q6', 'q9', 'q1', 'q11', 'q13', 'q4', 'q12', 'q2', 'q8', 'q2', 'q7', 'q11'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 6: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['G9J6F8H3', 'G9J6F8H3', 'G9J6F8H3', 'G9J6F8H3', 'A3I6N5Y8', 'A3I6N5Y8', 'A3I6N5Y8', 'A3I6N5Y8', 'A5A7R1Z8', 'A5A7R1Z8', 'A5A7R1Z8', 'A5A7R1Z8', 'A5A7R1Z8', 'B3I7X0G2', 'B3I7X0G2', 'B3I7X0G2'], Q ['q2', 'q4', 'q5', 'q6', 'q10', 'q13', 'q5', 'q8', 'q1', 'q12', 'q6', 'q8', 'q9', 'q4', 'q6', 'q9'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 7: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]), ID ['F7H8A9K0', 'F8A6H8H2', 'F8A6H8H2', 'D7Q6N2Q0', 'B4S4U7I7', 'B4S4U7I7', 'B4S4U7I7', 'B4S4U7I7', 'B4S4U7I7', 'D8N7C6F0', 'D8N7C6F0', 'D8N7C6F0', 'D8N7C6F0', 'D8N7C6F0', 'D8N7C6F0', 'C4S2S0H2'], Q ['q11', 'q11', 'q12', 'q11', 'q1', 'q13', 'q6', 'q8', 'q9', 'q1', 'q10', 'q2', 'q4', 'q6', 'q7', 'q10'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 8: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]), ID ['C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'C4S2S0H2', 'A0R9W8D8', 'A0R9W8D8', 'A0R9W8D8', 'F6N5O0U2', 'G0Q2S8G9'], Q ['q11', 'q12', 'q13', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q3', 'q9', 'q1', 'q2'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 9: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['D9O2O1P2', 'D9O2O1P2', 'D9O2O1P2', 'D9O2O1P2', 'B7I9V1G7', 'A8V9V0R2', 'A8V9V0R2', 'F3L3E0K5', 'F3L3E0K5', 'F3L3E0K5', 'C7L9W9V5', 'E2P0Q1I1', 'A4U6Y7K7', 'A4U6Y7K7', 'A4U6Y7K7', 'E0C5U9Q7'], Q ['q2', 'q3', 'q5', 'q9', 'q10', 'q2', 'q5', 'q6', 'q7', 'q8', 'q10', 'q8', 'q12', 'q6', 'q7', 'q10'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 10: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['E0C5U9Q7', 'E0C5U9Q7', 'E0C5U9Q7', 'E0C5U9Q7', 'G6F4Z8C3', 'G6F4Z8C3', 'F5U5Q1W9', 'F5U5Q1W9', 'D6G3V0V8', 'D6G3V0V8', 'D6G3V0V8', 'I3J2X5Q1', 'I3J2X5Q1', 'I3J2X5Q1', 'A9T3G8J1', 'A9T3G8J1'], Q ['q11', 'q6', 'q7', 'q9', 'q3', 'q6', 'q12', 'q8', 'q1', 'q12', 'q7', 'q11', 'q3', 'q4', 'q2', 'q4'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 11: Label tensor([0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]), ID ['A9T3G8J1', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'A7A4D0E2', 'D8W8O8S5', 'D8W8O8S5', 'D8W8O8S5'], Q ['q9', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3', 'q5', 'q6', 'q7', 'q8', 'q9', 'q1', 'q10', 'q11'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 0: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]), ID ['D0P0V4E4', 'A2I7B7V7', 'A2I7B7V7', 'A2I7B7V7', 'C8P1X9Z7', 'C8P1X9Z7', 'C8P1X9Z7', 'E3Z2Y1M3', 'E3Z2Y1M3', 'E3Z2Y1M3', 'E7E0L6F2', 'E7E0L6F2', 'B9O0Y9W7', 'B9O0Y9W7', 'A4G4N6I5', 'A4G4N6I5'], Q ['q2', 'q10', 'q6', 'q8', 'q12', 'q13', 'q3', 'q13', 'q6', 'q7', 'q13', 'q7', 'q4', 'q9', 'q1', 'q10'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 1: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), ID ['A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7'], Q ['q11', 'q12', 'q13', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 2: Label tensor([1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1]), ID ['F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'A0R6J8J7', 'A0R6J8J7', 'A0R6J8J7', 'A0R6J8J7', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1'], Q ['q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q11', 'q13', 'q3', 'q6', 'q1', 'q10', 'q11', 'q12', 'q13'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 3: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'A8W4A3V3', 'A8W4A3V3', 'A8W4A3V3', 'A7I2Y0M2', 'D7J9N2Q4', 'D7J9N2Q4', 'F6N1D5M0', 'F6N1D5M0'], Q ['q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q12', 'q3', 'q13', 'q12', 'q7', 'q2', 'q6'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 4: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1]), ID ['F6N1D5M0', 'B5U7Z1J3', 'F5J3D7Y5', 'F5J3D7Y5', 'F5J3D7Y5', 'B4B9B6R3', 'B4B9B6R3', 'B4B9B6R3', 'B4B9B6R3', 'B4B9B6R3', 'F3I7X2B1', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5'], Q ['q8', 'q3', 'q10', 'q12', 'q13', 'q10', 'q11', 'q12', 'q5', 'q7', 'q3', 'q1', 'q10', 'q11', 'q12', 'q13'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 5: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'C4L7M3G2', 'C4L7M3G2', 'B2G1D3E2', 'B2G1D3E2', 'D2G5B2W6', 'D2G5B2W6', 'A6C4U0M8', 'A6C4U0M8'], Q ['q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q8', 'q9', 'q4', 'q8', 'q1', 'q12', 'q1', 'q2'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 6: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['A6C4U0M8', 'A6C4U0M8', 'E0T9S8Z2', 'E0T9S8Z2', 'E3I1C5F6', 'E3I1C5F6', 'E3I1C5F6', 'B8J8S8Z5', 'B8J8S8Z5', 'B8J8S8Z5', 'B8J8S8Z5', 'D2K0M3H9', 'D2K0M3H9', 'D2K0M3H9', 'D2K0M3H9', 'D2K0M3H9'], Q ['q4', 'q8', 'q1', 'q6', 'q13', 'q3', 'q5', 'q12', 'q4', 'q6', 'q9', 'q10', 'q12', 'q2', 'q4', 'q6'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 7: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['B4B8V7X3', 'B4B8V7X3', 'B4B8V7X3', 'I9B0Y8P6', 'I9B0Y8P6', 'I9B0Y8P6', 'I9B0Y8P6', 'I9B0Y8P6', 'F9V1D9O6', 'F9V1D9O6', 'B2I6B9M9', 'B2I6B9M9', 'B2I6B9M9', 'B2I6B9M9', 'B2I6B9M9', 'B9A9C5M1'], Q ['q4', 'q6', 'q7', 'q13', 'q3', 'q5', 'q7', 'q9', 'q1', 'q7', 'q1', 'q5', 'q6', 'q8', 'q9', 'q11'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 8: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1]), ID ['B9A9C5M1', 'B9A9C5M1', 'B0R1R6N0', 'B6Z1L1J9', 'F6R3P0X7', 'F6R3P0X7', 'F6R3P0X7', 'F6R3P0X7', 'A2J8F7T4', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6'], Q ['q13', 'q9', 'q6', 'q12', 'q12', 'q13', 'q3', 'q8', 'q11', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 9: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), ID ['A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7'], Q ['q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3', 'q4', 'q5', 'q6'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 10: Label tensor([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'A6D1A8V5', 'F3R2V4I4', 'C9T5V3G5', 'C9T5V3G5', 'C9T5V3G5', 'B3Y0L9H0', 'B3Y0L9H0', 'B3Y0L9H0', 'B3Y0L9H0', 'B3Y0L9H0', 'A9I1H4K8', 'A9I1H4K8', 'A9I1H4K8'], Q ['q7', 'q8', 'q9', 'q7', 'q10', 'q1', 'q11', 'q2', 'q1', 'q2', 'q5', 'q7', 'q8', 'q1', 'q13', 'q3'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
+Sample 11: Label tensor([0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0]), ID ['A9I1H4K8', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'B2K2O3K8', 'B2K2O3K8'], Q ['q6', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q1', 'q4'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
 Class distribution in val set (after filtering for modality digit):
 lateralite
 0.0    27342
@@ -44,144 +44,54 @@ Anteprima salvata con successo in: data/anteprima_dataset.png
 ┏━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┓
 ┃   ┃ Name      ┃ Type       ┃ Params ┃ Mode  ┃ FLOPs ┃   In sizes ┃ Out sizes ┃
 ┡━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━┩
-│ 0 │ model     │ JoinedMod… │ 11.2 M │ train │ 3.6 B │     [1, 3, │    [1, 2] │
+│ 0 │ model     │ JoinedMod… │ 23.6 M │ train │ 8.2 B │     [1, 3, │    [1, 1] │
 │   │           │            │        │       │       │  224, 224] │           │
-│ 1 │ criterion │ CrossEntr… │      0 │ train │     0 │          ? │         ? │
+│ 1 │ criterion │ BCEWithLo… │      0 │ train │     0 │          ? │         ? │
 └───┴───────────┴────────────┴────────┴───────┴───────┴────────────┴───────────┘
-Trainable params: 11.2 M                                                        
-Non-trainable params: 0                                                         
-Total params: 11.2 M                                                            
-Total estimated model params size (MB): 44                                      
-Modules in train mode: 76                                                       
+Trainable params: 69.7 K                                                        
+Non-trainable params: 23.5 M                                                    
+Total params: 23.6 M                                                            
+Total estimated model params size (MB): 94                                      
+Modules in train mode: 160                                                      
 Modules in eval mode: 0                                                         
-Total FLOPs: 3.6 B                                                              
+Total FLOPs: 8.2 B                                                              
 
-[Epoch 1] Total Trainable Parameters: 11,209,474
+[Epoch 1] Total Trainable Parameters: 69,697
 
-[Epoch 2] Total Trainable Parameters: 11,209,474
+[Epoch 2] Total Trainable Parameters: 69,697
 
-[Epoch 3] Total Trainable Parameters: 11,209,474
+[Epoch 3] Total Trainable Parameters: 69,697
 
-[Epoch 4] Total Trainable Parameters: 11,209,474
+[Epoch 4] Total Trainable Parameters: 69,697
 
-[Epoch 5] Total Trainable Parameters: 11,209,474
+[Epoch 5] Total Trainable Parameters: 69,697
 
-[Epoch 6] Total Trainable Parameters: 11,209,474
-
-[Epoch 7] Total Trainable Parameters: 11,209,474
-
-[Epoch 8] Total Trainable Parameters: 11,209,474
-
-[Epoch 9] Total Trainable Parameters: 11,209,474
-
-[Epoch 10] Total Trainable Parameters: 11,209,474
-
-[Epoch 11] Total Trainable Parameters: 11,209,474
-
-[Epoch 12] Total Trainable Parameters: 11,209,474
-
-[Epoch 13] Total Trainable Parameters: 11,209,474
-
-[Epoch 14] Total Trainable Parameters: 11,209,474
-
-[Epoch 15] Total Trainable Parameters: 11,209,474
-
-[Epoch 16] Total Trainable Parameters: 11,209,474
-
-[Epoch 17] Total Trainable Parameters: 11,209,474
-
-[Epoch 18] Total Trainable Parameters: 11,209,474
-
-[Epoch 19] Total Trainable Parameters: 11,209,474
-
-[Epoch 20] Total Trainable Parameters: 11,209,474
-
-[Epoch 21] Total Trainable Parameters: 11,209,474
-
-[Epoch 22] Total Trainable Parameters: 11,209,474
-
-[Epoch 23] Total Trainable Parameters: 11,209,474
-
-[Epoch 24] Total Trainable Parameters: 11,209,474
-
-[Epoch 25] Total Trainable Parameters: 11,209,474
-
-[Epoch 26] Total Trainable Parameters: 11,209,474
-
-[Epoch 27] Total Trainable Parameters: 11,209,474
-
-[Epoch 28] Total Trainable Parameters: 11,209,474
-
-[Epoch 29] Total Trainable Parameters: 11,209,474
-
-[Epoch 30] Total Trainable Parameters: 11,209,474
-
-[Epoch 31] Total Trainable Parameters: 11,209,474
-
-[Epoch 32] Total Trainable Parameters: 11,209,474
-
-[Epoch 33] Total Trainable Parameters: 11,209,474
-
-[Epoch 34] Total Trainable Parameters: 11,209,474
-
-[Epoch 35] Total Trainable Parameters: 11,209,474
-
-[Epoch 36] Total Trainable Parameters: 11,209,474
-
-[Epoch 37] Total Trainable Parameters: 11,209,474
-
-[Epoch 38] Total Trainable Parameters: 11,209,474
-
-[Epoch 39] Total Trainable Parameters: 11,209,474
-
-[Epoch 40] Total Trainable Parameters: 11,209,474
-
-[Epoch 41] Total Trainable Parameters: 11,209,474
-
-[Epoch 42] Total Trainable Parameters: 11,209,474
-
-[Epoch 43] Total Trainable Parameters: 11,209,474
-
-[Epoch 44] Total Trainable Parameters: 11,209,474
-
-[Epoch 45] Total Trainable Parameters: 11,209,474
-
-[Epoch 46] Total Trainable Parameters: 11,209,474
-
-[Epoch 47] Total Trainable Parameters: 11,209,474
-
-[Epoch 48] Total Trainable Parameters: 11,209,474
-
-[Epoch 49] Total Trainable Parameters: 11,209,474
-
-[Epoch 50] Total Trainable Parameters: 11,209,474
-
-[Epoch 51] Total Trainable Parameters: 11,209,474
-Epoch 50/99 ━━━━━━━━━━━━━━━━ 6103/-- 0:04:13 •       22.87it/s v_num: 17.000    
-                                     -:--:--                   train_loss_step: 
-                                                               0.002            
+[Epoch 6] Total Trainable Parameters: 69,697
+Epoch 5/29 ━━━━━━━━━━━━━━━━ 6104/-- 0:04:18 •        23.93it/s v_num: 3.000     
+                                    -:--:--                    train_loss_step: 
+                                                               0.811            
                                                                train_acc_step:  
-                                                               1.000 val_loss:  
-                                                               2.144 val_acc:   
-                                                               0.512            
+                                                               0.375 val_loss:  
+                                                               0.734 val_acc:   
+                                                               0.498            
                                                                train_loss_epoch:
-                                                               0.036            
+                                                               0.680            
                                                                train_acc_epoch: 
-                                                               0.988            
+                                                               0.549            
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4461888
+Job ID: 4482319
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
 Nodelist: gpu04
 Nodes: 1
 Cores per node: 20
-Job started at: 2026-06-01 12:27:25
-Job ended at:   2026-06-01 16:04:56
-Job Wall-clock time: 03:37:31
-CPU Utilized: 19:16:36
-CPU Efficiency: 26.59% of 3-00:30:20 core-walltime
-Memory Utilized: 5.05 GB
-Memory Efficiency: 15.80% of 32.00 GB
+Job started at: 2026-06-02 18:16:30
+Job ended at:   2026-06-02 18:46:10
+Job Wall-clock time: 00:29:40
+CPU Utilized: 02:21:24
+CPU Efficiency: 23.83% of 09:53:20 core-walltime
+Memory Utilized: 4.82 GB
+Memory Efficiency: 15.07% of 32.00 GB

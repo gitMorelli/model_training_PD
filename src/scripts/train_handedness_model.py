@@ -45,17 +45,24 @@ SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(q) for q in range(1,14)]
 
 #Model definition
-MODEL = 'resnet18' #'resnet18', 'custom_cnn'
-CLASSIFICATION_HEAD = 'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
-layers_to_unfreeze = ['all','classifier']#['layer4','classifier'] #Update it for every model
+MODEL = 'clip-vit-large-patch14-un' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+#clip-vit-large-patch14, clip-vit-large-patch14-inter
+huggingface_transform=True if MODEL in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
+CLASSIFICATION_HEAD = 'MLPClassifier1' #'MLPClassifier1'#'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
+PARAMS = {
+    'dropout': 0.2,
+    'hidden_sizes': [32],
+    'with_input_norm': 'batch_norm'
+}
+layers_to_unfreeze = ['classifier']#['layer4','classifier'] #Update it for every model
 input_size = 224
 
 TEST = 'all_Qs_balanced' #'balanced_loss', 'balanced_data', 'balanced_data_and_loss'
 EXPERIMENT_NAME = f"{MODEL}_{data_folder}"
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
-TRAIN = False  # Set to False to skip training and only run validation evaluation
+TRAIN = True  # Set to False to skip training and only run validation evaluation
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
-checkpoint_to_load='v_17/best-epoch=03-val_loss=0.69.ckpt'#best.ckpt , None last.ckpt
+checkpoint_to_load='v_1/best-epoch=01-val_loss=0.69.ckpt'#best.ckpt , None last.ckpt
 DEBUG_IMGS = True
 GET_STATISTICS = False
 SEED=42
@@ -155,7 +162,7 @@ def prepare_handedness_dataset(shard_pattern, decode_approach='pil',load_in_memo
     return dataset
 
 def prepare_handedness_dataset_all(shard_pattern, decode_approach='pil', load_in_memory=False, 
-                               split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X'):
+                               split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',huggingface_transform=False):
     if modality == 'X':
         modality_string = 'X'
     elif modality == 'text':
@@ -201,7 +208,11 @@ def prepare_handedness_dataset_all(shard_pattern, decode_approach='pil', load_in
                             try:
                                 # Apply transformations
                                 if transform_func is not None:
-                                    img_tensor = transform_func(value) 
+                                    if huggingface_transform:
+                                        inputs = transform_func(images=value, return_tensors="pt")
+                                        img_tensor = inputs['pixel_values'][0]
+                                    else:
+                                        img_tensor = transform_func(value) 
                                 elif isinstance(value, torch.Tensor):
                                     img_tensor = value
                                 else:
@@ -373,22 +384,28 @@ def debug_images_dataset(dataset, output_path="anteprima_dataset.png", num_immag
     print(f"Anteprima salvata con successo in: {output_path}")
 
 class LitModel(L.LightningModule):
-    def __init__(self, model,num_0, num_1, lr=1e-3,log_file=None):
+    def __init__(self, model,num_0, num_1,num_classes=2, lr_backbone=1e-4,
+                 lr_classifier_head=1e-3,log_file=None):
         super().__init__()
         self.save_hyperparameters()
-        if BALANCED_DATA:
-            self.num_1 = num_1
-            self.num_0 = num_1*BALANCING_FACTOR 
-        else:
-            self.num_1 = num_1
-            self.num_0 = num_0
+
+        self.num_1 = num_1
+        self.num_0 = num_1 * BALANCING_FACTOR if BALANCED_DATA else num_0
         self.total = self.num_0 + self.num_1
+
+        #cross entropy
         weight_0 = self.total / (2 * self.num_0)
         weight_1 = self.total / (2 * self.num_1)
+        # For BCE loss, the weight is applied to the positive class (Left-handed / Class 1)
+        # Formula: pos_weight = majority_class_count / minority_class_count
+        pos_weight_val = self.num_0 / self.num_1 if self.num_1 > 0 else 1.0
 
         # Array matching [weight_for_class_0, weight_for_class_1]
         class_weights = torch.tensor([weight_0, weight_1], dtype=torch.float32)
         self.register_buffer("class_weights", class_weights)
+        #BCE loss
+        pos_weight = torch.tensor([pos_weight_val], dtype=torch.float32)
+        self.register_buffer("pos_weight", pos_weight)
         '''
         Watch out for device mismatches: A common mistake is doing self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([weight])) without using register_buffer. 
         If you do that, the weight tensor stays on the CPU, and the moment your model moves to a GPU, your code will crash with a runtime device mismatch error. 
@@ -396,12 +413,21 @@ class LitModel(L.LightningModule):
         '''
 
         self.model = model
-        if USE_BALANCED_WEIGHTS:
-            self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
-        else:
-            self.criterion = nn.CrossEntropyLoss()
+
+        if num_classes == 2:
+            if USE_BALANCED_WEIGHTS:
+                self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
+            else:
+                self.criterion = nn.CrossEntropyLoss()
+        elif num_classes == 1:
+            if USE_BALANCED_WEIGHTS:
+                self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
+            else:
+                self.criterion = nn.BCEWithLogitsLoss()
         
-        self.lr = lr
+        self.num_classes = num_classes
+        self.lr_backbone = lr_backbone
+        self.lr_classifier_head = lr_classifier_head
         # Initialize attributes to store sample counts
         self.train_sample_count = 0
         self.log_file = log_file
@@ -418,15 +444,19 @@ class LitModel(L.LightningModule):
     def training_step(self, batch, batch_idx):
         inputs, labels, *_ = batch
 
+        if self.num_classes == 1:
+            labels = labels.float().unsqueeze(1)
         outputs = self(inputs)
 
         # Accumulate the number of samples in the current batch
         self.train_sample_count += inputs.size(0)
-
         loss = self.criterion(outputs, labels)
         
         # Calculate accuracy
-        _, preds = torch.max(outputs, 1)
+        if self.num_classes == 1:
+            preds = (outputs > 0.0).float()
+        else:
+            _, preds = torch.max(outputs, 1)
         acc = torch.sum(preds == labels.data).float() / inputs.size(0)
         
         # Log metrics (Lightning tracks epoch averages automatically)
@@ -436,10 +466,16 @@ class LitModel(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         inputs, labels, *_ = batch
+
+        if self.num_classes == 1:
+            labels = labels.float().unsqueeze(1)
         outputs = self(inputs)
         loss = self.criterion(outputs, labels)
         
-        _, preds = torch.max(outputs, 1)
+        if self.num_classes == 1:
+            preds = (outputs > 0.0).float()
+        else:
+            _, preds = torch.max(outputs, 1)
         acc = torch.sum(preds == labels.data).float() / inputs.size(0)
         
         # 'val_loss' must be logged so the callbacks can monitor it
@@ -482,23 +518,47 @@ class LitModel(L.LightningModule):
                     f.write(f"{layer_info}\n")
 
     def configure_optimizers(self):
-        trainable_parameters = filter(lambda p: p.requires_grad, self.model.parameters()) 
+        backbone_params = []
+        head_params = []
         
-        return torch.optim.Adam(trainable_parameters, lr=self.lr)
+        # Segregate parameters based on whether they belong to the classification head
+        for name, param in self.model.named_parameters():
+            if not param.requires_grad:
+                continue
+            
+            # Adjust the string matching here depending on how 'JoinedModels' names your layers.
+            # Usually, new heads are named 'classifier', 'fc', or 'head'.
+            if any(key in name.lower() for key in ['classifier']):
+                head_params.append(param)
+            else:
+                backbone_params.append(param)
+                
+        # Apply a 10x smaller learning rate to the backbone
+        optimizer = torch.optim.Adam([
+            {'params': backbone_params, 'lr': self.lr_backbone},
+            {'params': head_params, 'lr': self.lr_classifier_head}
+        ])
+        
+        return optimizer
 
     def predict_step(self, batch, batch_idx):
-        inputs, labels, *_ = batch
+        inputs, labels, subject_id,*_ = batch
         outputs = self(inputs)
-        _, preds = torch.max(outputs, 1)
 
-        # Convert logits to probabilities for both classes
-        probs = torch.softmax(outputs, dim=1)
+        if self.num_classes == 1:
+            preds = (outputs > 0.0).float()
+            probs = torch.sigmoid(outputs)  # Get probabilities for the positive class
+        else:
+            _, preds = torch.max(outputs, 1)
+            # Convert logits to probabilities for both classes
+            probs = torch.softmax(outputs, dim=1)
         
         # Detach and move to CPU to avoid hoarding GPU memory
         return {
             "probs": probs.detach().cpu(),
             "preds": preds.detach().cpu(), 
-            "labels": labels.detach().cpu()
+            "labels": labels.detach().cpu(),
+            "subject_id": subject_id  # Assuming subject_id is already a CPU tensor or a list of strings
         }
 
 class BestMetricTracker(L.Callback):
@@ -584,10 +644,11 @@ def main():
     load_in_memory = False
     split_workers = True
     transform = None
-    lr=1e-4
-    num_classes=2
-    num_epochs = 100
-    patience = 50
+    lr_backbone=1e-4
+    lr_classifier_head=1e-3 
+    num_classes=1 #1 for BCE loss, 2 for crossentropy
+    num_epochs = 30
+    patience = 5
     exclusion_set = set() # you can add here the ids you want to exclude from the dataset (for example because they are corrupted or for debugging purposes)
 
     csv_data = pd.read_csv(LIST_OF_IDS_HANDEDNESS_PATH)
@@ -646,7 +707,7 @@ def main():
     backbone,transform = get_model(name=MODEL, pretrained=True)
     out=test_output(input_size, backbone)
     in_features = out.shape[1]
-    classificaton_head = get_classification_head(name=CLASSIFICATION_HEAD,in_features=in_features,num_classes=num_classes)
+    classificaton_head = get_classification_head(name=CLASSIFICATION_HEAD,in_features=in_features,num_classes=num_classes,**PARAMS)
     model = JoinedModels(backbone, classificaton_head)
     unfreeze_layers(model,layer_names=layers_to_unfreeze)
 
@@ -655,7 +716,8 @@ def main():
         if 'all' in EXPERIMENT_NAME:
             train_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
                                                     split_workers=split_workers, batch_size=batch_size, 
-                                                    transform=transform, modality=DATA_MODALITY, exclusion_set=exclusion_set)
+                                                    transform=transform, modality=DATA_MODALITY, exclusion_set=exclusion_set, 
+                                                    huggingface_transform=huggingface_transform)
         else:
             train_dataset = prepare_handedness_dataset(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
                                                     split_workers=split_workers, batch_size=batch_size, 
@@ -672,7 +734,8 @@ def main():
     if 'all' in EXPERIMENT_NAME:
         val_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
                                                      split_workers=split_workers, batch_size=batch_size,
-                                                     transform=transform, modality=DATA_MODALITY, exclusion_set=val_exclusion_set)
+                                                     transform=transform, modality=DATA_MODALITY, exclusion_set=val_exclusion_set, 
+                                                     huggingface_transform=huggingface_transform)
     else:
         val_dataset = prepare_handedness_dataset(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
                                                     split_workers=split_workers, batch_size=batch_size, 
@@ -705,7 +768,7 @@ def main():
     log_folder = os.path.join(OUTPUT_PATH,"custom_logs")
     if not os.path.exists(log_folder):
         os.makedirs(log_folder)
-    lit_model = LitModel(model=model, num_0=num_0, num_1=num_1, lr=lr, 
+    lit_model = LitModel(model=model, num_0=num_0, num_1=num_1, num_classes=num_classes,lr_backbone=lr_backbone, lr_classifier_head=lr_classifier_head,
                          log_file=os.path.join(log_folder,f"version_{current_version}_training_log.txt"))
 
 
@@ -787,7 +850,7 @@ def main():
             "RATE": rate,
             "BALANCING_FACTOR": BALANCING_FACTOR,
             "batch_size": batch_size,
-            "lr": lr,
+            "lr": [lr_backbone,lr_classifier_head],
             "num_epochs": num_epochs,
             "patience": patience,
             "current_version": current_version,

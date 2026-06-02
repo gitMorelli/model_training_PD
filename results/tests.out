@@ -1,147 +1,123 @@
-Processing questionanire:  1
-Page: 1 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 2 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 3 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 4 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Processing questionanire:  10
-Page: 1 | Expected Dimension: [2496, 3514] | Extracted Dimension: [2480, 3507]
-Page: 2 | Expected Dimension: [2500, 3516] | Extracted Dimension: [2480, 3507]
-Page: 3 | Expected Dimension: [2492, 3507] | Extracted Dimension: [2480, 3507]
-Page: 4 | Expected Dimension: [2492, 3507] | Extracted Dimension: [2480, 3507]
-Page: 5 | Expected Dimension: [2500, 3517] | Extracted Dimension: [2480, 3507]
-Page: 6 | Expected Dimension: [2500, 3517] | Extracted Dimension: [2480, 3507]
-Page: 7 | Expected Dimension: [2488, 3513] | Extracted Dimension: [2480, 3507]
-Page: 8 | Expected Dimension: [2488, 3513] | Extracted Dimension: [2480, 3507]
-Page: 9 | Expected Dimension: [2492, 3504] | Extracted Dimension: [2480, 3507]
-Page: 10 | Expected Dimension: [2492, 3504] | Extracted Dimension: [2480, 3507]
-Processing questionanire:  11
-Page: 1 | Expected Dimension: [2480, 3507] | Extracted Dimension: [2480, 3507]
-Page: 2 | Expected Dimension: [2480, 3507] | Extracted Dimension: [2480, 3507]
-Page: 3 | Expected Dimension: [2480, 3507] | Extracted Dimension: [2480, 3507]
-Page: 4 | Expected Dimension: [2480, 3507] | Extracted Dimension: [2480, 3507]
-Page: 5 | Expected Dimension: [2480, 3507] | Extracted Dimension: [2480, 3507]
-Page: 6 | Expected Dimension: [2480, 3507] | Extracted Dimension: [2480, 3507]
-Page: 7 | Expected Dimension: [2480, 3507] | Extracted Dimension: [2480, 3507]
-Page: 8 | Expected Dimension: [2480, 3507] | Extracted Dimension: [2480, 3507]
-Processing questionanire:  12
-Page: 1 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 2 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 3 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 4 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 5 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 6 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 7 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 8 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 9 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 10 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 11 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Page: 12 | Expected Dimension: [2480, 3504] | Extracted Dimension: [2480, 3504]
-Processing questionanire:  13
-Page: 1 | Expected Dimension: [2474, 3467] | Extracted Dimension: [2471, 3480]
-Page: 2 | Expected Dimension: [2482, 3487] | Extracted Dimension: [2471, 3480]
-Page: 3 | Expected Dimension: [2472, 3480] | Extracted Dimension: [2468, 3480]
-Page: 4 | Expected Dimension: [2468, 3481] | Extracted Dimension: [2468, 3480]
-Page: 5 | Expected Dimension: [2475, 3488] | Extracted Dimension: [2465, 3484]
-Page: 6 | Expected Dimension: [2474, 3476] | Extracted Dimension: [2465, 3484]
-Page: 7 | Expected Dimension: [2465, 3478] | Extracted Dimension: [2467, 3485]
-Page: 8 | Expected Dimension: [2464, 3499] | Extracted Dimension: [2461, 3481]
-Page: 9 | Expected Dimension: [2467, 3482] | Extracted Dimension: [2468, 3487]
-Page: 10 | Expected Dimension: [2458, 3477] | Extracted Dimension: [2462, 3483]
-Page: 11 | Expected Dimension: [2463, 3479] | Extracted Dimension: [2467, 3485]
-Page: 12 | Expected Dimension: [2458, 3484] | Extracted Dimension: [2455, 3477]
-Page: 13 | Expected Dimension: [2474, 3487] | Extracted Dimension: [2465, 3482]
-Page: 14 | Expected Dimension: [2463, 3497] | Extracted Dimension: [2459, 3478]
-Page: 15 | Expected Dimension: [2471, 3481] | Extracted Dimension: [2462, 3476]
-Page: 16 | Expected Dimension: [2465, 3486] | Extracted Dimension: [2462, 3476]
-Page: 17 | Expected Dimension: [2482, 3485] | Extracted Dimension: [2466, 3479]
-Page: 18 | Expected Dimension: [2482, 3485] | Extracted Dimension: [2466, 3479]
-Page: 19 | Expected Dimension: [2479, 3482] | Extracted Dimension: [2474, 3484]
-Page: 20 | Expected Dimension: [2479, 3482] | Extracted Dimension: [2468, 3480]
-Processing questionanire:  2
-Page: 1 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 2 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 3 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 4 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 5 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 6 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 7 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 8 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Processing questionanire:  3
-Page: 1 | Expected Dimension: [1696, 2372] | Extracted Dimension: [1696, 2386]
-Page: 2 | Expected Dimension: [1696, 2367] | Extracted Dimension: [1696, 2384]
-Processing questionanire:  4
-Page: 1 | Expected Dimension: [1648, 2400] | Extracted Dimension: [1648, 2400]
-Page: 2 | Expected Dimension: [1648, 2400] | Extracted Dimension: [1648, 2400]
-Page: 3 | Expected Dimension: [1648, 2400] | Extracted Dimension: [1648, 2400]
-Page: 4 | Expected Dimension: [1648, 2400] | Extracted Dimension: [1648, 2400]
-Processing questionanire:  5
-Page: 1 | Expected Dimension: [1648, 2368] | Extracted Dimension: [1648, 2368]
-Page: 2 | Expected Dimension: [1648, 2368] | Extracted Dimension: [1648, 2368]
-Page: 3 | Expected Dimension: [1648, 2368] | Extracted Dimension: [1648, 2368]
-Page: 4 | Expected Dimension: [1648, 2368] | Extracted Dimension: [1648, 2368]
-Processing questionanire:  6
-Page: 1 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 2 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 3 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 4 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Processing questionanire:  7
-Page: 1 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 2 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 3 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 4 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1648, 2338]
-Page: 5 | Expected Dimension: [2336, 1684] | Extracted Dimension: [2336, 1687]
-Processing questionanire:  8
-Skipping page  1  of questionnaire 8 due to known issues with template dimensions.
-Skipping page  2  of questionnaire 8 due to known issues with template dimensions.
-Page: 3 | Expected Dimension: [1664, 2359] | Extracted Dimension: [1664, 2353]
-Page: 4 | Expected Dimension: [1664, 2365] | Extracted Dimension: [1664, 2355]
-Page: 5 | Expected Dimension: [1664, 2359] | Extracted Dimension: [1664, 2353]
-Page: 6 | Expected Dimension: [1664, 2363] | Extracted Dimension: [1664, 2356]
-Page: 7 | Expected Dimension: [1664, 2332] | Extracted Dimension: [1664, 2356]
-Page: 8 | Expected Dimension: [1664, 2363] | Extracted Dimension: [1664, 2360]
-Page: 9 | Expected Dimension: [1632, 2368] | Extracted Dimension: [1664, 2350]
-Page: 10 | Expected Dimension: [1664, 2333] | Extracted Dimension: [1664, 2353]
-Page: 11 | Expected Dimension: [1664, 2336] | Extracted Dimension: [1664, 2352]
-Page: 12 | Expected Dimension: [2368, 1657] | Extracted Dimension: [2368, 1656]
-Page: 13 | Expected Dimension: [2368, 1656] | Extracted Dimension: [2368, 1654]
-Page: 14 | Expected Dimension: [2368, 1658] | Extracted Dimension: [2368, 1656]
-Page: 15 | Expected Dimension: [2368, 1657] | Extracted Dimension: [2368, 1654]
-Page: 16 | Expected Dimension: [2368, 1658] | Extracted Dimension: [2368, 1656]
-Page: 17 | Expected Dimension: [2368, 1655] | Extracted Dimension: [2368, 1653]
-Page: 18 | Expected Dimension: [2368, 1658] | Extracted Dimension: [2368, 1654]
-Page: 19 | Expected Dimension: [2368, 1655] | Extracted Dimension: [2368, 1654]
-Page: 20 | Expected Dimension: [2368, 1658] | Extracted Dimension: [2368, 1655]
-Page: 21 | Expected Dimension: [2368, 1655] | Extracted Dimension: [2368, 1652]
-Page: 22 | Expected Dimension: [2368, 1657] | Extracted Dimension: [2368, 1654]
-Page: 23 | Expected Dimension: [2368, 1655] | Extracted Dimension: [2368, 1651]
-Page: 24 | Expected Dimension: [2368, 1656] | Extracted Dimension: [2368, 1653]
-Page: 25 | Expected Dimension: [2368, 1658] | Extracted Dimension: [2368, 1653]
-Page: 26 | Expected Dimension: [2368, 1661] | Extracted Dimension: [2368, 1656]
-Page: 27 | Expected Dimension: [1664, 2358] | Extracted Dimension: [1664, 2353]
-Page: 28 | Expected Dimension: [1664, 2359] | Extracted Dimension: [1664, 2356]
-Page: 29 | Expected Dimension: [1664, 2359] | Extracted Dimension: [1664, 2352]
-Page: 30 | Expected Dimension: [1664, 2360] | Extracted Dimension: [1664, 2355]
-Page: 31 | Expected Dimension: [1664, 2353] | Extracted Dimension: [1664, 2352]
-Page: 32 | Expected Dimension: [1664, 2355] | Extracted Dimension: [1664, 2355]
-Processing questionanire:  9
-Page: 1 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1674, 2357]
-Page: 2 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1676, 2358]
-Page: 3 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1658, 2345]
-Page: 4 | Expected Dimension: [1648, 2338] | Extracted Dimension: [1666, 2351]
+Data for ID A0C5I2D5:
+  Questionnaire: q1
+    Class: X | Scalar Value: 113 | Array Shape: (2, 10)
+    Class: X_random | Scalar Value: 113 | Array Shape: (2, 10)
+    Class: hand | Scalar Value: 9 | Array Shape: (2, 2)
+    Class: hand_partial_full | Scalar Value: 9 | Array Shape: (2, 2)
+    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: number | Scalar Value: 31 | Array Shape: (2, 5)
+    Class: number_random | Scalar Value: 31 | Array Shape: (2, 5)
+  Questionnaire: q10
+    Class: X | Scalar Value: 93 | Array Shape: (2, 9)
+    Class: X_random | Scalar Value: 93 | Array Shape: (2, 9)
+    Class: hand | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: number | Scalar Value: 89 | Array Shape: (2, 9)
+    Class: number_random | Scalar Value: 89 | Array Shape: (2, 9)
+  Questionnaire: q11
+    Class: X | Scalar Value: 39 | Array Shape: (2, 6)
+    Class: X_random | Scalar Value: 39 | Array Shape: (2, 6)
+    Class: hand | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: number | Scalar Value: 40 | Array Shape: (2, 6)
+    Class: number_random | Scalar Value: 40 | Array Shape: (2, 6)
+  Questionnaire: q12
+    Class: X | Scalar Value: 133 | Array Shape: (2, 11)
+    Class: X_random | Scalar Value: 133 | Array Shape: (2, 11)
+    Class: hand | Scalar Value: 2 | Array Shape: (2, 1)
+    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_sentences_full | Scalar Value: 1 | Array Shape: (2, 0)
+    Class: number | Scalar Value: 46 | Array Shape: (2, 6)
+    Class: number_random | Scalar Value: 46 | Array Shape: (2, 6)
+  Questionnaire: q13
+    Class: X | Scalar Value: 171 | Array Shape: (2, 13)
+    Class: X_random | Scalar Value: 171 | Array Shape: (2, 13)
+    Class: hand | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: number | Scalar Value: 92 | Array Shape: (2, 9)
+    Class: number_random | Scalar Value: 92 | Array Shape: (2, 9)
+  Questionnaire: q2
+    Class: X | Scalar Value: 95 | Array Shape: (2, 9)
+    Class: X_random | Scalar Value: 95 | Array Shape: (2, 9)
+    Class: hand | Scalar Value: 8 | Array Shape: (2, 2)
+    Class: hand_partial_full | Scalar Value: 8 | Array Shape: (2, 2)
+    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: number | Scalar Value: 43 | Array Shape: (2, 6)
+    Class: number_random | Scalar Value: 43 | Array Shape: (2, 6)
+  Questionnaire: q3
+    Class: X | Scalar Value: 30 | Array Shape: (2, 5)
+    Class: X_random | Scalar Value: 30 | Array Shape: (2, 5)
+    Class: hand | Scalar Value: 23 | Array Shape: (2, 4)
+    Class: hand_partial_full | Scalar Value: 11 | Array Shape: (2, 3)
+    Class: hand_sentences_full | Scalar Value: 2 | Array Shape: (2, 1)
+    Class: number | Scalar Value: 17 | Array Shape: (2, 4)
+    Class: number_random | Scalar Value: 17 | Array Shape: (2, 4)
+  Questionnaire: q4
+    Class: X | Scalar Value: 18 | Array Shape: (2, 4)
+    Class: X_random | Scalar Value: 18 | Array Shape: (2, 4)
+    Class: hand | Scalar Value: 5 | Array Shape: (2, 2)
+    Class: hand_partial_full | Scalar Value: 5 | Array Shape: (2, 2)
+    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: number | Scalar Value: 36 | Array Shape: (2, 5)
+    Class: number_random | Scalar Value: 36 | Array Shape: (2, 5)
+  Questionnaire: q5
+    Class: X | Scalar Value: 22 | Array Shape: (2, 4)
+    Class: X_random | Scalar Value: 22 | Array Shape: (2, 4)
+    Class: hand | Scalar Value: 33 | Array Shape: (2, 5)
+    Class: hand_partial_full | Scalar Value: 6 | Array Shape: (2, 2)
+    Class: hand_sentences_full | Scalar Value: 4 | Array Shape: (2, 1)
+    Class: number | Scalar Value: 25 | Array Shape: (2, 4)
+    Class: number_random | Scalar Value: 25 | Array Shape: (2, 4)
+  Questionnaire: q6
+    Class: X | Scalar Value: 13 | Array Shape: (2, 3)
+    Class: X_random | Scalar Value: 13 | Array Shape: (2, 3)
+    Class: hand | Scalar Value: 43 | Array Shape: (2, 6)
+    Class: hand_partial_full | Scalar Value: 9 | Array Shape: (2, 2)
+    Class: hand_sentences_full | Scalar Value: 4 | Array Shape: (2, 1)
+    Class: number | Scalar Value: 18 | Array Shape: (2, 4)
+    Class: number_random | Scalar Value: 18 | Array Shape: (2, 4)
+  Questionnaire: q7
+    Class: X | Scalar Value: 32 | Array Shape: (2, 5)
+    Class: X_random | Scalar Value: 32 | Array Shape: (2, 5)
+    Class: hand | Scalar Value: 35 | Array Shape: (2, 5)
+    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_sentences_full | Scalar Value: 5 | Array Shape: (2, 2)
+    Class: number | Scalar Value: 30 | Array Shape: (2, 5)
+    Class: number_random | Scalar Value: 30 | Array Shape: (2, 5)
+  Questionnaire: q8
+    Class: X | Scalar Value: 541 | Array Shape: (2, 23)
+    Class: X_random | Scalar Value: 541 | Array Shape: (2, 23)
+    Class: hand | Scalar Value: 42 | Array Shape: (2, 6)
+    Class: hand_partial_full | Scalar Value: 2 | Array Shape: (2, 1)
+    Class: hand_sentences_full | Scalar Value: 11 | Array Shape: (2, 3)
+    Class: number | Scalar Value: 182 | Array Shape: (2, 13)
+    Class: number_random | Scalar Value: 182 | Array Shape: (2, 13)
+  Questionnaire: q9
+    Class: X | Scalar Value: 27 | Array Shape: (2, 5)
+    Class: X_random | Scalar Value: 27 | Array Shape: (2, 5)
+    Class: hand | Scalar Value: 59 | Array Shape: (2, 7)
+    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_sentences_full | Scalar Value: 9 | Array Shape: (2, 2)
+    Class: number | Scalar Value: 107 | Array Shape: (2, 10)
+    Class: number_random | Scalar Value: 107 | Array Shape: (2, 10)
+Image size is (252, 267, 3) and number of tiles is 18
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4463159
+Job ID: 4482164
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n03
+Nodelist: n23
 Nodes: 1
 Cores per node: 2
-Job started at: 2026-06-01 15:57:33
-Job ended at:   2026-06-01 15:57:36
+Job started at: 2026-06-02 18:10:12
+Job ended at:   2026-06-02 18:10:15
 Job Wall-clock time: 00:00:03
 CPU Utilized: 00:00:01
 CPU Efficiency: 16.67% of 00:00:06 core-walltime
-Memory Utilized: 264.00 KB
-Memory Efficiency: 0.01% of 4.00 GB
+Memory Utilized: 988.00 KB
+Memory Efficiency: 0.02% of 4.00 GB

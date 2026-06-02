@@ -54,3 +54,19 @@ Page: 2 | Expected Dimension: (1664, 2363)
 q8_v2
 Page: 1 | Expected Dimension: (1664, 1624)
 Page: 2 | Expected Dimension: (1664, 1658)
+
+Struttura file h5
+id_data = get_id_data_from_h5_file(h5_path, id)
+    print(f"Data for ID {id}:")
+    for q_name, classes in id_data.items():
+        print(f"  Questionnaire: {q_name}")
+        for class_key, (scalar_val, array_val) in classes.items():
+            print(f"    Class: {class_key} | Scalar Value: {scalar_val} | Array Shape: {array_val.shape}") ->
+Questionnaire: q9
+    Class: X | Scalar Value: 27 | Array Shape: (2, 5)
+    Class: X_random | Scalar Value: 27 | Array Shape: (2, 5)
+    Class: hand | Scalar Value: 59 | Array Shape: (2, 7)
+    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
+    Class: hand_sentences_full | Scalar Value: 9 | Array Shape: (2, 2)
+    Class: number | Scalar Value: 107 | Array Shape: (2, 10)
+    Class: number_random | Scalar Value: 107 | Array Shape: (2, 10)
