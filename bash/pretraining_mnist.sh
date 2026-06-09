@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=train_handedness
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train_handedness.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_handedness.err
+#SBATCH --job-name=mnist_pretrain
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/mnist_pretrain.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/mnist_pretrain.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=32              # Number of CPU cores per task
+#SBATCH --cpus-per-task=18              # Number of CPU cores per task
 #SBATCH --mem=64G                      # Job memory request
 #SBATCH --time=04:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #SBATCH --partition=visuq,gpgpuq
-#--gres=gpu:1
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:1
+#--gres=gpu:a100:1
 #--gres=gpu:v100:1
 #--gres=gpu:p40:1
 #--nodelist=gpu04
@@ -33,5 +33,5 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 
 cd $HOME_DIR
 # --- Execution ---
-$ENV_PYTHON -m src.scripts.train_handedness_model \
-    --num_workers 30
+$ENV_PYTHON -m src.scripts.pretraining_mnist \
+    --num_workers 16

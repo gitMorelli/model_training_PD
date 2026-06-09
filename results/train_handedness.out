@@ -1,97 +1,110 @@
-Columns in the CSV: ['ident_projet', 'lateralite', 'grid_file_category', 'q_1_num_X', 'q_1_num_text', 'q_1_num_digit', 'q_2_num_X', 'q_2_num_text', 'q_2_num_digit', 'q_3_num_X', 'q_3_num_text', 'q_3_num_digit', 'q_4_num_X', 'q_4_num_text', 'q_4_num_digit', 'q_5_num_X', 'q_5_num_text', 'q_5_num_digit', 'q_6_num_X', 'q_6_num_text', 'q_6_num_digit', 'q_7_num_X', 'q_7_num_text', 'q_7_num_digit', 'q_8_num_X', 'q_8_num_text', 'q_8_num_digit', 'q_9_num_X', 'q_9_num_text', 'q_9_num_digit', 'q_10_num_X', 'q_10_num_text', 'q_10_num_digit', 'q_11_num_X', 'q_11_num_text', 'q_11_num_digit', 'q_12_num_X', 'q_12_num_text', 'q_12_num_digit', 'q_13_num_X', 'q_13_num_text', 'q_13_num_digit', 'q_1_grid_file_avail', 'q_2_grid_file_avail', 'q_3_grid_file_avail', 'q_4_grid_file_avail', 'q_5_grid_file_avail', 'q_6_grid_file_avail', 'q_7_grid_file_avail', 'q_8_grid_file_avail', 'q_9_grid_file_avail', 'q_10_grid_file_avail', 'q_11_grid_file_avail', 'q_12_grid_file_avail', 'q_13_grid_file_avail', 'split']
 Length of melted df before filtering: 429936
-Length of melted df after filtering: 366814
+Length of melted df after filtering: 337030
+92906 samples will be excluded from the dataset based on the num_filtering process for modality text
 CSV after melting:   ident_projet  lateralite split
 0   D3B2E9R1_1         1.0   val
-1   A0G7P9I7_1         0.0   val
-2   A7A3K1M9_1         0.0   val
-3   C2A9Z0V3_1         1.0   val
-4   K0U8N0C7_1         0.0   val
-Training samples with at least 1 chunck for modality digit: 297127
-Class distribution in training set (after filtering for modality digit):
+1   A7A3K1M9_1         0.0   val
+2   C2A9Z0V3_1         1.0   val
+3   K0U8N0C7_1         0.0   val
+4   F0V3Z3W8_1         0.0   val
+Training samples with at least 1 chunck for modality text: 273153
+Class distribution in training set (after filtering for modality text):
 lateralite
-0.0    248234
-1.0     48893
+0.0    228254
+1.0     44899
 Name: count, dtype: int64
-Number of samples per class: Class 0 = 248234, Class 1 = 48893; Total = 297127
-199341 samples will be excluded from the training set to achieve balancing.
-Current experiment version: 3
+Number of samples per class: Class 0 = 228254, Class 1 = 44899; Total = 273153
+Class distribution in val set (after filtering for modality text):
+lateralite
+0.0    228254
+1.0     44899
+Name: count, dtype: int64
+276261 samples will be excluded from the training set to achieve balancing.
+Current experiment version: 5
 --- GPU DIAGNOSTICS ---
-Active GPU: Tesla P40
+Active GPU: NVIDIA A100-PCIE-40GB
 CUDA_VISIBLE_DEVICES: 0
-Reading from /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_png_resized_padded/train/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_png_resized_padded/val/worker*_shard-*.tar with decode approach 'pil' and load_in_memory=False
-Sample 0: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]), ID ['D0P0V4E4', 'A2I7B7V7', 'A2I7B7V7', 'A2I7B7V7', 'C8P1X9Z7', 'C8P1X9Z7', 'C8P1X9Z7', 'E3Z2Y1M3', 'E3Z2Y1M3', 'E3Z2Y1M3', 'E7E0L6F2', 'E7E0L6F2', 'B9O0Y9W7', 'B9O0Y9W7', 'A4G4N6I5', 'A4G4N6I5'], Q ['q2', 'q10', 'q6', 'q8', 'q12', 'q13', 'q3', 'q13', 'q6', 'q7', 'q13', 'q7', 'q4', 'q9', 'q1', 'q10'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 1: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), ID ['A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'A4G4N6I5', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7'], Q ['q11', 'q12', 'q13', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 2: Label tensor([1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1]), ID ['F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'F1N9X9E7', 'A0R6J8J7', 'A0R6J8J7', 'A0R6J8J7', 'A0R6J8J7', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1'], Q ['q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q11', 'q13', 'q3', 'q6', 'q1', 'q10', 'q11', 'q12', 'q13'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 3: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'D3P7V9S1', 'A8W4A3V3', 'A8W4A3V3', 'A8W4A3V3', 'A7I2Y0M2', 'D7J9N2Q4', 'D7J9N2Q4', 'F6N1D5M0', 'F6N1D5M0'], Q ['q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q12', 'q3', 'q13', 'q12', 'q7', 'q2', 'q6'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 4: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1]), ID ['F6N1D5M0', 'B5U7Z1J3', 'F5J3D7Y5', 'F5J3D7Y5', 'F5J3D7Y5', 'B4B9B6R3', 'B4B9B6R3', 'B4B9B6R3', 'B4B9B6R3', 'B4B9B6R3', 'F3I7X2B1', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5'], Q ['q8', 'q3', 'q10', 'q12', 'q13', 'q10', 'q11', 'q12', 'q5', 'q7', 'q3', 'q1', 'q10', 'q11', 'q12', 'q13'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 5: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'B7M0L6F5', 'C4L7M3G2', 'C4L7M3G2', 'B2G1D3E2', 'B2G1D3E2', 'D2G5B2W6', 'D2G5B2W6', 'A6C4U0M8', 'A6C4U0M8'], Q ['q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q8', 'q9', 'q4', 'q8', 'q1', 'q12', 'q1', 'q2'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 6: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['A6C4U0M8', 'A6C4U0M8', 'E0T9S8Z2', 'E0T9S8Z2', 'E3I1C5F6', 'E3I1C5F6', 'E3I1C5F6', 'B8J8S8Z5', 'B8J8S8Z5', 'B8J8S8Z5', 'B8J8S8Z5', 'D2K0M3H9', 'D2K0M3H9', 'D2K0M3H9', 'D2K0M3H9', 'D2K0M3H9'], Q ['q4', 'q8', 'q1', 'q6', 'q13', 'q3', 'q5', 'q12', 'q4', 'q6', 'q9', 'q10', 'q12', 'q2', 'q4', 'q6'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 7: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['B4B8V7X3', 'B4B8V7X3', 'B4B8V7X3', 'I9B0Y8P6', 'I9B0Y8P6', 'I9B0Y8P6', 'I9B0Y8P6', 'I9B0Y8P6', 'F9V1D9O6', 'F9V1D9O6', 'B2I6B9M9', 'B2I6B9M9', 'B2I6B9M9', 'B2I6B9M9', 'B2I6B9M9', 'B9A9C5M1'], Q ['q4', 'q6', 'q7', 'q13', 'q3', 'q5', 'q7', 'q9', 'q1', 'q7', 'q1', 'q5', 'q6', 'q8', 'q9', 'q11'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 8: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1]), ID ['B9A9C5M1', 'B9A9C5M1', 'B0R1R6N0', 'B6Z1L1J9', 'F6R3P0X7', 'F6R3P0X7', 'F6R3P0X7', 'F6R3P0X7', 'A2J8F7T4', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6'], Q ['q13', 'q9', 'q6', 'q12', 'q12', 'q13', 'q3', 'q8', 'q11', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 9: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]), ID ['A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'A7C5O1X6', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7'], Q ['q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3', 'q4', 'q5', 'q6'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 10: Label tensor([1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ID ['B4A4Q0T7', 'B4A4Q0T7', 'B4A4Q0T7', 'A6D1A8V5', 'F3R2V4I4', 'C9T5V3G5', 'C9T5V3G5', 'C9T5V3G5', 'B3Y0L9H0', 'B3Y0L9H0', 'B3Y0L9H0', 'B3Y0L9H0', 'B3Y0L9H0', 'A9I1H4K8', 'A9I1H4K8', 'A9I1H4K8'], Q ['q7', 'q8', 'q9', 'q7', 'q10', 'q1', 'q11', 'q2', 'q1', 'q2', 'q5', 'q7', 'q8', 'q1', 'q13', 'q3'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Sample 11: Label tensor([0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0]), ID ['A9I1H4K8', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'A0C4V5B5', 'B2K2O3K8', 'B2K2O3K8'], Q ['q6', 'q1', 'q10', 'q11', 'q12', 'q13', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q1', 'q4'], Mode ['number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random', 'number_random']
-Class distribution in val set (after filtering for modality digit):
+Removing keys: ['fc.weight', 'fc.bias']
+Missing keys: ['fc.weight', 'fc.bias']
+Unexpected keys: []
+############# Model backbone loaded! #############
+Reading from /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_no_grids_png_whitebg/train/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_no_grids_png_whitebg/val/worker*_shard-*.tar with decode approach 'pil' and load_in_memory=False
+Sample 0: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0]), ID ['K1E5D5W1', 'C3X4E9D8', 'C3X4E9D8', 'C3X4E9D8', 'B5T6N4S5', 'B5T6N4S5', 'C8Z1B9F1', 'F8L8S1C8', 'A3H0W9V2', 'A3H0W9V2', 'A3H0W9V2', 'A3H0W9V2', 'A3H0W9V2', 'A3H0W9V2', 'A3H0W9V2', 'A3H0W9V2', 'A3H0W9V2', 'D6N8I7V8', 'H7N7V2U1', 'H7N7V2U1', 'H7N7V2U1', 'J0R9H9K5', 'A7C6N5G7', 'A2L2P3C0', 'A5B1K8I5', 'A5B1K8I5', 'A2F4Z4Y6', 'A2F4Z4Y6', 'A2F4Z4Y6', 'B1L8G3S9', 'B1L8G3S9', 'B1L8G3S9'], Q ['q5', 'q2', 'q8', 'q12', 'q5', 'q11', 'q13', 'q1', 'q1', 'q2', 'q3', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q2', 'q3', 'q6', 'q10', 'q1', 'q7', 'q11', 'q5', 'q6', 'q6', 'q7', 'q11', 'q10', 'q11', 'q12'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 1: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1,
+        1, 1, 0, 0, 0, 0, 0, 0]), ID ['B0L3K8N2', 'A8M8W9X0', 'A8M8W9X0', 'C9M1A3N1', 'C9M1A3N1', 'A3Z4Y1O2', 'A3Z4Y1O2', 'A5O3Y4S6', 'A5O3Y4S6', 'H6L8M8Y1', 'B0Z7O3T3', 'A4F1E3J3', 'A4F1E3J3', 'A4F1E3J3', 'A4F1E3J3', 'A4F1E3J3', 'A4F1E3J3', 'A4F1E3J3', 'D9Q7P7G3', 'D9Q7P7G3', 'C6D1T8A4', 'C6D1T8A4', 'C6D1T8A4', 'C6D1T8A4', 'C6D1T8A4', 'C6D1T8A4', 'A6D4B1S4', 'A6D4B1S4', 'A4Y0Z2Q5', 'A4Y0Z2Q5', 'A4Y0Z2Q5', 'A8A7Y3O6'], Q ['q1', 'q2', 'q8', 'q2', 'q7', 'q1', 'q6', 'q3', 'q5', 'q5', 'q7', 'q2', 'q3', 'q8', 'q9', 'q10', 'q11', 'q12', 'q5', 'q7', 'q1', 'q2', 'q6', 'q8', 'q11', 'q12', 'q6', 'q13', 'q4', 'q9', 'q11', 'q1'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 2: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 1]), ID ['A8A7Y3O6', 'A8A7Y3O6', 'B0M2N7H4', 'A7D5Z7A8', 'A7D5Z7A8', 'G7T6U6A7', 'G7T6U6A7', 'G7T6U6A7', 'A3P3D0B4', 'A3P3D0B4', 'A3P3D0B4', 'A8N4X3U1', 'A8N4X3U1', 'A8N4X3U1', 'A8N4X3U1', 'A8N4X3U1', 'A0T7F1D3', 'A0T7F1D3', 'A0T7F1D3', 'A0T7F1D3', 'A0T7F1D3', 'B3V5L1I9', 'B3V5L1I9', 'B3V5L1I9', 'C7O3Q1D6', 'C0O3V6Z9', 'A5P8K0Y1', 'B4S5T1C9', 'B4S5T1C9', 'B4S5T1C9', 'C5Q4I4F1', 'D0I8R8K1'], Q ['q3', 'q5', 'q1', 'q1', 'q5', 'q3', 'q6', 'q9', 'q2', 'q4', 'q12', 'q1', 'q2', 'q4', 'q10', 'q13', 'q2', 'q3', 'q6', 'q8', 'q11', 'q5', 'q9', 'q10', 'q4', 'q9', 'q3', 'q2', 'q6', 'q10', 'q8', 'q1'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 3: Label tensor([1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+        1, 1, 1, 1, 1, 1, 1, 1]), ID ['D0I8R8K1', 'D0I8R8K1', 'D0I8R8K1', 'D0I8R8K1', 'D0I8R8K1', 'D0I8R8K1', 'D0I8R8K1', 'H3Y9P2B9', 'H3Y9P2B9', 'H3Y9P2B9', 'C4Z0L1L6', 'C4Z0L1L6', 'B0O1C2B8', 'A7D3W6L1', 'A7D3W6L1', 'F0O1A2C8', 'F0O1A2C8', 'F0O1A2C8', 'F0O1A2C8', 'F0O1A2C8', 'F0O1A2C8', 'F0O1A2C8', 'G8I2B5H0', 'C5E2M3O7', 'B6L7J3Q6', 'B6L7J3Q6', 'B6L7J3Q6', 'B6L7J3Q6', 'B6L7J3Q6', 'B6L7J3Q6', 'B6L7J3Q6', 'B6L7J3Q6'], Q ['q6', 'q7', 'q8', 'q10', 'q11', 'q12', 'q13', 'q3', 'q5', 'q6', 'q2', 'q8', 'q13', 'q10', 'q12', 'q1', 'q2', 'q3', 'q4', 'q5', 'q8', 'q9', 'q6', 'q6', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 4: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+        0, 0, 1, 1, 1, 1, 1, 1]), ID ['F2Z5O8I7', 'F2Z5O8I7', 'B1U0H6P9', 'B1U0H6P9', 'B1U0H6P9', 'A1F0C7G5', 'A1F0C7G5', 'G1H2U7U9', 'G1H2U7U9', 'M0K8E8C0', 'M0K8E8C0', 'M0K8E8C0', 'M0K8E8C0', 'M0K8E8C0', 'M0K8E8C0', 'M0K8E8C0', 'M0K8E8C0', 'M0K8E8C0', 'M0K8E8C0', 'E4F0O7H7', 'E4F0O7H7', 'E1O9F6P4', 'E1O9F6P4', 'L5T1O7L9', 'L5T1O7L9', 'L5T1O7L9', 'B1M7C4P2', 'B1M7C4P2', 'B1M7C4P2', 'B1M7C4P2', 'B1M7C4P2', 'B1M7C4P2'], Q ['q1', 'q10', 'q2', 'q3', 'q7', 'q2', 'q13', 'q3', 'q6', 'q1', 'q2', 'q3', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q4', 'q11', 'q2', 'q9', 'q2', 'q5', 'q7', 'q1', 'q2', 'q3', 'q5', 'q6', 'q7'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 5: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1]), ID ['B1M7C4P2', 'B1M7C4P2', 'B1M7C4P2', 'B1M7C4P2', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'C2U7F8T8', 'B6E0P1S3', 'C2R4N5T1', 'B2U1A3I6', 'A9C5D8U5', 'A9C5D8U5', 'A9C5D8U5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5', 'H2L9Z8M5'], Q ['q8', 'q9', 'q10', 'q12', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q11', 'q12', 'q8', 'q5', 'q6', 'q2', 'q4', 'q8', 'q1', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q12', 'q13'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 6: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1]), ID ['A3U7K0T2', 'A3U7K0T2', 'F4B7S0V5', 'F4B7S0V5', 'F4B7S0V5', 'B1W2H5U7', 'B1W2H5U7', 'C9Z4T4Z4', 'C9Z4T4Z4', 'D8A2I4E3', 'B2C4T3D2', 'B2C4T3D2', 'B7D2L6J5', 'B7D2L6J5', 'B7D2L6J5', 'G2P7U5T5', 'G2P7U5T5', 'C5L2Y3F1', 'D7Q0I4I4', 'D7Q0I4I4', 'D7Q0I4I4', 'D7Q0I4I4', 'D7Q0I4I4', 'D7Q0I4I4', 'D7Q0I4I4', 'C8C5G7U5', 'C8C5G7U5', 'C8C5G7U5', 'C8C5G7U5', 'C8C5G7U5', 'C8C5G7U5', 'C8C5G7U5'], Q ['q5', 'q7', 'q1', 'q2', 'q6', 'q7', 'q8', 'q4', 'q8', 'q2', 'q8', 'q10', 'q2', 'q7', 'q10', 'q6', 'q8', 'q6', 'q1', 'q2', 'q3', 'q6', 'q7', 'q8', 'q9', 'q2', 'q3', 'q4', 'q6', 'q7', 'q8', 'q9'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 7: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+        1, 1, 1, 1, 1, 1, 1, 1]), ID ['C8C5G7U5', 'C8C5G7U5', 'C8C5G7U5', 'C8C5G7U5', 'A9M6L8U3', 'A9M6L8U3', 'A9M6L8U3', 'A9M6L8U3', 'A9M6L8U3', 'A9M6L8U3', 'A9M6L8U3', 'A9M6L8U3', 'A9M6L8U3', 'A3O4N4L0', 'G0G5N4O0', 'G0G5N4O0', 'G0G5N4O0', 'G0G5N4O0', 'G0G5N4O0', 'G0G5N4O0', 'G0G5N4O0', 'G0G5N4O0', 'G0G5N4O0', 'B9G1T3Q7', 'H0G6L9X8', 'H0G6L9X8', 'H0G6L9X8', 'H0G6L9X8', 'H0G6L9X8', 'C2C2W7E5', 'C2C2W7E5', 'C2C2W7E5'], Q ['q10', 'q11', 'q12', 'q13', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q10', 'q1', 'q1', 'q3', 'q4', 'q5', 'q6', 'q8', 'q9', 'q10', 'q11', 'q6', 'q1', 'q2', 'q6', 'q7', 'q8', 'q2', 'q5', 'q6'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 8: Label tensor([1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 1, 1, 1, 1, 0, 0, 0]), ID ['C2C2W7E5', 'C2C2W7E5', 'C2C2W7E5', 'C2C2W7E5', 'C2C2W7E5', 'C2T1E7U2', 'C2T1E7U2', 'D0J8T9A9', 'C4Z7X5L0', 'C4Z7X5L0', 'C4Z7X5L0', 'C4Z7X5L0', 'C4Z7X5L0', 'C4Z7X5L0', 'C4Z7X5L0', 'C4Z7X5L0', 'D6H0U4Z3', 'D6H0U4Z3', 'D6H0U4Z3', 'D6H0U4Z3', 'D6H0U4Z3', 'M2S9Z8N6', 'M2S9Z8N6', 'B1I0Z1I8', 'B1I0Z1I8', 'B1I0Z1I8', 'B1I0Z1I8', 'B1I0Z1I8', 'B1I0Z1I8', 'F5S7D4E6', 'A2M6S5Q9', 'B5D7G2M1'], Q ['q8', 'q10', 'q11', 'q12', 'q13', 'q4', 'q8', 'q8', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q1', 'q2', 'q5', 'q7', 'q9', 'q7', 'q12', 'q1', 'q5', 'q6', 'q7', 'q8', 'q9', 'q8', 'q10', 'q8'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 9: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+        0, 0, 0, 0, 1, 1, 1, 1]), ID ['B7I7B4O7', 'B7I7B4O7', 'B7I7B4O7', 'F6M1W5S8', 'F6M1W5S8', 'E6M6H8E6', 'E6M6H8E6', 'C5S9Q5D8', 'C5S9Q5D8', 'E4Z9V7I6', 'E4Z9V7I6', 'A4O0S4O0', 'A6T9N9U6', 'A6T9N9U6', 'A6T9N9U6', 'A6T9N9U6', 'A6T9N9U6', 'A6T9N9U6', 'A6T9N9U6', 'A6T9N9U6', 'A6T9N9U6', 'A1I7J3T8', 'A1I7J3T8', 'A1I7J3T8', 'D8M4H1Q6', 'D8M4H1Q6', 'F0I1U8P2', 'F9F5T8A9', 'D2F3H0N5', 'D2F3H0N5', 'D2F3H0N5', 'D2F3H0N5'], Q ['q6', 'q7', 'q8', 'q6', 'q8', 'q8', 'q12', 'q3', 'q11', 'q8', 'q10', 'q7', 'q1', 'q2', 'q3', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q7', 'q9', 'q10', 'q9', 'q11', 'q5', 'q6', 'q1', 'q2', 'q3', 'q4'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 10: Label tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 1, 1, 1]), ID ['D2F3H0N5', 'D2F3H0N5', 'D2F3H0N5', 'D2F3H0N5', 'D2F3H0N5', 'D2F3H0N5', 'D2F3H0N5', 'F9W8X3P5', 'F9W8X3P5', 'F9W8X3P5', 'F9W8X3P5', 'F9W8X3P5', 'F9W8X3P5', 'F9W8X3P5', 'C4I4I4N2', 'C4I4I4N2', 'C4I4I4N2', 'B6D3B0D4', 'H6L1B2L0', 'H6L1B2L0', 'A3D0B4T9', 'A4F9G2D9', 'A4F9G2D9', 'A8L8G5I8', 'A8L8G5I8', 'A8L8G5I8', 'A8L8G5I8', 'B4B6L5T3', 'B4B6L5T3', 'A4H2T4Z1', 'A4H2T4Z1', 'A4H2T4Z1'], Q ['q5', 'q6', 'q7', 'q8', 'q9', 'q11', 'q13', 'q2', 'q3', 'q4', 'q5', 'q8', 'q9', 'q10', 'q4', 'q6', 'q9', 'q6', 'q5', 'q7', 'q11', 'q2', 'q6', 'q1', 'q6', 'q7', 'q8', 'q8', 'q12', 'q2', 'q3', 'q4'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Sample 11: Label tensor([1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 1, 1, 1, 1, 1, 1]), ID ['A4H2T4Z1', 'A4H2T4Z1', 'A4H2T4Z1', 'A4H2T4Z1', 'A4H2T4Z1', 'A4H2T4Z1', 'D8V1G9S8', 'D8V1G9S8', 'D8V1G9S8', 'D8V1G9S8', 'D3N1L0F6', 'A2G5H8A6', 'A2G5H8A6', 'E1Q7D6S9', 'A1X4J5C9', 'I3W1L3O3', 'I3W1L3O3', 'I3W1L3O3', 'B2S2B6H0', 'A3X5I7L2', 'A6D6Y9C8', 'A6D6Y9C8', 'A6D6Y9C8', 'J6A5J4X5', 'J6A5J4X5', 'J6A5J4X5', 'A9B7F6U5', 'A9B7F6U5', 'A9B7F6U5', 'A9B7F6U5', 'A9B7F6U5', 'A9B7F6U5'], Q ['q5', 'q6', 'q7', 'q8', 'q9', 'q11', 'q2', 'q3', 'q5', 'q8', 'q12', 'q3', 'q5', 'q7', 'q8', 'q2', 'q4', 'q9', 'q10', 'q6', 'q5', 'q7', 'q8', 'q7', 'q9', 'q10', 'q1', 'q2', 'q6', 'q7', 'q8', 'q9'], Mode [('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X'), ('hand', 'number_random', 'X')]
+Class distribution in val set (after filtering for modality text):
 lateralite
-0.0    27342
-1.0     5679
+0.0    25121
+1.0     5186
 Name: count, dtype: int64
-Raccolta di 16 immagini dal WebDataset...
-Dimensione del batch di immagini raccolte: torch.Size([16, 3, 224, 224])
-Valori pixel prima del clamp: min=-2.1179, max=2.6400
-Anteprima salvata con successo in: data/anteprima_dataset.png
-┏━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┓
-┃   ┃ Name      ┃ Type       ┃ Params ┃ Mode  ┃ FLOPs ┃   In sizes ┃ Out sizes ┃
-┡━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━┩
-│ 0 │ model     │ JoinedMod… │ 23.6 M │ train │ 8.2 B │     [1, 3, │    [1, 1] │
-│   │           │            │        │       │       │  224, 224] │           │
-│ 1 │ criterion │ BCEWithLo… │      0 │ train │     0 │          ? │         ? │
-└───┴───────────┴────────────┴────────┴───────┴───────┴────────────┴───────────┘
-Trainable params: 69.7 K                                                        
-Non-trainable params: 23.5 M                                                    
-Total params: 23.6 M                                                            
+Raccolta di 16 campioni multimodali dal WebDataset...
+dim in debug images:  torch.Size([32, 3, 3, 224, 224])
+
+--- Elaborazione modalità: 0 ---
+Dimensione del batch per 0: torch.Size([16, 3, 224, 224])
+Valori pixel prima del clamp (0): min=-0.2536, max=3.9439
+Anteprima [0] salvata con successo in: data/anteprima_dataset_0.png
+
+--- Elaborazione modalità: 1 ---
+Dimensione del batch per 1: torch.Size([16, 3, 224, 224])
+Valori pixel prima del clamp (1): min=-0.2536, max=3.9439
+Anteprima [1] salvata con successo in: data/anteprima_dataset_1.png
+
+--- Elaborazione modalità: 2 ---
+Dimensione del batch per 2: torch.Size([16, 3, 224, 224])
+Valori pixel prima del clamp (2): min=-0.2536, max=3.9439
+Anteprima [2] salvata con successo in: data/anteprima_dataset_2.png
+Preparing dataloaders .. 
+┏━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━┓
+┃   ┃ Name      ┃ Type      ┃ Params ┃ Mode  ┃  FLOPs ┃   In sizes ┃ Out sizes ┃
+┡━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━┩
+│ 0 │ model     │ TiledJoi… │ 23.5 M │ train │ 24.5 B │  [1, 3, 3, │    [1, 1] │
+│   │           │           │        │       │        │  224, 224] │           │
+│ 1 │ criterion │ BCEWithL… │      0 │ train │      0 │          ? │         ? │
+└───┴───────────┴───────────┴────────┴───────┴────────┴────────────┴───────────┘
+Trainable params: 23.5 M                                                        
+Non-trainable params: 0                                                         
+Total params: 23.5 M                                                            
 Total estimated model params size (MB): 94                                      
-Modules in train mode: 160                                                      
+Modules in train mode: 156                                                      
 Modules in eval mode: 0                                                         
-Total FLOPs: 8.2 B                                                              
-
-[Epoch 1] Total Trainable Parameters: 69,697
-
-[Epoch 2] Total Trainable Parameters: 69,697
-
-[Epoch 3] Total Trainable Parameters: 69,697
-
-[Epoch 4] Total Trainable Parameters: 69,697
-
-[Epoch 5] Total Trainable Parameters: 69,697
-
-[Epoch 6] Total Trainable Parameters: 69,697
-Epoch 5/29 ━━━━━━━━━━━━━━━━ 6104/-- 0:04:18 •        23.93it/s v_num: 3.000     
-                                    -:--:--                    train_loss_step: 
-                                                               0.811            
-                                                               train_acc_step:  
-                                                               0.375 val_loss:  
-                                                               0.734 val_acc:   
-                                                               0.498            
-                                                               train_loss_epoch:
-                                                               0.680            
-                                                               train_acc_epoch: 
-                                                               0.549            
+Total FLOPs: 24.5 B                                                             
+Experiment parameters successfully logged to /mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet50_model_results/checkpoints/experiments_log.csv
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4482319
+Job ID: 4573712
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: gpu04
+Nodelist: gpu03
 Nodes: 1
-Cores per node: 20
-Job started at: 2026-06-02 18:16:30
-Job ended at:   2026-06-02 18:46:10
-Job Wall-clock time: 00:29:40
-CPU Utilized: 02:21:24
-CPU Efficiency: 23.83% of 09:53:20 core-walltime
-Memory Utilized: 4.82 GB
-Memory Efficiency: 15.07% of 32.00 GB
+Cores per node: 32
+Job started at: 2026-06-08 10:24:24
+Job ended at:   2026-06-08 13:51:42
+Job Wall-clock time: 03:27:18
+CPU Utilized: 23:30:36
+CPU Efficiency: 21.26% of 4-14:33:36 core-walltime
+Memory Utilized: 18.57 GB
+Memory Efficiency: 29.02% of 64.00 GB

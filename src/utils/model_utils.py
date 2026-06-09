@@ -14,6 +14,7 @@ import glob
 from tqdm import tqdm
 from torchvision.transforms import InterpolationMode
 from torchvision import datasets, transforms
+from transformers import VisionEncoderDecoderModel, ViTModel, ViTForImageClassification
 
 #custom models
 class SimpleMockModel(nn.Module):
@@ -182,10 +183,30 @@ class CustomLogreg(nn.Module):
 
 #Pretrained CNN models
 def get_resnet(name,mode, pretrained, **kwargs):
+    def load_ln_checkpoint_for_resnet(full_model,checkpoint,custom_pre_trained_weights):
+        if custom_pre_trained_weights:
+            state_dict = checkpoint['state_dict'] 
+            # Strip the "model." prefix added by LightningModule
+            stripped = {k.removeprefix('model.'): v for k, v in state_dict.items()}
+            keys_to_remove = [k for k in stripped if k.startswith('fc.')]
+            print("Removing keys:", keys_to_remove)  # sanity check
+            for k in keys_to_remove:
+                stripped.pop(k)
+            result = full_model.load_state_dict(stripped, strict=False)  # skips fc.weight / fc.bias 
+            print("Missing keys:", result.missing_keys)    # in model but not in checkpoint
+            print("Unexpected keys:", result.unexpected_keys)  # in checkpoint but not in model
+        return full_model
+    
     from torchvision.models import resnet50, ResNet50_Weights, resnet18, ResNet18_Weights, resnet34, ResNet34_Weights, resnet101, ResNet101_Weights
+    custom_pre_trained_weights = kwargs.get('custom_pre_trained_weights', None)
+    if custom_pre_trained_weights:
+        checkpoint = torch.load(custom_pre_trained_weights)
+        pretrained = False
     if name in ['resnet34_layer1','resnet34_layer2','resnet34_layer3']:
         weights = ResNet34_Weights.IMAGENET1K_V1 if pretrained else None
         full_model = resnet34(weights=weights)
+        #full_model.load_state_dict(checkpoint['model_state_dict']) if custom_pre_trained_weights else None #torch
+        full_model = load_ln_checkpoint_for_resnet(full_model,checkpoint, custom_pre_trained_weights)
         if name=='resnet34_layer1':
             layers = nn.Sequential(
                 full_model.conv1,
@@ -229,17 +250,19 @@ def get_resnet(name,mode, pretrained, **kwargs):
         return model
     elif name in ['resnet50','resnet18','resnet34','resnet101']:
         if name=='resnet50':
-            weights = ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
+            weights = ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
             model = resnet50(weights=weights)
         elif name=='resnet18':
             weights = ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
             model = resnet18(weights=weights)
         elif name=='resnet34':
-            weights = ResNet34_Weights.IMAGENET1K_V1 if pretrained else None
+            weights = ResNet34_Weights.DEFAULT if pretrained else None
             model = resnet34(weights=weights)
         elif name=='resnet101':
-            weights = ResNet101_Weights.IMAGENET1K_V1 if pretrained else None
+            weights = ResNet101_Weights.DEFAULT if pretrained else None
             model = resnet101(weights=weights)
+        #model.load_state_dict(checkpoint['model_state_dict']) if custom_pre_trained_weights else None
+        model = load_ln_checkpoint_for_resnet(model,checkpoint, custom_pre_trained_weights)
         model.fc = torch.nn.Identity()
     else:
         raise ValueError(f"Model {name} is not supported. Choose from ['resnet50', 'resnet18']")
@@ -271,32 +294,47 @@ def simple_resize_transform(size):
     ])
 
 #Pretrained transformer models
-def get_clip_vit(name, mode, **kwargs):
+def get_clip_vit(name, **kwargs):
     from transformers import CLIPModel
     normalization=True if name=="clip-vit-large-patch14" else False
     if name=="clip-vit-large-patch14-un":
         name="clip-vit-large-patch14"
     class WrappedModelInter(nn.Module):
-        """
-        Works with either:
-        - transformers.CLIPVisionModel
-        - transformers.CLIPModel  (uses .vision_model internally)
-        Returns [CLS] from the specified vision block.
-        """
-        def __init__(self, model, layer_index: int = 12):
-            super().__init__()
-            # If it's a full CLIPModel, grab the vision tower
-            self.vision = getattr(model, "vision_model", model)
-            num_layers = self.vision.config.num_hidden_layers
-            assert 1 <= layer_index <= num_layers, f"layer_index must be in [1, {num_layers}]"
-            self.layer_index = layer_index
+      """
+      Uses register_forward_hook to extract CLS from a specific
+      encoder layer — works regardless of transformers version.
+      """
+      def __init__(self, model, layer_index: int = 12):
+          super().__init__()
+          self.vision = getattr(model, "vision_model", model)
 
-        def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-            # Run ONLY the vision encoder; request hidden states
-            out = self.vision(pixel_values=pixel_values, output_hidden_states=True)
-            hs = out.hidden_states[self.layer_index]   # [B, seq_len, hidden_dim]
-            cls = hs[:, 0, :]                          # [CLS]
-            return cls
+          num_layers = self.vision.config.num_hidden_layers
+          assert 1 <= layer_index <= num_layers, \
+              f"layer_index must be in [1, {num_layers}]"
+
+          self._captured = None
+
+          # Hook fires after encoder.layers[layer_index - 1] completes
+          # layer_index=12 → layers[11] → output after block 12
+          target_layer = self.vision.encoder.layers[layer_index - 1]
+          self._hook = target_layer.register_forward_hook(self._capture_hook)
+
+      def _capture_hook(self, module, input, output):
+          # CLIPEncoderLayer returns a tuple; index 0 is the hidden state
+          hidden = output[0] if isinstance(output, tuple) else output
+          self._captured = hidden
+
+      def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+          self._captured = None
+          # Just run the full vision model — the hook captures mid-way
+          self.vision(pixel_values=pixel_values)
+          assert self._captured is not None, "Hook did not fire"
+          return self._captured[:, 0, :]  # CLS token
+
+      def remove_hook(self):
+          """Call this when done to avoid memory leaks.
+          Memory leaks are a problem if you re-initialize the model multiple times in a notebook."""
+          self._hook.remove()
     class WrappedModel(torch.nn.Module):
         def __init__(self, model, type_of_output='cls',normalization=False):
             super().__init__()
@@ -306,6 +344,7 @@ def get_clip_vit(name, mode, **kwargs):
 
         def forward(self, x):
             image_features = self.model.get_image_features(x)
+            image_features = image_features.last_hidden_state[:, 0, :]  # CLS token
             # Normalize the features (optional but common)
             if self.normalization:
                 image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
@@ -345,6 +384,7 @@ def get_clip_vit(name, mode, **kwargs):
         return WrappedModelInter(model, layer_index=12)
     else:
         return WrappedModel(model,'cls',normalization) #add an option for other ways of reading the output
+        #return WrappedVisionModelExpl(model.vision_model, 'cls',normalization=normalization)
     #return WrappedVisionModelExpl(model.vision_model, type_of_output=kwargs.get('type_of_output', 'cls'),normalization=normalization)
 def get_clip_vit_transforms(name, **kwargs):
     from transformers import CLIPImageProcessor
@@ -368,7 +408,7 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         model = get_resnet(name,mode, pretrained, **kwargs)
         transform = get_resnet_transforms(**kwargs)
     elif name.startswith('clip-vit'):
-        model = get_clip_vit(name, mode, pretrained, **kwargs)
+        model = get_clip_vit(name, **kwargs)
         transform = get_clip_vit_transforms(name, **kwargs) 
     elif name == 'custom_cnn':
         model = CustomBinaryCNN() 
@@ -381,6 +421,69 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
     return model, transform
+def get_sklearn_model(name='logreg', **kwargs): 
+    if name=='svm':
+        from sklearn.svm import SVC
+        C=kwargs.get('C',1.0)
+        return SVC(kernel='rbf', C=C, gamma='scale', probability=True, random_state=42)
+    elif name=='logreg':
+        from sklearn.linear_model import LogisticRegression
+        penalty=kwargs.get('penalty','l2')
+        C=kwargs.get('C',1.0)
+        solver=kwargs.get('solver','lbfgs')
+        max_iter=kwargs.get('max_iter',5000)
+        return LogisticRegression(max_iter=max_iter, random_state=42, penalty=penalty, C=C, solver=solver)
+    elif name=='gbm':
+        # Define the models
+        from sklearn.ensemble import GradientBoostingClassifier
+        return GradientBoostingClassifier(
+            n_estimators=100, #100 is standard 
+            learning_rate=0.1,  
+            max_depth=3,  
+            random_state=42
+        )
+    elif name=='lgbm':
+        import lightgbm as lgb
+        from lightgbm import early_stopping, log_evaluation
+        return lgb.LGBMClassifier(
+            n_estimators=1000,
+            learning_rate=0.05,
+            max_depth=5,
+            num_leaves=20,
+            min_child_samples=30,#Minimum number of data samples per leaf
+            subsample=0.8, #Randomness in row 
+            colsample_bytree=0.8, #and feature sampling respectively.
+            reg_alpha=1.0, # L1 regularization
+            reg_lambda=1.0, # L2 regularization
+            random_state=42,
+            n_jobs=-1,
+            min_split_gain=0.01,  # Minimum gain to make a split
+        )
+    elif name=='xgb':
+        from xgboost import XGBClassifier
+        return XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+    #rf = RandomForestClassifier(n_estimators=100, max_depth=None, random_state=42)
+    elif name=='rf':
+        from sklearn.ensemble import RandomForestClassifier
+        return RandomForestClassifier(
+            n_estimators=200,            # More trees = more stable
+            max_depth=10,                # Limits tree depth (main regularizer)
+            min_samples_split=10,        # Minimum samples to split a node
+            min_samples_leaf=5,          # Minimum samples at a leaf node
+            max_features='sqrt',         # Random feature selection at each split
+            bootstrap=True,              # Use bootstrapped samples (default)
+            oob_score=True,              # Out-of-bag error estimate
+            random_state=42,
+            n_jobs=-1
+        )
+    elif name=='mlp':
+        from sklearn.neural_network import MLPClassifier
+        hidden_layer_sizes = kwargs.get('hidden_layer_sizes', 256)
+        return MLPClassifier(hidden_layer_sizes=(hidden_layer_sizes,), activation='relu', solver='adam',
+                            max_iter=200, random_state=42, early_stopping=True, validation_fraction=0.1, n_iter_no_change=10)
+    elif name=='dt':
+        from sklearn.tree import DecisionTreeClassifier
+        return DecisionTreeClassifier(max_depth=3, min_samples_split=5, min_samples_leaf=2, ccp_alpha=0.01, random_state=42)
 def get_classification_head(name='MLPClassifier1',in_features=512,num_classes=2,**kwargs):
     dropout = kwargs.get('dropout', 0.5)
     activation = kwargs.get('activation', 'relu')
@@ -466,7 +569,58 @@ class JoinedModels(nn.Module):
         features = self.vision_model(x)  # image -> features
         logits = self.classifier(features)  # features -> prediction
         return logits
+class TiledJoinedModels(nn.Module):
 
+    def __init__(self, vision_model, classifier):
+        # Fixed the mismatch: super() should match the current class name
+        super().__init__()
+        self.vision_model = vision_model
+        self.classifier = classifier
+
+    def forward(self, x):
+        # x shape: (B, n, C, H, W)
+        B, n, C, H, W = x.size()
+
+        # 1. Collapse Batch and Tile dimensions into a single batch
+        # New shape: (B * n, C, H, W)
+        x_flattened = x.view(B * n, C, H, W)
+
+        # 2. Forward pass through vision model in parallel (1 call instead of n)
+        # Expected output shape per image: (B * n, feature_dim)
+        features_flattened = self.vision_model(x_flattened)
+
+        # 3. Reshape back to separate Batch and Tiles, then flatten tiles into features
+        # Shape transition: (B * n, feature_dim) -> (B, n * feature_dim)
+        feature_dim = features_flattened.size(-1)
+        combined_feats = features_flattened.view(B, n * feature_dim)
+
+        # 4. Final classification
+        return self.classifier(combined_feats)
+class ConcatenateViews(nn.Module):
+    def __init__(self, vision_model):
+        # Fixed the mismatch: super() should match the current class name
+        super().__init__()
+        self.vision_model = vision_model
+
+    def forward(self, x):
+        # x shape: (B, n, C, H, W)
+        B, n, C, H, W = x.size()
+
+        # 1. Collapse Batch and Tile dimensions into a single batch
+        # New shape: (B * n, C, H, W)
+        x_flattened = x.view(B * n, C, H, W)
+
+        # 2. Forward pass through vision model in parallel (1 call instead of n)
+        # Expected output shape per image: (B * n, feature_dim)
+        features_flattened = self.vision_model(x_flattened)
+
+        # 3. Reshape back to separate Batch and Tiles, then flatten tiles into features
+        # Shape transition: (B * n, feature_dim) -> (B, n * feature_dim)
+        feature_dim = features_flattened.size(-1)
+        features = features_flattened.view(B, n, feature_dim)  # ← Changed this line
+
+        
+        return features
 #others
 def test_output(size, model):
     dummy_input = torch.rand(1, 3, size, size)
@@ -478,6 +632,9 @@ def test_output(size, model):
         patch = inputs['pixel_values'].squeeze()
     else:
         patch = transform(dummy_input)'''
+    #print(model)
     with torch.no_grad():
         output = model(dummy_input)
     return output
+
+

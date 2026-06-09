@@ -2,7 +2,7 @@ import tarfile
 import time
 import io
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 import os
@@ -23,18 +23,22 @@ import shutil
 #from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks import Callback
 import re
+import signal
+import sys
 
 from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset
-from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP
+from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
+from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
+from src.utils.visualization import debug_images_dataset
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
 
 #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
 LIST_OF_IDS_HANDEDNESS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
 
-#data_folder = "png_resized_padded_whitebg"
-data_folder = "all_png_resized_padded"
+#data_folder = "png_resized_padded_whitebg", "all_png_resized_padded" 
+data_folder = "all_no_grids_png_whitebg" 
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
 
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
@@ -45,271 +49,53 @@ SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(q) for q in range(1,14)]
 
 #Model definition
-MODEL = 'clip-vit-large-patch14-un' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+MODEL = 'resnet50' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
 huggingface_transform=True if MODEL in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
-CLASSIFICATION_HEAD = 'MLPClassifier1' #'MLPClassifier1'#'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
+transform_override = True #if true overrides the transform defined for the model with ta custom one
+CLASSIFICATION_HEAD = 'linear' #'MLPClassifier1'#'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
 PARAMS = {
     'dropout': 0.2,
     'hidden_sizes': [32],
     'with_input_norm': 'batch_norm'
 }
-layers_to_unfreeze = ['classifier']#['layer4','classifier'] #Update it for every model
+lr_backbone=1e-4
+lr_classifier_head=1e-3 
+lr_scheduling = None #'cosine' # 'cosine', 'step', None
+ETA_MIN_COSINE = 1e-6
+num_epochs = 50
+patience = 20
+layers_to_unfreeze = ['all','classifier'] #Update it for every model
+define_optimization_groups = [
+        {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': 1e-5, 'lr_name': 'lr_1'},
+        {'names': ['layer2'],'lr': 3e-5, 'lr_name': 'lr_2'},
+        {'names': ['layer3'],'lr': 1e-4, 'lr_name': 'lr_3'},
+        {'names': ['layer4'],'lr': 3e-4, 'lr_name': 'lr_4'},
+        {'names': ['classifier'], 'lr': lr_classifier_head, 'lr_name': 'lr_head'},
+    ] # or None or other configurations fo other models
+custom_pre_trained_weights = os.path.join(
+    '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
+    'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
+)
+
+#None
 input_size = 224
 
-TEST = 'all_Qs_balanced' #'balanced_loss', 'balanced_data', 'balanced_data_and_loss'
+TEST = 'all_with_pre_trained_weights_resnet50' #'balanced_loss', 'balanced_data', 'balanced_data_and_loss'
 EXPERIMENT_NAME = f"{MODEL}_{data_folder}"
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
 TRAIN = True  # Set to False to skip training and only run validation evaluation
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
 checkpoint_to_load='v_1/best-epoch=01-val_loss=0.69.ckpt'#best.ckpt , None last.ckpt
 DEBUG_IMGS = True
-GET_STATISTICS = False
 SEED=42
-DATA_MODALITY = 'digit' # 'X', 'text', 'digit'
+DATA_MODALITY = 'all' # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+NUM_tiles = 1
 
 BALANCED_DATA = True
 USE_BALANCED_WEIGHTS = False
 BALANCING_FACTOR = 1
 MAJORITY_CLASS_ID = 0
-
-def prepare_handedness_dataset(shard_pattern, decode_approach='pil',load_in_memory=False, split_workers=True, 
-                               batch_size=4, transform = None, modality='X',rate=1, balanced_data=False, exclusion_set=set()):
-    def filter(sample):
-        # 'sample' is a dictionary. 
-        # Assumes you have decoded the class label (e.g., via .cls or custom key)
-        label = sample[1].item()  # Adjust this if your label is stored differently
-        subject_id = sample[2]  # Assuming the subject ID is stored in the third position of the tuple returned by select_single_modality
-        
-        if label == -1:
-            return False  # Filter out samples with missing labels
-        elif subject_id in exclusion_set:
-            return False  # Filter out samples whose subject ID is in the exclusion set
-        '''elif label == MAJORITY_CLASS_ID and balanced_data:
-            # Keep only 20% of the majority class samples
-            return random.random() < BALANCING_FACTOR*rate  # Adjust the rate as needed (e.g., 0.2 for 20%)'''
-        # Always keep minority classes
-        return True
-    def select_single_modality(sample, transform=None, modality='X'):
-        if modality == 'X':
-            modality_string = 'X'
-        elif modality == 'text':
-            modality_string = 'hand'
-        elif modality == 'digit':
-            modality_string = 'number_random'
-
-        img_tensor = None
-        label = None
-        blank_image = torch.zeros(3, 224, 224)  # Assuming 3 channels and 224x224 size for ResNet18
-        
-        for key, value in sample.items():
-            #print(f"Processing key: {key} with value type: {type(value)}")
-            if key.endswith((".png", ".jpg", ".jpeg")):
-                parts = key.split('.')
-                #example key: q5.number_random.png
-
-                #print(f"Processing key: {key} with parts: {parts}")
-                #raise Exception("Debugging: Stopping after processing the first image key to check the key structure and modality matching.")
-
-                # If it matches our target modality, process it
-                if len(parts) == 3 and parts[1].lower() == modality_string.lower():
-                    try:
-                        if transform is not None:
-                            img_tensor = transform(value) 
-                        elif isinstance(value, torch.Tensor):
-                            img_tensor = value
-                        else:
-                            img_tensor = T.ToTensor()(value)
-                    except Exception as e:
-                        print(f"Skipping corrupted image {key}: {e}")
-                            
-            elif key.endswith("json"):
-                label = torch.tensor(value.get("label", -1), dtype=torch.long)
-                subject_id = value.get("subject", "unknown") 
-        #raise Exception("Debugging: Stopping after processing the first sample to check the key structure, modality matching, and label extraction.")
-                
-        # If we are missing either the image or the label, return the filter flag (-1)
-        if img_tensor is None or label is None:
-            return blank_image, torch.tensor(-1, dtype=torch.long) , subject_id,0,0
-        
-        # Return the image directly. 
-        # Shape will be (Channels, Height, Width) instead of (1, Channels, Height, Width)
-        return img_tensor, label , subject_id,0,0
-    
-    # 1. Use glob to find all files matching the pattern
-    shard_files = glob.glob(shard_pattern)
-    # Sort them just to be safe so they load in order
-    shard_files.sort()
-
-
-    if load_in_memory:
-        return 0
-    else:
-        # 1. Define the base WDS Pipeline
-        dataset = wds.WebDataset(shard_files, shardshuffle=100)
-
-        # 2. Conditionally apply worker splitting
-        if split_workers:
-            dataset = dataset.select(wds.split_by_worker)
-
-        # 3. Apply the remaining transformations
-        dataset = (dataset
-            .decode(decode_approach)
-            .map(lambda sample: select_single_modality(sample, transform,modality=modality)) 
-            .select(filter) # to filter missing data (labelled as -1)
-            .batched(batch_size,partial=False) 
-        )
-    return dataset
-
-def prepare_handedness_dataset_all(shard_pattern, decode_approach='pil', load_in_memory=False, 
-                               split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',huggingface_transform=False):
-    if modality == 'X':
-        modality_string = 'X'
-    elif modality == 'text':
-        modality_string = 'hand'
-    elif modality == 'digit':
-        modality_string = 'number_random'
-    
-    # 1. Create a closure to pass arguments into the compose function
-    def create_flattener(transform_func):
-        def flatten_samples(src):
-            """Takes an iterator of samples and yields multiple individual images."""
-            for sample in src:
-                label = None
-                subject_id = "unknown"
-                
-                # Step A: Find the JSON file first to get the label and subject
-                for key, value in sample.items():
-                    if key.endswith("json"):
-                        label = torch.tensor(value.get("label", -1), dtype=torch.long)
-                        subject_id = value.get("subject", "unknown")
-                        break # Found it, no need to keep checking other keys for json
-                        
-                # Step B: Filter at the sample level
-                # If the sample is missing a label or has a -1 label, skip the whole sample
-                if label is None or label.item() == -1:
-                    continue
-                    
-                # Step C: Process and YIELD images one by one
-                for key, value in sample.items():
-                    if key.endswith((".png", ".jpg", ".jpeg")):
-                        parts = key.split('.')
-                        
-                        # Expected format: q5.number_random.png
-                        if len(parts) == 3 and parts[1].lower() == modality_string.lower():
-                            questionnaire = parts[0]
-                            modality_type = parts[1]
-
-                            complete_example_id = f"{subject_id}_{questionnaire[1:]}"
-                            if complete_example_id in exclusion_set: #the exclusion set ids are the subjects_id + the questionnaire number
-                                #since the exclusion is specific for the questionnaire, no tfor the subject 
-                                continue
-                            
-                            try:
-                                # Apply transformations
-                                if transform_func is not None:
-                                    if huggingface_transform:
-                                        inputs = transform_func(images=value, return_tensors="pt")
-                                        img_tensor = inputs['pixel_values'][0]
-                                    else:
-                                        img_tensor = transform_func(value) 
-                                elif isinstance(value, torch.Tensor):
-                                    img_tensor = value
-                                else:
-                                    img_tensor = T.ToTensor()(value)
-                                
-                                # YIELD ONE ROW AT A TIME
-                                yield img_tensor, label, subject_id, questionnaire, modality_type
-                                
-                            except Exception as e:
-                                print(f"Skipping corrupted image {key}: {e}")
-                                
-        return flatten_samples
-
-    # 2. File gathering
-    shard_files = glob.glob(shard_pattern)
-    shard_files.sort()
-
-    if load_in_memory:
-        return 0 # Handle your in-memory logic here
-        
-    # 3. Build the WebDataset Pipeline
-    dataset = wds.WebDataset(shard_files, shardshuffle=100)
-
-    if split_workers:
-        dataset = dataset.select(wds.split_by_worker)
-
-    # 4. Apply the flattening and batching
-    dataset = (dataset
-        .decode(decode_approach)
-        .compose(create_flattener(transform)) # This replaces .map() and .select()
-        .batched(batch_size,partial=False)
-    )
-    
-    return dataset
-
-# --- 5. Training & Validation Loop ---
-def train_model(model, train_loader, val_loader, criterion, optimizer, epochs):
-    for epoch in range(epochs):
-        print(f"\nEpoch {epoch+1}/{epochs}")
-        print("-" * 10)
-        
-        # --- Training Phase ---
-        model.train()
-        running_loss = 0.0
-        running_corrects = 0
-        total_train_samples = 0
-        
-        for inputs, labels in train_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            
-            # Zero the parameter gradients
-            optimizer.zero_grad()
-            
-            # Forward pass
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            _, preds = torch.max(outputs, 1)
-            
-            # Backward pass + Optimize
-            loss.backward()
-            optimizer.step()
-            
-            # Statistics
-            running_loss += loss.item() * inputs.size(0)
-            running_corrects += torch.sum(preds == labels.data)
-            total_train_samples += inputs.size(0)
-            
-        epoch_train_loss = running_loss / total_train_samples
-        epoch_train_acc = running_corrects.double() / total_train_samples
-        
-        print(f"Train Loss: {epoch_train_loss:.4f} | Train Acc: {epoch_train_acc:.4f}")
-        
-        # --- Validation Phase ---
-        model.eval()
-        val_loss = 0.0
-        val_corrects = 0
-        total_val_samples = 0
-        
-        # Turn off gradients for validation to save memory and speed up
-        with torch.no_grad():
-            for inputs, labels in val_loader:
-                inputs, labels = inputs.to(device), labels.to(device)
-                
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                _, preds = torch.max(outputs, 1)
-                
-                val_loss += loss.item() * inputs.size(0)
-                val_corrects += torch.sum(preds == labels.data)
-                total_val_samples += inputs.size(0)
-                
-        epoch_val_loss = val_loss / total_val_samples
-        epoch_val_acc = val_corrects.double() / total_val_samples
-        
-        print(f"Val Loss: {epoch_val_loss:.4f} | Val Acc: {epoch_val_acc:.4f}")
-
-    return model
 
 
 def get_args():
@@ -320,74 +106,14 @@ def get_args():
     parser.add_argument("--batches_to_test", type=int, default=50, help="Number of batches to process for benchmark")
     return parser.parse_args()
 
-def debug_images_dataset(dataset, output_path="anteprima_dataset.png", num_immagini=16, mean=None, std=None):
-    """
-    Estrae un numero specifico di immagini da un WebDataset (o standard Dataset) 
-    iterando sugli elementi e le salva in una griglia su file.
-    """
-    # 1. Creiamo un DataLoader temporaneo (batch_size=None mantiene lo streaming nativo)
-    dataloader = DataLoader(
-        dataset, 
-        num_workers=0, 
-        batch_size=None, 
-        prefetch_factor=None,
-    )
-    
-    immagini_raccolte = []
-    data_iter = iter(dataloader)
-    
-    # 2. Iteriamo ed estraiamo campioni finché non raggiungiamo 'num_immagini'
-    print(f"Raccolta di {num_immagini} immagini dal WebDataset...")
-    for sample in data_iter:
-        for img in sample[0]:
-            if len(immagini_raccolte) < num_immagini:
-                immagini_raccolte.append(img.cpu())
-            else:
-                break
-        if len(immagini_raccolte) >= num_immagini:
-            break
-            
-    if len(immagini_raccolte) == 0:
-        print("Errore: Il dataset è vuoto o non è stato possibile estrarre immagini.")
-        return
-
-    # Se lo stream si è esaurito prima del previsto, avvisiamo l'utente
-    if len(immagini_raccolte) < num_immagini:
-        print(f"Nota: Trovate solo {len(immagini_raccolte)} immagini rispetto alle {num_immagini} richieste.")
-
-    # 3. Stack delle immagini individuali in un unico batch tensor [B, C, H, W]
-    immagini = torch.stack(immagini_raccolte, dim=0)
-    print("Dimensione del batch di immagini raccolte:", immagini.size())
-
-    # 4. Denormalizzazione (opzionale ma consigliata se usi transforms.Normalize)
-    if mean is not None and std is not None:
-        # Convertiamo in tensor con dimensioni compatibili [1, C, 1, 1] per il broadcasting su un batch
-        mean_t = torch.tensor(mean).view(1, -1, 1, 1)
-        std_t = torch.tensor(std).view(1, -1, 1, 1)
-        # Ripristiniamo i colori originali: img * std + mean
-        immagini = immagini * std_t + mean_t
-    #for the first image in immagini get the max and min value and print them
-    print(f"Valori pixel prima del clamp: min={immagini.min().item():.4f}, max={immagini.max().item():.4f}")
-    
-    # Assicuriamoci che i valori siano nel range [0, 1] per il salvataggio corretto
-    immagini = torch.clamp(immagini, 0.0, 1.0)
-
-    # 5. Creiamo la cartella di destinazione se non esiste
-    cartella = os.path.dirname(output_path)
-    if cartella and not os.path.exists(cartella):
-        os.makedirs(cartella)
-
-    # 6. Creiamo la griglia e salviamo su file
-    nrow = int(len(immagini_raccolte) ** 0.5)
-    vutils.save_image(immagini, output_path, nrow=nrow, padding=2, normalize=False)
-    
-    print(f"Anteprima salvata con successo in: {output_path}")
 
 class LitModel(L.LightningModule):
-    def __init__(self, model,num_0, num_1,num_classes=2, lr_backbone=1e-4,
-                 lr_classifier_head=1e-3,log_file=None):
+    def __init__(self, write_log,model,num_0, num_1,num_classes=2, lr_backbone=1e-4,
+                 lr_classifier_head=1e-3,example_input_array=torch.randn(1, 3, 224, 224),
+                 opt_groups=None,num_epochs=10,lr_scheduling='cosine'):
         super().__init__()
         self.save_hyperparameters()
+        self.opt_groups = opt_groups
 
         self.num_1 = num_1
         self.num_0 = num_1 * BALANCING_FACTOR if BALANCED_DATA else num_0
@@ -430,14 +156,18 @@ class LitModel(L.LightningModule):
         self.lr_classifier_head = lr_classifier_head
         # Initialize attributes to store sample counts
         self.train_sample_count = 0
-        self.log_file = log_file
-        self.example_input_array = torch.randn(1, 3, 224, 224)  # For visualizing the graph in TensorBoard
+        self.write_log = write_log
+        self.example_input_array = example_input_array
+        self.lr_scheduling = lr_scheduling
 
     def forward(self, x):
         return self.model(x)
     
     # --- Epoch Start Hooks ---
     def on_train_epoch_start(self):
+        if self.current_epoch == 0:
+            self.write_log(f"Device of model at start of training: {next(self.model.parameters()).device}")
+
         # Reset the counter at the beginning of every training epoch
         self.train_sample_count = 0
 
@@ -448,9 +178,20 @@ class LitModel(L.LightningModule):
             labels = labels.float().unsqueeze(1)
         outputs = self(inputs)
 
+        # Check for NaN/inf in model outputs
+        if not torch.isfinite(outputs).all():
+            self.write_log(f"Warning: NaN or inf detected in model outputs at step {self.trainer.global_step}.")
+            # You might want to return or handle this case, e.g., by skipping the step
+            return None
+
         # Accumulate the number of samples in the current batch
         self.train_sample_count += inputs.size(0)
         loss = self.criterion(outputs, labels)
+
+        # Check for NaN/inf in loss
+        if not torch.isfinite(loss):
+            self.write_log(f"Warning: NaN or inf detected in loss at step {self.trainer.global_step}. Skipping update.")
+            return None
         
         # Calculate accuracy
         if self.num_classes == 1:
@@ -462,6 +203,16 @@ class LitModel(L.LightningModule):
         # Log metrics (Lightning tracks epoch averages automatically)
         self.log("train_loss", loss, on_epoch=True, prog_bar=True)
         self.log("train_acc", acc, on_epoch=True, prog_bar=True)
+
+        # Log learning rates directly from the optimizer
+        opt = self.optimizers()
+        if self.opt_groups:
+            for i, group in enumerate(self.opt_groups):
+                self.log(group['lr_name'], opt.param_groups[i]['lr'], on_step=False, on_epoch=True)
+        else:
+            self.log("lr_backbone", opt.param_groups[0]['lr'], on_step=False, on_epoch=True)
+            self.log("lr_classifier_head", opt.param_groups[1]['lr'], on_step=False, on_epoch=True)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -497,49 +248,79 @@ class LitModel(L.LightningModule):
                 total_trainable_params += param.numel()
 
         # Optional: Print to the terminal console so you can see it live during execution
-        print(f"\n[Epoch {self.current_epoch + 1}] Total Trainable Parameters: {total_trainable_params:,}")
+        self.write_log(f"\n[Epoch {self.current_epoch + 1}] Total Trainable Parameters: {total_trainable_params:,}")
         
         # 2. Check if it is the first epoch and write everything to your log file
-        if self.log_file and self.current_epoch == 0:
-            with open(self.log_file, 'w') as f:
-                # Your existing tracking metadata
-                f.write(f"Epoch {self.current_epoch + 1}: Total Training Samples Processed: {self.train_sample_count}\n")
-                f.write(f"Expected total is: {self.total}\n")
-                f.write(f"Class 0 samples: {self.num_0}, Class 1 samples: {self.num_1}\n")
-                f.write(f"Balancing Factor: {BALANCING_FACTOR}\n")
-                f.write(f"Balanced Data: {BALANCED_DATA}, Use Balanced Weights: {USE_BALANCED_WEIGHTS}\n")
-                f.write(f"Weights for Loss Function: {self.class_weights.tolist()}\n")
-                
-                # New: Append the model architecture specifics
-                f.write("\n--- Trainable Model Architecture Summary ---\n")
-                f.write(f"Total Trainable Parameters Count: {total_trainable_params:,}\n")
-                f.write("Trainable Layers Structure:\n")
-                for layer_info in trainable_layers_info:
-                    f.write(f"{layer_info}\n")
+        if self.current_epoch in [0,1]:
+            self.write_log(f"\n--- Epoch {self.current_epoch + 1} Summary ---")
+            # Your existing tracking metadata
+            self.write_log(f"Epoch {self.current_epoch + 1}: Total Training Samples Processed: {self.train_sample_count}\n")
+            self.write_log(f"Expected total is: {self.total}\n")
+            self.write_log(f"Class 0 samples: {self.num_0}, Class 1 samples: {self.num_1}\n")
+            self.write_log(f"Balancing Factor: {BALANCING_FACTOR}\n")
+            self.write_log(f"Balanced Data: {BALANCED_DATA}, Use Balanced Weights: {USE_BALANCED_WEIGHTS}\n")
+            self.write_log(f"Weights for Loss Function: {self.class_weights.tolist()}\n")
+            
+            # New: Append the model architecture specifics
+            self.write_log("\n--- Trainable Model Architecture Summary ---\n")
+            self.write_log(f"Total Trainable Parameters Count: {total_trainable_params:,}\n")
+            self.write_log("Trainable Layers Structure:\n")
+            for layer_info in trainable_layers_info:
+                self.write_log(f"{layer_info}\n")
 
     def configure_optimizers(self):
-        backbone_params = []
-        head_params = []
-        
-        # Segregate parameters based on whether they belong to the classification head
-        for name, param in self.model.named_parameters():
-            if not param.requires_grad:
-                continue
-            
-            # Adjust the string matching here depending on how 'JoinedModels' names your layers.
-            # Usually, new heads are named 'classifier', 'fc', or 'head'.
-            if any(key in name.lower() for key in ['classifier']):
-                head_params.append(param)
-            else:
-                backbone_params.append(param)
+        if self.opt_groups:
+            param_groups = []
+            for group in self.opt_groups:
+                params = [param for name, param in self.model.named_parameters() 
+                                   if any(key in name.lower() for key in group['names']) and param.requires_grad]
+                lr = group['lr']
+                lr_name = group['lr_name'] 
+                param_groups.append({'params': params, 'lr': lr})
                 
-        # Apply a 10x smaller learning rate to the backbone
-        optimizer = torch.optim.Adam([
-            {'params': backbone_params, 'lr': self.lr_backbone},
-            {'params': head_params, 'lr': self.lr_classifier_head}
-        ])
-        
-        return optimizer
+        else:
+            backbone_params = []
+            head_params = []
+            
+            # Segregate parameters based on whether they belong to the classification head
+            for name, param in self.model.named_parameters():
+                if not param.requires_grad:
+                    continue
+                
+                # Adjust the string matching here depending on how 'JoinedModels' names your layers.
+                # Usually, new heads are named 'classifier', 'fc', or 'head'.
+                if any(key in name.lower() for key in ['classifier']):
+                    head_params.append(param)
+                else:
+                    backbone_params.append(param)
+            param_groups = [
+                {'params': backbone_params, 'lr': self.lr_backbone},  # All existing ResNet18 layers
+                {'params': head_params, 'lr': self.lr_classifier_head}       # Only the new final linear layer
+            ]      
+            '''# Apply a 10x smaller learning rate to the backbone
+            optimizer = torch.optim.Adam([
+                {'params': backbone_params, 'lr': self.lr_backbone},
+                {'params': head_params, 'lr': self.lr_classifier_head}
+            ])'''
+
+        optimizer = optim.AdamW(param_groups, weight_decay=1e-2)
+
+        if self.lr_scheduling == 'cosine':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.hparams.num_epochs,
+                eta_min=ETA_MIN_COSINE,
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "monitor": "val_loss",
+                },
+            }
+        else:
+            return {"optimizer": optimizer}
 
     def predict_step(self, batch, batch_idx):
         inputs, labels, subject_id,*_ = batch
@@ -560,6 +341,21 @@ class LitModel(L.LightningModule):
             "labels": labels.detach().cpu(),
             "subject_id": subject_id  # Assuming subject_id is already a CPU tensor or a list of strings
         }
+    
+    def on_after_backward(self):
+        # This hook is called after loss.backward() and before optimizer.step()
+        # We check gradients only on the first batch of the first training epoch
+        if self.trainer.global_step == 0:
+            self.write_log("\n--- Gradient Check (First Batch) ---")
+            for name, param in self.model.named_parameters():
+                if param.requires_grad and param.grad is not None:
+                    # Print the mean absolute gradient for key layers
+                    if 'layer4' in name or 'classifier' in name:
+                        grad_abs_mean = param.grad.abs().mean().item()
+                        self.write_log(f"Layer '{name}': Mean Abs Gradient = {grad_abs_mean:.2e}")
+                        if grad_abs_mean < 1e-8:
+                            self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
+            self.write_log("-------------------------------------\n")
 
 class BestMetricTracker(L.Callback):
     def __init__(self):
@@ -596,19 +392,8 @@ class BestMetricTracker(L.Callback):
             # If you want the epoch where the best validation loss happened:
             self.best_epoch = current_epoch
 
-def generate_exclusion_set_val(csv_data, data_modality):
-    train_data = csv_data[csv_data['split'] == 'val']
-    class_counts = train_data['lateralite'].value_counts()
-    print(f"Class distribution in val set (after filtering for modality {data_modality}):\n{class_counts}")
-    num_0 = class_counts.get(0.0, 0)  # Count of class 0 (e.g., right-handed)
-    num_1 = class_counts.get(1.0, 0)  # Count of class 1 (e.g., left-handed)
-    majority_class_ids = train_data[train_data['lateralite'] == MAJORITY_CLASS_ID]['ident_projet'].unique()
-    # randomly select a fraction of those ids based on the balancing factor
-    majority_ids_to_include = random.sample(list(majority_class_ids), min(int(num_1*BALANCING_FACTOR), len(majority_class_ids)))
-    exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
-    return exclusion_set
-
 def melt_df(df,modality):
+    exclusion_set = set()
     avail_columns=[f'q_{q}_num_{modality}' for q in QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS]
     df_source = df[['ident_projet', 'lateralite','split'] + avail_columns]
     df_long = df_source.melt(
@@ -619,68 +404,123 @@ def melt_df(df,modality):
     )
     print(f"Length of melted df before filtering: {len(df_long)}")
 
-    # 2. Filter rows where the score/value is >= 1
-    df_long = df_long[df_long['score'] >= 1]
-
-    print(f"Length of melted df after filtering: {len(df_long)}")
-
     # 3. Extract the 'q' number from the column name
     # This regex looks for 'q_' followed by digits at the start of the string
     df_long['questionnaire'] = df_long['original_col'].str.extract(r'^q_(\d+)_').astype(int)
 
     df_long['ident_projet'] = df_long['ident_projet'].astype(str) + '_' + df_long['questionnaire'].astype(str)
 
+    # 2. Filter rows where the score/value is >= 1
+    df_filtered = df_long[df_long['score'] < 1]
+    ident_projets_to_exclude = set(df_filtered['ident_projet'].unique())
+    df_long = df_long[df_long['score'] >= 1]
+
+    print(f"Length of melted df after filtering: {len(df_long)}")
+
     # 4. Drop the temporary columns to get your final desired structure
     new_df = df_long[['ident_projet', 'lateralite','split']].reset_index(drop=True)
 
-    return new_df
+    return new_df,ident_projets_to_exclude
+
+def get_trainable_parameters_string(model):
+    """Returns a string containing the names and parameter counts of layers that require gradients."""
+    output_lines = []
+    output_lines.append("\n--- Trainable Parameters ---")
+    
+    total_trainable_params = 0
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            num_params = param.numel()
+            total_trainable_params += num_params
+            output_lines.append(f"  - Layer: {name} | Parameters: {num_params:,}")
+            
+    output_lines.append(f"Total Trainable Parameters: {total_trainable_params:,}")
+    output_lines.append("--------------------------\n")
+    
+    return "\n".join(output_lines)
+
+def save_experiment_logs(params_dict, status_suffix=""):
+    """Helper function to write/append dictionary to the CSV log file."""
+    log_path = os.path.join(CHECKPOINT_PATH, "experiments_log.csv")
+    
+    # Modify the experiment name if it was cancelled to explicitly track it
+    if status_suffix:
+        params_dict["EXPERIMENT_NAME"] = f"{params_dict['EXPERIMENT_NAME']}_{status_suffix}"
+        
+    if not os.path.exists(log_path):
+        df = pd.DataFrame([params_dict])
+        df.to_csv(log_path, index=False)
+    else:
+        df = pd.read_csv(log_path)
+        new_row = pd.DataFrame([params_dict])
+        df = pd.concat([df, new_row], ignore_index=True)
+        df.to_csv(log_path, index=False)
+    print(f"Experiment parameters successfully logged to {log_path}")
 
 def main():
     args = get_args()
     worker = args.num_workers
-    batch_size = 16
+    batch_size = 32
     prefetch_factor = 2
     decode_approach = 'pil'
     load_in_memory = False
     split_workers = True
     transform = None
-    lr_backbone=1e-4
-    lr_classifier_head=1e-3 
     num_classes=1 #1 for BCE loss, 2 for crossentropy
-    num_epochs = 30
-    patience = 5
     exclusion_set = set() # you can add here the ids you want to exclude from the dataset (for example because they are corrupted or for debugging purposes)
+    val_exclusion_set = set()
+    apply_augmentation = True
+    invert_color=True
 
+    if NUM_tiles > 1 and DATA_MODALITY == 'all':
+        print("Warning: Data modality = 'all' and NUM_tiles>1 are incompatible ")
+        return 
+
+
+    if apply_augmentation:
+        #add a random crop transform without resizing
+        augmentation_transform = T.Compose([
+            T.RandomCrop(
+                112, 
+                pad_if_needed=True, 
+                padding_mode='constant', 
+                fill=(255,255,255) # <-- White fill for RGB PIL images
+            )
+        ])
+    else:
+        augmentation_transform = None
+
+    if DATA_MODALITY == 'all':
+        selection_modality = 'text' 
+    else:
+        selection_modality = DATA_MODALITY 
     csv_data = pd.read_csv(LIST_OF_IDS_HANDEDNESS_PATH)
+    '''print('Test num_text exclusion:')
+    print(csv_data.loc[csv_data['ident_projet'] == 'A4V2C8D0'].T)
     print("Columns in the CSV:", csv_data.columns.tolist())
-    csv_data = melt_df(csv_data, modality=DATA_MODALITY)
+    return'''
+    csv_data, num_less_than_1_rows = melt_df(csv_data, modality=selection_modality)
+    exclusion_set.update(num_less_than_1_rows)
+    val_exclusion_set.update(num_less_than_1_rows)
+    print(len(exclusion_set), "samples will be excluded from the dataset based on the num_filtering process for modality", selection_modality)
+    #includes elements that are -1 (hence no extracted file)
     print("CSV after melting:", csv_data.head())
     #cols: 'ident_projet', 'lateralite', 'q_5_num_X', 'q_5_num_text', 'q_5_num_digit', 'split']
-    train_data = csv_data[csv_data['split'] == 'train']
-    print(f"Training samples with at least 1 chunck for modality {DATA_MODALITY}: {len(train_data)}")
 
+    train_data = csv_data[csv_data['split'] == 'train']
+    print(f"Training samples with at least 1 chunck for modality {selection_modality}: {len(train_data)}")
     #get the number of samples for each class
     class_counts = train_data['lateralite'].value_counts()
-    print(f"Class distribution in training set (after filtering for modality {DATA_MODALITY}):\n{class_counts}")
-
+    print(f"Class distribution in training set (after filtering for modality {selection_modality}):\n{class_counts}")
     num_0 = class_counts.get(0.0, 0)  # Count of class 0 (e.g., right-handed)
     num_1 = class_counts.get(1.0, 0)  # Count of class 1 (e.g., left-handed)
     rate = num_1/num_0 if num_0 > 0 else 0
     print(f"Number of samples per class: Class 0 = {num_0}, Class 1 = {num_1}; Total = {num_0 + num_1}")
-
-    if GET_STATISTICS:
-        #lateralite, X filtered
-        #0.0    39271
-        #1.0     3370
-        print("Statistics requested. Stopping after data analysis and class distribution check.")
-        return 
     
     if BALANCED_DATA:
-        # get a list of unique ids for the majority class
-        majority_class_ids = train_data[train_data['lateralite'] == MAJORITY_CLASS_ID]['ident_projet'].unique()
-        # randomly select a fraction of those ids based on the balancing factor
-        majority_ids_to_include = random.sample(list(majority_class_ids), min(int(num_1*BALANCING_FACTOR), len(majority_class_ids)))
-        exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
+        exclusion_set.update( generate_exclusion_set_val(csv_data, data_modality=selection_modality,
+                                                    majority_class_id=MAJORITY_CLASS_ID, balancing_factor=BALANCING_FACTOR, 
+                                                    label_col='lateralite', id_col='ident_projet', split='train') )
     print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
 
     #read the current version number (starts from 1)
@@ -693,8 +533,24 @@ def main():
         current_version = df['current_version'].max() + 1
     print(f"Current experiment version: {current_version}")
 
+    #Create the file to log all relevant information
+    log_folder = os.path.join(OUTPUT_PATH,"custom_logs")
+    if not os.path.exists(log_folder):
+        os.makedirs(log_folder)
+    log_file = os.path.join(log_folder,f"version_{current_version}_training_log.txt")
+    if TRAIN:
+        with open(log_file,'w') as f:
+            f.write("Log file for experiment version: " + str(current_version) + "\n")
+    #define a writign function that creates the file if it doesn't exist and append if it exists and write only if TRAIN==True
+    def write_log(message):
+        if TRAIN:
+            with open(log_file, 'a') as f:
+                f.write(message + "\n")
+
     # Automatically use GPU if available
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    hf_path = os.environ["HF_HOME"]
+    write_log(f"Hugging Face cache directory: {hf_path}")
     if torch.cuda.is_available():
         device_id = torch.cuda.current_device()
         gpu = torch.cuda.get_device_name(device_id)
@@ -702,14 +558,39 @@ def main():
         print(f"--- GPU DIAGNOSTICS ---")
         print(f"Active GPU: {gpu}")
         print(f"CUDA_VISIBLE_DEVICES: {visible}")
+        write_log(f"GPU detected: {gpu} (Device ID: {device_id})")
 
 
-    backbone,transform = get_model(name=MODEL, pretrained=True)
+    backbone,transform = get_model(name=MODEL, pretrained=True, custom_pre_trained_weights=custom_pre_trained_weights)
+    print("############# Model backbone loaded! #############")
+    if transform_override:
+        transform = T.Compose(
+            [
+                T.Resize((input_size, input_size)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.06040578708052635, 0.06040578708052635, 0.06040578708052635], 
+                            std=[0.23823712766170502, 0.23823712766170502, 0.23823712766170502]),
+            ]
+        )
+    #check on which device the backbone is
+    #print(f"Backbone device: {next(backbone.parameters()).device}")
     out=test_output(input_size, backbone)
+    #print(out)
     in_features = out.shape[1]
+    in_features*= 3 if DATA_MODALITY=='all' else 1
+    in_features*= NUM_tiles if NUM_tiles > 1 else 1
     classificaton_head = get_classification_head(name=CLASSIFICATION_HEAD,in_features=in_features,num_classes=num_classes,**PARAMS)
-    model = JoinedModels(backbone, classificaton_head)
+    if DATA_MODALITY == 'all' or NUM_tiles>1:
+        model = TiledJoinedModels(backbone, classificaton_head) #it gets the dimension by itself
+    else:
+        model = JoinedModels(backbone, classificaton_head)
     unfreeze_layers(model,layer_names=layers_to_unfreeze)
+
+    write_log(f"Device of model after initialization: {next(model.parameters()).device}") # <-- ADD THIS LINE
+    trainable_parameters_info = get_trainable_parameters_string(model)
+    write_log("Model Architecture and Trainable Parameters right after initialization:")
+    write_log(trainable_parameters_info)
+
 
     print(f"Reading from {SHARD_PATTERN_train} and {SHARD_PATTERN_val} with decode approach '{decode_approach}' and load_in_memory={load_in_memory}")
     if TRAIN:
@@ -717,12 +598,14 @@ def main():
             train_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
                                                     split_workers=split_workers, batch_size=batch_size, 
                                                     transform=transform, modality=DATA_MODALITY, exclusion_set=exclusion_set, 
-                                                    huggingface_transform=huggingface_transform)
+                                                    huggingface_transform=huggingface_transform, augmentation_transform=augmentation_transform,
+                                                    invert_color=invert_color, n_views=NUM_tiles)
         else:
             train_dataset = prepare_handedness_dataset(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
                                                     split_workers=split_workers, batch_size=batch_size, 
                                                     transform=transform, modality=DATA_MODALITY, 
-                                                    rate=rate, balanced_data=BALANCED_DATA, exclusion_set=exclusion_set)
+                                                    rate=rate, balanced_data=BALANCED_DATA, exclusion_set=exclusion_set, augmentation_transform=augmentation_transform,
+                                                    invert_color=invert_color)
     if DEBUG_IMGS and TRAIN:
         # Iterate through the first few items to see what labels are coming out
         for i, (img, label, id,q,mode) in enumerate(train_dataset):
@@ -730,22 +613,30 @@ def main():
             if i > 10: break
     
     #print(f"Number of dataset samples (train): {len(train_dataset)}")
-    val_exclusion_set = generate_exclusion_set_val(csv_data, data_modality=DATA_MODALITY)
+    val_exclusion_set.update( generate_exclusion_set_val(csv_data, data_modality=selection_modality,
+                                                   majority_class_id=MAJORITY_CLASS_ID, balancing_factor=BALANCING_FACTOR, 
+                                                   label_col='lateralite', id_col='ident_projet', split='val') )
     if 'all' in EXPERIMENT_NAME:
         val_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
                                                      split_workers=split_workers, batch_size=batch_size,
                                                      transform=transform, modality=DATA_MODALITY, exclusion_set=val_exclusion_set, 
-                                                     huggingface_transform=huggingface_transform)
+                                                     huggingface_transform=huggingface_transform, augmentation_transform=augmentation_transform,
+                                                     invert_color=invert_color, n_views=NUM_tiles)
     else:
         val_dataset = prepare_handedness_dataset(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
                                                     split_workers=split_workers, batch_size=batch_size, 
-                                                    transform=transform, modality=DATA_MODALITY, balanced_data=False, exclusion_set=val_exclusion_set)
+                                                    transform=transform, modality=DATA_MODALITY, balanced_data=False, exclusion_set=val_exclusion_set,
+                                                    augmentation_transform=augmentation_transform)
     if DEBUG_IMGS and TRAIN:
         #sample N data points at random from the train dataset, save them in an image with the corresponding label
         mean=[0.485, 0.456, 0.406]
         std=[0.229, 0.224, 0.225]
-        debug_images_dataset(train_dataset, output_path="data/anteprima_dataset.png", num_immagini=16, mean=None, std=None)
+        n_stacked=NUM_tiles
+        if DATA_MODALITY == 'all':
+            n_stacked = 3
+        debug_images_dataset(train_dataset, output_path="data/anteprima_dataset.png", num_immagini=16, mean=None, std=None, n_stacked=n_stacked)
  
+    print("Preparing dataloaders .. ")
     #raise Exception("Debugging: Stopping after dataset preparation and image debugging. Check 'anteprima_dataset.png' for a visual preview of the data and verify labels in the console output.")
 
     if TRAIN:
@@ -764,12 +655,15 @@ def main():
         pin_memory=True
     )
 
-    #criterion = nn.CrossEntropyLoss()
-    log_folder = os.path.join(OUTPUT_PATH,"custom_logs")
-    if not os.path.exists(log_folder):
-        os.makedirs(log_folder)
-    lit_model = LitModel(model=model, num_0=num_0, num_1=num_1, num_classes=num_classes,lr_backbone=lr_backbone, lr_classifier_head=lr_classifier_head,
-                         log_file=os.path.join(log_folder,f"version_{current_version}_training_log.txt"))
+    if DATA_MODALITY == 'all':
+        example_input_array = torch.randn(1, 3,3, 224, 224)  # For visualizing the graph in TensorBoard
+    elif NUM_tiles > 1:
+        example_input_array = torch.randn(1, NUM_tiles, 3, 224, 224)
+    else:
+        example_input_array = torch.randn(1, 3, 224, 224)
+    lit_model = LitModel(write_log,model=model, num_0=num_0, num_1=num_1, num_classes=num_classes,lr_backbone=lr_backbone, 
+                         lr_classifier_head=lr_classifier_head, example_input_array=example_input_array, 
+                         opt_groups=define_optimization_groups, num_epochs=num_epochs, lr_scheduling=lr_scheduling)
 
 
     # 2. Setup Checkpointing
@@ -824,25 +718,20 @@ def main():
         max_epochs=num_epochs,
         logger = tb_logger,
         accelerator="auto",                # Automatically selects GPU/CPU/MPS
-        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker]
+        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker],
+        profiler="simple",  # Add this line to get a performance summary
+        enable_progress_bar=False  # Remove this CPU overhead
     )
     # if you want you can set anothr kind of logger (not tensorboard but csv ..)
 
     if TRAIN:
-        # This replaces your entire training loop function
-        trainer.fit(lit_model, train_dataloaders=train_loader, val_dataloaders=val_loader)
-        #save experiment parameters in a dict 
-        #generate timestamp
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        #get the best_epoch the model was saved at, the best val_loss and val_acc
-        
         experiment_params = {
-            "timestamp": timestamp,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
             "MODEL": MODEL,
             "TEST": TEST,
             "EXPERIMENT_NAME": EXPERIMENT_NAME,
             "DATA_MODALITY": DATA_MODALITY,
-            "MODEL_MODALITY": layers_to_unfreeze, #which layers were unfreezed before training (All=all layers, [] or [frozen]=no layers)
+            "MODEL_MODALITY": layers_to_unfreeze,
             "BALANCED_DATA": BALANCED_DATA,
             "USE_BALANCED_WEIGHTS": USE_BALANCED_WEIGHTS,
             "NUM_0": num_0,
@@ -850,26 +739,38 @@ def main():
             "RATE": rate,
             "BALANCING_FACTOR": BALANCING_FACTOR,
             "batch_size": batch_size,
-            "lr": [lr_backbone,lr_classifier_head],
+            "lr": [lr_backbone, lr_classifier_head],
             "num_epochs": num_epochs,
             "patience": patience,
             "current_version": current_version,
-            "best_epoch": metrics_tracker.best_epoch,
-            "best_val_loss": metrics_tracker.best_val_loss,
-            "best_val_acc": metrics_tracker.best_val_acc,
-            "best_train_acc": metrics_tracker.best_train_acc,
+            "best_epoch": "N/A (Cancelled)",
+            "best_val_loss": "N/A (Cancelled)",
+            "best_val_acc": "N/A (Cancelled)",
+            "best_train_acc": "N/A (Cancelled)",
         }
-        #if it exists open the log file in CHECKPOINT_PATH, else create it 
-        log_path = os.path.join(CHECKPOINT_PATH,"experiments_log.csv")
-        if not os.path.exists(log_path):
-            #save the experiment_parameters converting the dict to a dataframe and then to csv
-            df = pd.DataFrame([experiment_params])
-            df.to_csv(log_path, index=False)
-        else:
-            df = pd.read_csv(log_path)
-            new_row = pd.DataFrame([experiment_params])
-            df = pd.concat([df, new_row], ignore_index=True)
-            df.to_csv(log_path, index=False)
+
+        def handle_slurm_cancel(signum, frame):
+            print(f"\n[SLURM] Job received signal {signum} (Cancellation/Timeout). Logging parameters before exiting...")
+            
+            save_experiment_logs(experiment_params, status_suffix="CANCELLED")
+            sys.exit(0)
+
+        # Register the handler for SIGTERM (Slurm cancel/timeout)
+        signal.signal(signal.SIGTERM, handle_slurm_cancel)
+
+        # This replaces your entire training loop function
+        trainer.fit(lit_model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+        #save experiment parameters in a dict 
+        #get the best_epoch the model was saved at, the best val_loss and val_acc
+        # If it finishes successfully, update the metrics dictionary with the real values
+        experiment_params["best_epoch"] = metrics_tracker.best_epoch
+        experiment_params["best_val_loss"] = metrics_tracker.best_val_loss
+        experiment_params["best_val_acc"] = metrics_tracker.best_val_acc
+        experiment_params["best_train_acc"] = metrics_tracker.best_train_acc
+        
+        # Save normal log
+        save_experiment_logs(experiment_params)
+        
     else:
         print("\n--- Starting Validation Evaluation ---")
     

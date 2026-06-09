@@ -103,21 +103,22 @@ Data for ID A0C5I2D5:
     Class: hand_sentences_full | Scalar Value: 9 | Array Shape: (2, 2)
     Class: number | Scalar Value: 107 | Array Shape: (2, 10)
     Class: number_random | Scalar Value: 107 | Array Shape: (2, 10)
-Image size is (252, 267, 3) and number of tiles is 18
+First tile width: 52 | Tile height: 59
+Image size is (252, 267, 3) and number of tiles is 18 -> average tile size is 59.396969619669996x62.93250352560273
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4482164
+Job ID: 4508960
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n23
+Nodelist: n16
 Nodes: 1
 Cores per node: 2
-Job started at: 2026-06-02 18:10:12
-Job ended at:   2026-06-02 18:10:15
-Job Wall-clock time: 00:00:03
+Job started at: 2026-06-03 09:44:49
+Job ended at:   2026-06-03 09:44:50
+Job Wall-clock time: 00:00:01
 CPU Utilized: 00:00:01
-CPU Efficiency: 16.67% of 00:00:06 core-walltime
-Memory Utilized: 988.00 KB
-Memory Efficiency: 0.02% of 4.00 GB
+CPU Efficiency: 50.00% of 00:00:02 core-walltime
+Memory Utilized: 22.72 MB
+Memory Efficiency: 0.55% of 4.00 GB

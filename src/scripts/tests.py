@@ -142,8 +142,12 @@ def get_h5_data():
     num_tiles = id_data['q6']['number'][0]
     img = save_class_image('q6','number','/home/a_morelli/vscode_projects/model_training/data',array_val,id)
     coords = get_tiles(img,array_val,num_tiles)
+    #get the width and height of the first tile
+    w = coords[0][0][2]-coords[0][0][0]
+    h = coords[0][0][3]-coords[0][0][1]
+    print(f"First tile width: {w} | Tile height: {h}")
     img_processed = recolor_border_via_profiles(img, coords)
-    print(f"Image size is {img.shape} and number of tiles is {num_tiles}")
+    print(f"Image size is {img.shape} and number of tiles is {num_tiles} -> average tile size is {img.shape[0]/math.sqrt(num_tiles)}x{img.shape[1]/math.sqrt(num_tiles)}")
     #save the processed image
     save_image_path = os.path.join('/home/a_morelli/vscode_projects/model_training/data', f"{id}_q6_number_processed.png")
     cv2.imwrite(save_image_path, img_processed)
@@ -253,6 +257,7 @@ def recolor_border_via_profiles(image, coords, black_tolerance=5):
         if len(x_content_indices) == 0 or len(y_content_indices) == 0 or tile_num==-1:
             #set the tile to white
             image[y1:y2, x1:x2] = 255
+            continue
         
         # 5. Identify the bounding box coordinates
         # The first and last indices represent the edges of the core content

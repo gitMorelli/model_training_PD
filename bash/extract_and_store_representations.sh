@@ -4,12 +4,13 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/extract_representations.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=20              # Number of CPU cores per task
-#SBATCH --mem=32G                      # Job memory request
-#SBATCH --time=00:30:00                # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=32              # Number of CPU cores per task
+#SBATCH --mem=64G                      # Job memory request
+#SBATCH --time=08:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #SBATCH --partition=visuq,gpgpuq
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:a100:1
+#--gres=gpu:1
 #--gres=gpu:p40:1
 #--nodelist=gpu04
 #--gres=gpu:t4:1
@@ -32,4 +33,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.extract_and_store_representations \
-    --num_workers 18
+    --num_workers 30

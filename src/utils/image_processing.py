@@ -79,6 +79,7 @@ def recolor_border_via_profiles(image, coords, black_tolerance=5):
         if len(x_content_indices) == 0 or len(y_content_indices) == 0 or tile_num==-1:
             #set the tile to white
             image[y1:y2, x1:x2] = 255
+            continue
         
         # 5. Identify the bounding box coordinates
         # The first and last indices represent the edges of the core content

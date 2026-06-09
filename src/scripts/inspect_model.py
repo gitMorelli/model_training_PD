@@ -28,7 +28,7 @@ from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 
 def main():
-    model_name ='resnet18'
+    model_name ='resnet50'
     classifier_name='linear'
     output_path=f"data/model_structures/{model_name}_structure.txt"
     if not os.path.exists(output_path):
