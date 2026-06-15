@@ -204,6 +204,8 @@ def prepare_handedness_dataset_all(shard_pattern, decode_approach='pil', load_in
         modality_string = 'hand'
     elif modality == 'digit':
         modality_string = 'number_random'
+    elif modality == 'sent':
+        modality_string = 'hand_sentences_full'
     else:
         modality_string = 'all'
     
@@ -648,6 +650,138 @@ def load_representations_handedness(output_path, as_dataframe=False, to_torch=Fa
         reps_by_name = {k: torch.from_numpy(v) for k, v in reps_by_name.items()}
  
     return metadata, reps_by_name
+
+# Functions and datasets for extracting debug information
+def explore_data(shard_pattern, load_in_memory=False, 
+                               split_workers=True, batch_size=4):
+    def create_df():
+        def flatten_samples(src):
+            """Takes an iterator of samples and yields multiple individual images."""
+            for sample in src:
+                label = None
+                subject_id = "unknown"
+                
+                # Step A: Find the JSON file first to get the label and subject
+                for key, value in sample.items():
+                    if key.endswith("json"):
+                        try:
+                            json_str = value.decode('utf-8') if isinstance(value, bytes) else value
+                            json_data = json.loads(json_str)
+                            label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
+                            subject_id = json_data.get("subject", "unknown")
+                            shard_name = json_data.get("shard_name", "unknown") 
+                        except Exception as e:
+                            print(f"Error parsing JSON for sample {key}: {e}")
+                        break
+                        
+                # Step B: Filter at the sample level
+                # If the sample is missing a label or has a -1 label, skip the whole sample
+                if label is None or label.item() == -1:
+                    continue
+                    
+                # Step C: Process and YIELD images one by one
+                for key, value in sample.items():
+                    if key.endswith((".png", ".jpg", ".jpeg")):
+                        parts = key.split('.')
+                        
+                        # Expected format: q5.number_random.png
+                        if len(parts) == 3:
+                            questionnaire = parts[0]
+                            modality_type = parts[1]
+                            
+                            try:
+                                if isinstance(value, bytes):
+                                    img_source = Image.open(io.BytesIO(value))
+                                    #convert to grayscale
+                                    img = img_source.convert('L')
+                                else:
+                                    img = value # Fallback in case it somehow got decoded
+                                #compute mean intensity
+                                arr=np.array(img)
+                                mean_intensity = arr.mean()
+                                #compute std
+                                std_intensity = arr.std()
+                                #compute ink density
+                                threshold = 128                                # pixels darker than this = ink
+                                ink_pixels = (arr < threshold).sum()
+                                ink_density_binary = ink_pixels / arr.size    # fraction of inked pixels
+
+                                img_properties = {
+                                    'format': img_source.format, #img format theimage was loaded from
+                                    'num_channels_original': len(img_source.getbands()), #number of channels in the original image before conversion
+                                    'mode': img_source.mode, #the color mode (e.g., RGB, RGBA, L)
+                                    'size': img.size, #width, height
+                                    'ratio': img.size[0] / img.size[1] if img.size[1] != 0 else None, #aspect ratio
+                                    'mean_intensity': mean_intensity, #mean pixel intensity
+                                    'std_intensity': std_intensity, #std of pixel intensity
+                                    'ink_density_binary': ink_density_binary, #fraction of pixels that are ink (binary threshold)
+                                }
+
+                                #get the filename from the shard_name path
+                                shard_filename = os.path.basename(shard_name)
+
+                                yield subject_id, questionnaire, modality_type, label, shard_filename, img_properties
+                                
+                            except Exception as e:
+                                print(f"Skipping corrupted image {key}: {e}")
+                                
+        return flatten_samples
+
+    
+    # 2. File gathering
+    shard_files = glob.glob(shard_pattern)
+    shard_files.sort()
+
+    if load_in_memory:
+        return 0 # Handle your in-memory logic here
+        
+    # 3. Build the WebDataset Pipeline
+    dataset = wds.WebDataset(shard_files, shardshuffle=False)
+
+    if split_workers:
+        dataset = dataset.select(wds.split_by_worker)
+
+    # 4. Apply the flattening and batching
+    dataset = (dataset
+        #.decode(decode_approach)
+        .compose(create_df()) # This replaces .map() and .select()
+    )
+    
+    return dataset
+
+#Training samples selection
+def melt_df(df,modality,threshold=1, questionnaires_to_include=None):
+    if questionnaires_to_include is None:
+        questionnaires_to_include = [str(q) for q in range(1,14)]
+    exclusion_set = set()
+    avail_columns=[f'q_{q}_num_{modality}' for q in questionnaires_to_include]
+    df_source = df[['ident_projet', 'lateralite','split'] + avail_columns]
+    df_long = df_source.melt(
+        id_vars=['ident_projet', 'lateralite','split'], 
+        value_vars=avail_columns,
+        var_name='original_col', 
+        value_name='score'
+    )
+    print(f"Length of melted df before filtering: {len(df_long)}")
+
+    # 3. Extract the 'q' number from the column name
+    # This regex looks for 'q_' followed by digits at the start of the string
+    df_long['questionnaire'] = df_long['original_col'].str.extract(r'^q_(\d+)_').astype(int)
+
+    df_long['ident_projet'] = df_long['ident_projet'].astype(str) + '_' + df_long['questionnaire'].astype(str)
+
+    # 2. Filter rows where the score/value is >= 1
+    df_filtered = df_long[df_long['score'] < threshold]
+    ident_projets_to_exclude = set(df_filtered['ident_projet'].unique())
+    df_long = df_long[df_long['score'] >= threshold]
+
+    print(f"Length of melted df after filtering: {len(df_long)}")
+
+    # 4. Drop the temporary columns to get your final desired structure
+    new_df = df_long[['ident_projet', 'lateralite','split']].reset_index(drop=True)
+
+    return new_df,ident_projets_to_exclude
+
 
 # Class rebalancing
 def generate_exclusion_set_val(csv_data, data_modality, majority_class_id, balancing_factor, label_col='lateralite',id_col='ident_projet',split='train'):

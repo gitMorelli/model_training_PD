@@ -9,7 +9,7 @@
 #SBATCH --time=08:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #SBATCH --partition=visuq,gpgpuq
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:h100:1
 #--gres=gpu:1
 #--gres=gpu:p40:1
 #--nodelist=gpu04

@@ -162,7 +162,7 @@ if __name__ == "__main__":
         mode="min",
         save_top_k=1,
         dirpath=CHECKPOINT_PATH,
-        filename="best-resnet18-mnist-{epoch:02d}-{val_loss:.4f}"
+        filename="best-mnist-{epoch:02d}-{val_loss:.4f}"
     )
 
     # 3. Initialize the logger

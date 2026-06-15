@@ -262,7 +262,8 @@ def get_resnet(name,mode, pretrained, **kwargs):
             weights = ResNet101_Weights.DEFAULT if pretrained else None
             model = resnet101(weights=weights)
         #model.load_state_dict(checkpoint['model_state_dict']) if custom_pre_trained_weights else None
-        model = load_ln_checkpoint_for_resnet(model,checkpoint, custom_pre_trained_weights)
+        if custom_pre_trained_weights:
+            model = load_ln_checkpoint_for_resnet(model,checkpoint, custom_pre_trained_weights)
         model.fc = torch.nn.Identity()
     else:
         raise ValueError(f"Model {name} is not supported. Choose from ['resnet50', 'resnet18']")
@@ -394,6 +395,34 @@ def get_clip_vit_transforms(name, **kwargs):
         name = name.replace('-inter','')
     processor = CLIPImageProcessor.from_pretrained(f"openai/{name}")
     return processor
+def get_swin(name, mode, pretrained, **kwargs):
+    if name == "swin_t":
+        from torchvision.models import swin_t, Swin_T_Weights
+        weights = Swin_T_Weights.IMAGENET1K_V1 if pretrained else None
+        model = swin_t(weights=weights)
+    elif name == "swin_s":
+        from torchvision.models import swin_s, Swin_S_Weights
+        weights = Swin_S_Weights.IMAGENET1K_V1 if pretrained else None
+        model = swin_s(weights=weights)
+    elif name == "swin_b":
+        from torchvision.models import swin_b, Swin_B_Weights
+        weights = Swin_B_Weights.IMAGENET1K_V1 if pretrained else None
+        model = swin_b(weights=weights)
+    if mode == 'classification head':
+        num_classes = kwargs.get('num_classes', 2) 
+        hidden_sizes = kwargs.get('hidden_sizes', [128])
+        in_features = model.head.in_features
+        mlp = CustomMLP(input_size=in_features, hidden_sizes=hidden_sizes, output_size=num_classes)
+        model.head = mlp
+    model.head = torch.nn.Identity()
+    return model
+def get_swin_transforms(name='swin_s',**kwargs):
+    transform = transforms.Compose([
+        transforms.Resize((256,256), interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    return transform
 
 #Model loading
 def get_model(name="resnet50", mode='classification head', pretrained=True,checkpoint_path=None, **kwargs):
@@ -410,6 +439,9 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
     elif name.startswith('clip-vit'):
         model = get_clip_vit(name, **kwargs)
         transform = get_clip_vit_transforms(name, **kwargs) 
+    elif name.startswith('swin'):
+        model = get_swin(name, mode, pretrained, **kwargs)
+        transform = get_swin_transforms(name, **kwargs)
     elif name == 'custom_cnn':
         model = CustomBinaryCNN() 
         input_size = kwargs.get('input_size', 224)

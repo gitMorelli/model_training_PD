@@ -60,7 +60,7 @@ GET_STATISTICS = False
 SEED=42
 DATA_MODALITY = "all" # text,digit,X,all 
 NUM_tiles = 1 #num tiles to concatenate in a single extraction
-NUM_augmentations = 3 #number of times to process the same image with a random augmentation
+NUM_augmentations = 2 #number of times to process the same image with a random augmentation
 invert_color = True
 exclusion_set = set()
 huggingface_transform = False
@@ -356,7 +356,7 @@ def run_inference_to_dataframe(
 def main():
     args = get_args()
     worker = args.num_workers
-    batch_size = 16
+    batch_size = 32
     prefetch_factor = 2
     decode_approach = 'pil'
     load_in_memory = False

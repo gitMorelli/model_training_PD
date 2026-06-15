@@ -28,7 +28,7 @@ from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 
 def main():
-    model_name ='resnet50'
+    model_name ='swin_s'
     classifier_name='linear'
     output_path=f"data/model_structures/{model_name}_structure.txt"
     if not os.path.exists(output_path):
@@ -41,12 +41,15 @@ def main():
     model = JoinedModels(backbone, classificaton_head)
     # Scriviamo la struttura del modello su file
     # The improved logging method
+    total_parameters = 0
     with open(output_path, 'w') as f:
         f.write(f"Output_shape: {in_features}\n\n")
         f.write("--- Model Parameter Names for Freezing/Unfreezing ---\n\n")
         for name, param in model.named_parameters():
             # This writes the EXACT name, its current freeze state, and its shape
             f.write(f"Name: {name:<40} | Trainable: {param.requires_grad} | Shape: {list(param.shape)}\n")
+            total_parameters += param.numel()
+        f.write(f"\nTotal Parameters: {total_parameters}\n")
         f.write("\n--- Model Structure ---\n\n")
         f.write(str(model))
     

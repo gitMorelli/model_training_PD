@@ -94,3 +94,18 @@ def recolor_border_via_profiles(image, coords, black_tolerance=5):
 
         image[y1:y2, x1:x2] = white_background.copy()
     return image
+
+
+# custom torch transforms
+import torchvision.transforms.functional as F
+from torchvision.transforms import InterpolationMode
+class ResizeLongestSide:
+    def __init__(self, size, interpolation=InterpolationMode.BILINEAR):
+        self.size = size
+        self.interpolation = interpolation
+
+    def __call__(self, img):
+        _, h, w = F.get_dimensions(img)        # works for PIL or tensor
+        scale = self.size / max(h, w)
+        new_h, new_w = round(h * scale), round(w * scale)
+        return F.resize(img, [new_h, new_w], interpolation=self.interpolation)

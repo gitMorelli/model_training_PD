@@ -1,3 +1,10 @@
+Scripts
+- model_evaluation: runs the evaluation on the selected checkpoint. COmpute predictions for val or for val+train and stores a file
+with the predicted values for each unique id+questionnaire in the checkpoint folder for the model 
+- create_statistics_on_images: iterate on the images using the data loader. Builds a table with relevant image properties. Merges the information with that 
+from other csv table (the original matching csv with covariates, the csv of predictions)
+- parallel_create_shards: the num=0 and num=-1 inputs are not saved in the shards (they are empty or missing)
+
 Shard structure:
 B6S9B6X9.json (23 bytes)
   - B6S9B6X9.q1.X.png (6684 bytes)

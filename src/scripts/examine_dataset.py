@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
-
+from src.utils.image_processing import ResizeLongestSide
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
 
 #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
@@ -419,7 +419,7 @@ def main():
     split_workers = True
     transform = None
     exclusion_set = set() # you can add here the ids you want to exclude from the dataset (for example because they are corrupted or for debugging purposes)
-    apply_augmentation = True
+    apply_augmentation = False
     invert_color=True
     random.seed(SEED)
 
@@ -427,8 +427,10 @@ def main():
     if apply_augmentation:
         #add a random crop transform without resizing
         augmentation_transform = T.Compose([
+            #resize to 448x448
+            ResizeLongestSide(448),
             T.RandomCrop(
-                336, 
+                224, 
                 pad_if_needed=True, 
                 padding_mode='constant', 
                 fill=(255, 255, 255) # <-- White fill for RGB PIL images
@@ -437,6 +439,7 @@ def main():
     else:
         augmentation_transform = None
     transform = T.Compose([
+        T.Resize((224, 224)),
         T.ToTensor(),          # Scales pixels to [0, 1]
         T.Normalize(mean=[0.06040578708052635, 0.06040578708052635, 0.06040578708052635], 
                         std=[0.23823712766170502, 0.23823712766170502, 0.23823712766170502]),

@@ -33,11 +33,11 @@ from sklearn.preprocessing import StandardScaler
 from src.utils.data_loading_utils import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
 
-SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/feature_extraction/resnet18_extracted_features/imagenet_resnet18_text_tiles1_aug3" 
+SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/feature_extraction/clip-vit-large-patch14-inter_extracted_features/clip_clip-vit-large-patch14-inter_all_tiles1_aug2" 
 SEED=42
-DATA_MODALITY = "text" # text,digit,X,all 
+DATA_MODALITY = "all" # text,digit,X,all 
 NUM_tiles = 1 #num tiles to concatenate in a single extraction
-NUM_augmentations = 3 #number of times to process the same image with a random augmentation
+NUM_augmentations = 2 #number of times to process the same image with a random augmentation
 
 def get_args():
     import argparse
@@ -78,6 +78,7 @@ def balance_df_data_handedness(train, val):
     rate = num_1/num_0 if num_0 > 0 else 0
     print(f"Number of samples per class: Class 0 = {num_0}, Class 1 = {num_1}; Total = {num_0 + num_1}")
     return train, val
+
 
 def main():
     args = get_args()
