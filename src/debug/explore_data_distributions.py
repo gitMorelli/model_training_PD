@@ -618,7 +618,8 @@ def confidence_prediction_analysis(df, out_dir):
     plt.savefig(os.path.join(out_dir, 'confidence_by_correctness.png'), dpi=150, bbox_inches='tight')
 
 
-def main(show_preview=True,run_validity_checks=True,generate_num_statistics=True, generate_correlations=True):
+def main(show_preview=False,run_validity_checks=False,generate_num_statistics=False, generate_correlations=False, 
+         run_metadata_analysis=False, run_confidence_prediction_analysis = False, save_file=True):
     args = get_args()
 
     matching_ids_df = pd.read_csv(LIST_OF_IDS_PATH)
@@ -649,9 +650,16 @@ def main(show_preview=True,run_validity_checks=True,generate_num_statistics=True
 
     statistics_df['area'] = statistics_df['width'] * statistics_df['height']
     #the area values seem off (order of 1e7)
-    metadata_analysis(statistics_df, out_dir=os.path.join(OUT_PATH,'metadata'))
+    if run_metadata_analysis:
+        metadata_analysis(statistics_df, out_dir=os.path.join(OUT_PATH,'metadata'))
 
-    confidence_prediction_analysis(statistics_df, out_dir=os.path.join(OUT_PATH,'confidence_analysis'))
+    if run_confidence_prediction_analysis:
+        confidence_prediction_analysis(statistics_df, out_dir=os.path.join(OUT_PATH,'confidence_analysis'))
+
+    if save_file:
+        out_path = os.path.join(OUT_PATH, "merged_statistics_w_predictions_w_original.csv")
+        statistics_df.to_csv(out_path, index=False)
+        print(f"Saved merged statistics with predictions to {out_path}")
     
 
 if __name__ == "__main__":

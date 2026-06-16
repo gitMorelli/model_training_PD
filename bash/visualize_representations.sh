@@ -1,16 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=debug_loading
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/evaluation/debug_loading.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/debug_loading.err
+#SBATCH --job-name=visualize_representations
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/evaluation/visualize_rep.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/visualize_rep.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=4              # Number of CPU cores per task
-#SBATCH --mem=16G                      # Job memory request
-#SBATCH --time=00:10:00                # Time limit hrs:min:sec
+#SBATCH --mem=20G                      # Job memory request
+#SBATCH --time=00:15:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
 #--partition=visuq,gpgpuq
 #--gres=gpu:1
 #--gres=gpu:a100:1
+#--gres=gpu:v100:1
 #--gres=gpu:p40:1
 #--nodelist=gpu04
 #--gres=gpu:t4:1
@@ -32,5 +33,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 
 cd $HOME_DIR
 # --- Execution ---
-$ENV_PYTHON -m src.debug.debug_loading \
-    --num_workers 6
+$ENV_PYTHON -m src.debug.visualize_representations
