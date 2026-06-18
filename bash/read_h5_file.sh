@@ -1,12 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=tests
+#SBATCH --job-name=read_h5
+#--array=0-3
 #SBATCH --nodes=1                     # 1 Node per array task
-#SBATCH --cpus-per-task=10          
-#SBATCH --mem=4G                     # Request enough RAM for 16 parallel processes
-#SBATCH --time=00:10:00               # Estimated time for 500 images
+#SBATCH --cpus-per-task=24           
+#SBATCH --mem=64G                     # Request enough RAM for 16 parallel processes
+#SBATCH --time=02:00:00               # Estimated time for 500 images
 #SBATCH --partition=shortq
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/tests.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/tests.err
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/read_h5.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/read_h5.err
 
 # 1. Load necessary modules (this varies by cluster)
 # module load python/3.10
@@ -18,6 +19,7 @@
 PROJECT_ROOT="/home/a_morelli/vscode_projects/model_training"
 ENV_PYTHON="/home/a_morelli/.conda/envs/torch_gpu/bin/python"
 
+#export SLURM_ARRAY_COUNT=4
 # Add this line to resolve the libiomp5 conflict
 export KMP_DUPLICATE_LIB_OK=TRUE
 #export OMP_NUM_THREADS=1
@@ -30,4 +32,5 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 cd $PROJECT_ROOT
 
 # 2. Run using the -m flag (No .py extension, use dots for path)
-$ENV_PYTHON -u -m src.scripts.tests
+$ENV_PYTHON -m src.scripts.read_h5_file \
+    --n_workers 20

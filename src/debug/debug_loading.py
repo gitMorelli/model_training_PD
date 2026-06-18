@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from collections import defaultdict
 import torch.nn.functional as F
+import pickle
 
 from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, melt_df
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
@@ -40,7 +41,7 @@ CSV_LOAD_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_sta
 LIST_OF_IDS_HANDEDNESS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
 
 #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
-data_folder = "all_no_grids_png_resized_half_whitebg"
+data_folder = "all_no_grids_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
 
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
@@ -53,13 +54,13 @@ SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/dataset_info"
 input_size = 224
 DEBUG_IMGS = True
 SEED=42
-DATA_MODALITY = 'all' # 'X', 'text', 'digit', 'all'
+DATA_MODALITY = 'digit' #'all' # 'X', 'text', 'digit', 'all'
 
 BALANCED_DATA = True
 BALANCING_FACTOR = 1
 MAJORITY_CLASS_ID = 0
 THRESHOLD_NUM = 1
-NUM_tiles = 1
+NUM_tiles = 3
 
 MEAN = [0.06040578708052635, 0.06040578708052635, 0.06040578708052635]
 STD = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
@@ -414,8 +415,15 @@ def get_dataloader(args,normalized=True):
     load_in_memory = False
     split_workers = True
     transform = None
-    apply_augmentation = True
+    apply_augmentation = False
     invert_color=True
+    use_grid = True
+
+    grid_dict = None
+    if use_grid:
+        with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "rb") as f:
+            grid_dict = pickle.load(f)
+        print("Grid dictionary loaded successfully. Number of entries:", len(grid_dict))
 
     if apply_augmentation:
         #add a random crop transform without resizing
@@ -488,7 +496,7 @@ def get_dataloader(args,normalized=True):
                                             split_workers=split_workers, batch_size=batch_size, 
                                             transform=transform, modality=DATA_MODALITY, exclusion_set=exclusion_set, 
                                             huggingface_transform=False, augmentation_transform=augmentation_transform,
-                                            invert_color=invert_color)
+                                            invert_color=invert_color, grid_dict=grid_dict)
 
     train_loader = DataLoader(
         train_dataset, 
@@ -500,7 +508,7 @@ def get_dataloader(args,normalized=True):
 
     if DATA_MODALITY == 'all':
         example_input_array = torch.randn(3,3, 224, 224)  # For visualizing the graph in TensorBoard
-    elif NUM_tiles > 1:
+    elif NUM_tiles > 1 or use_grid:
         example_input_array = torch.randn(NUM_tiles, 3, 224, 224)
     else:
         example_input_array = torch.randn(3, 224, 224)
@@ -513,6 +521,16 @@ def study_dataloader(args):
     train_loader_un_normalized, _ = get_dataloader(args,normalized=False)
     compute_per_modality_norm(train_loader_un_normalized, num_modalities=expected_shape[1], max_batches=None)
     dataset_overview(train_loader, num_modalities=expected_shape[1], num_classes=2, max_batches=50)
+def compute_time_to_iterate_on_dataloader(args):
+    import time
+    start = time.time()
+    train_loader, expected_shape = get_dataloader(args)
+    for batch_idx, batch in enumerate(train_loader):
+        img_tensor, *_ = batch
+        #print(f"Batch {batch_idx}: img_tensor shape: {img_tensor.shape}, label shape: {label.shape}, subject_id_batch shape: {subject_id_batch.shape}, questionnaire_batch shape: {questionnaire_batch.shape}")
+    end = time.time()
+    elapsed_time = end - start
+    print(f"Time taken to iterate over the dataloader: {elapsed_time:.2f} seconds")
 def random_samples_from_dataloader(args,out_folder,batches_to_show=3):
     os.makedirs(out_folder, exist_ok=True)
     #this functions shows images and properties of a random sample of images from the dataloader
@@ -555,7 +573,13 @@ def random_samples_from_dataloader(args,out_folder,batches_to_show=3):
         if n_batches >= batches_to_show:
             break
 def grids_of_random_samples(args,out_folder,batches_to_show=3):
-    os.makedirs(out_folder, exist_ok=True)
+    if os.path.exists(out_folder):
+        #delete all files in the folder
+        for entry in os.listdir(out_folder):
+            path = os.path.join(out_folder, entry)
+            shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+    else:
+        os.makedirs(out_folder, exist_ok=True)
     #this functions shows images and properties of a random sample of images from the dataloader
     train_loader, expected_shape = get_dataloader(args)
 
@@ -571,7 +595,11 @@ def grids_of_random_samples(args,out_folder,batches_to_show=3):
     
     for b_idx, batch in enumerate(take_random_batches(train_loader, 3, max_batches=100)):
         imgs = batch[0] if isinstance(batch, (list, tuple)) else batch  # (B, n, C, H, W)
-        n = imgs.shape[1]
+        if len(expected_shape) == 3:
+            n = 1
+            imgs = imgs.unsqueeze(1)  # Add a modality dimension if only one view
+        else:
+            n = imgs.shape[1]
         mean = torch.as_tensor(MEAN).expand(n, -1)   # (n, C), no copy
         std  = torch.as_tensor(STD).expand(n, -1)
         show_batch_grid(
@@ -730,12 +758,18 @@ def debug_from_shards(args,out_folder, augmentation_transform, transform, invert
         #convert to tensor
         save_image_list(img_list, path, nrow=3, size=(224, 224),
                         mean=None, std=None, title=title, stacked=True)
+    def process_path(path):
+        in_tar_path = path.split('/')[1]
+        questionnaire = in_tar_path.split('.')[1]
+        modality = in_tar_path.split('.')[2]
+        subject_id = in_tar_path.split('.')[0]
+        return subject_id,questionnaire, modality
 
     
     #key values you can use: 'hand', 'number_random', 'X', 'hand_sentences_full', 'all' 
     #name in the shard is the same as name here
     high_num_names, low_num_names = get_images_w_low_high_num(n_images=6, modality='hand', questionnaire=['q5','q10'])
-    images_per_id = specific_samples_from_shards(list_of_ids=['D3B2E9R1'], modality=None, questionnaire=None)
+    images_per_id = specific_samples_from_shards(list_of_ids=['D3I3J0N6','A0P9N2Q7'], modality=None, questionnaire=None)
     images_to_augment = grid_augmentations(n_samples=3, modality=None, questionnaire=None)
     
     save_to_grid(high_num_names, out_folder, 'high_num_grid.png')
@@ -743,7 +777,18 @@ def debug_from_shards(args,out_folder, augmentation_transform, transform, invert
 
     for subject_id in images_per_id:
         specific_names = images_per_id[subject_id]
-        save_to_grid(specific_names, out_folder, f'{subject_id}_grid.png')
+        print("#"*50)
+        print(f"Saving grid for subject {subject_id} with {len(specific_names)} images.")
+        print(f"Specific names: {specific_names}")
+        for q in ['q'+str(i) for i in range(1,14)]:
+            this_list=[]
+            for name in specific_names:
+                if q==process_path(name)[1]:
+                    this_list.append(name)
+            this_out_folder=os.path.join(out_folder,f"{subject_id}")
+            os.makedirs(this_out_folder, exist_ok=True)
+            if len(this_list)>0:
+                save_to_grid(this_list, this_out_folder, f'{q}_grid.png')
 
     for image_name in images_to_augment:
         subject_id=image_name.split('/')[1].split('.')[0]
@@ -751,7 +796,18 @@ def debug_from_shards(args,out_folder, augmentation_transform, transform, invert
 
     return
 
-def main(run_random_samples_from_loader=False, run_study_loader = False, show_grids=False, run_debug_from_shards=True):
+def explore_files(filename='worker94_shard-000000/D3I3J0N6.q1.hand.png'):
+    #this function explores the files in the shards and prints some properties of them
+    shard_path = os.path.join(SOURCE_PATTERN,"train",filename.split('/')[0]+".tar")
+    subject=filename.split('/')[1].split('.')[0]
+    with tarfile.open(shard_path) as tar:
+        print("Elements for subject ",subject)
+        for member in tar.getmembers():
+            if subject in member.name:
+                print(f"- {member.name}")
+
+def main(run_random_samples_from_loader=False, run_study_loader = False, show_grids=True, run_compute_time=True, run_debug_from_shards=False,
+         run_explore_files=False):
     args = get_args()
     random.seed(SEED)
 
@@ -760,6 +816,9 @@ def main(run_random_samples_from_loader=False, run_study_loader = False, show_gr
     
     if show_grids:
         grids_of_random_samples(args, out_folder=os.path.join(SAVE_PATH, "grids"), batches_to_show=3)
+    
+    if run_compute_time:
+        compute_time_to_iterate_on_dataloader(args)
         
     if run_study_loader:
         study_dataloader(args)
@@ -784,6 +843,8 @@ def main(run_random_samples_from_loader=False, run_study_loader = False, show_gr
         debug_from_shards(args, out_folder=os.path.join(SAVE_PATH, "debug_from_shards"), 
                           augmentation_transform=augmentation_transform, transform=transform, invert_color=True)
         #add some other grids (eg larger than higher, bad predictions, ...)
+    if run_explore_files:
+        explore_files(filename='worker94_shard-000000/D3I3J0N6.q1.hand.png')
 
 
 

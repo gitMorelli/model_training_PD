@@ -50,7 +50,7 @@ SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(q) for q in range(1,14)]
 
 #Model definition
-MODEL = 'resnet50' #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+MODEL = 'resnet18' #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
 huggingface_transform=True if MODEL in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
 transform_override = True #if true overrides the transform defined for the model with ta custom one
@@ -66,13 +66,13 @@ input_size = 224
 EXPERIMENT_NAME = f"{MODEL}_{data_folder}"
 RESULTS_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
 CHECKPOINT_PATH = os.path.join(RESULTS_PATH, "checkpoints")
-checkpoint_to_load='v_10/best-epoch=55-val_loss=0.91.ckpt'#best-epoch=55-val_loss=0.91.ckpt'#best.ckpt , None last.ckpt
+checkpoint_to_load='v_30/best-epoch=09-val_loss=0.69.ckpt'#best-epoch=55-val_loss=0.91.ckpt'#best.ckpt , None last.ckpt
 DEBUG_IMGS = False
 SEED=42
-DATA_MODALITY = 'all' # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+DATA_MODALITY = 'digit' # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
 NUM_tiles = 1
 
-BALANCED_DATA = True
+BALANCED_DATA = False
 USE_BALANCED_WEIGHTS = False
 BALANCING_FACTOR = 1
 MAJORITY_CLASS_ID = 0
@@ -211,7 +211,7 @@ def main():
     unique_ids_in_train = csv_data[csv_data['split'] == 'train']['ident_projet'].unique()
     print(f"Debug -> exclusion set length (val): {len(val_exclusion_set)}; Remaining samples in val dataset: {len(unique_ids_in_val) - len(val_exclusion_set)}")
     print(f"Debug -> exclusion set length (train): {len(exclusion_set)}; Remaining samples in train dataset: {len(unique_ids_in_train) - len(exclusion_set)}")
-    return 
+    
     val_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
                                                     split_workers=split_workers, batch_size=batch_size,
                                                     transform=transform, modality=DATA_MODALITY, exclusion_set=val_exclusion_set, 
@@ -261,7 +261,17 @@ def main():
         example_input_array = torch.randn(1, NUM_tiles, 3, 224, 224)
     else:
         example_input_array = torch.randn(1, 3, 224, 224)
-    lit_model = LitModel(write_log=None,model=model, num_0=1, num_1=1, num_classes=num_classes, example_input_array=example_input_array)
+    
+    # 1. Gather predictions using the best checkpoint saved during training
+    # Setting ckpt_path="best" tells Lightning to automatically find your top model
+    ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
+    '''# 3. Load the checkpoint file (weights are skipped, only reading metadata)
+    checkpoint = torch.load(ckpt_path, map_location="cpu")
+    print(f"Checkpoint loaded from: {ckpt_path}")
+    # 4. Extract the exact epoch
+    best_epoch = checkpoint["epoch"]
+    print(f"The best model was saved at epoch: {best_epoch}")'''
+    lit_model = LitModel.load_from_checkpoint(ckpt_path, write_log=False)
 
     tb_logger=False
 
@@ -274,16 +284,7 @@ def main():
     
     print("\n--- Starting Validation Evaluation ---")
 
-    # 1. Gather predictions using the best checkpoint saved during training
-    # Setting ckpt_path="best" tells Lightning to automatically find your top model
-    ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
-    # 3. Load the checkpoint file (weights are skipped, only reading metadata)
-    checkpoint = torch.load(ckpt_path, map_location="cpu")
-    print(f"Checkpoint loaded from: {ckpt_path}")
-    # 4. Extract the exact epoch
-    best_epoch = checkpoint["epoch"]
-    print(f"The best model was saved at epoch: {best_epoch}")
-    outputs = trainer.predict(lit_model, dataloaders=val_loader,ckpt_path = ckpt_path)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
+    outputs = trainer.predict(lit_model, dataloaders=val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
     results_df, all_probs, all_preds, all_labels = get_result_df(outputs)
 
     #show 10 example outputs and the corresponding expected label
@@ -321,7 +322,7 @@ def main():
         print(results_df.head(10))
 
     if PREDICT_ON_TRAIN:
-        outputs = trainer.predict(lit_model, dataloaders=train_loader,ckpt_path = ckpt_path)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
+        outputs = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
         results_df_train, all_probs, all_preds, all_labels = get_result_df(outputs)
         q = results_df_train['questionnaire'].astype(str).str.removeprefix('q')
         results_df_train['ident_projet'] = results_df_train['subject_id'].astype(str) + '_' + q

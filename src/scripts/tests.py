@@ -9,8 +9,11 @@ import math
 import numpy as np
 import cv2
 import re
+import pickle
+import time
 
-from src.utils.file_utils import get_id_data_from_h5_file
+
+from src.utils.data_loading_utils import pre_load_grid_data
 
 def test_read_json(tar_path="/mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A0C5I2D5.tar"):
 
@@ -274,6 +277,18 @@ def recolor_border_via_profiles(image, coords, black_tolerance=5):
     return image
 
 if __name__ == "__main__":
-    get_h5_data()
+    #get_h5_data()
     #test_read_json()
     #test_read_templates()
+    csv_data = pd.read_csv("/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv")
+    result=pre_load_grid_data("/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5",
+                       csv_data)
+    with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "wb") as f:
+        pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
+    start = time.time()
+    with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "rb") as f:
+        data = pickle.load(f)
+    end = time.time()
+    print(f"Data loaded from pickle in {end - start:.2f} seconds.")
+    
+    

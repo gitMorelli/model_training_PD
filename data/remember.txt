@@ -1,3 +1,15 @@
+Usage:
+You want to debug a model? Eg a resnet18 model on the handedness dataset? -> 
+1)train it 2) load the good checkpoint and extract the representations (representations will be stored in the feature_extraction folder 
+corresponding to the model with an informative name)
+3) run the model to generate predictions (predictions will be stored in the same folder as the checkpoint)
+4) Run the explore_data_distribution script to aggregate predictions to the dataset descripting tables -> the script saves the merged csv to the model folder
+5) run visualize_representations to inspect the representations you get with this model
+
+Notes
+For evaluation scripts notice that merged_statistics_w_predictions_w_original.csv is only for the last model you are analyzing (no model name -> be careful
+or change the name to have the model name and checkpoint version)
+
 Scripts
 - model_evaluation: runs the evaluation on the selected checkpoint. COmpute predictions for val or for val+train and stores a file
 with the predicted values for each unique id+questionnaire in the checkpoint folder for the model 
@@ -59,7 +71,7 @@ Q8
 Page: 1 | Expected Dimension: (1664, 2365)
 Page: 2 | Expected Dimension: (1664, 2363)
 q8_v2
-Page: 1 | Expected Dimension: (1664, 1624)
+Page: 1 | Expected Dimension: (1664, 1624) 
 Page: 2 | Expected Dimension: (1664, 1658)
 
 Struttura file h5

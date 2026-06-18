@@ -17,6 +17,8 @@ import random
 import json
 from pathlib import Path
 import numpy as np
+import h5py
+import sys
 
 #Datasets and dataloaders for speed tests
 class InMemoryWdsDataset(torch.utils.data.Dataset):
@@ -104,7 +106,6 @@ class MultiTarSequenceDataset(Dataset):
                 
         # Stack the 6 images: [6, Channels, Height, Width]
         return torch.stack(images)
-
 
 # Datasets and dataloaders for handedness model
 def prepare_handedness_dataset(shard_pattern, decode_approach='pil',load_in_memory=False, split_workers=True, 
@@ -197,7 +198,7 @@ def prepare_handedness_dataset(shard_pattern, decode_approach='pil',load_in_memo
 
 def prepare_handedness_dataset_all(shard_pattern, decode_approach='pil', load_in_memory=False, 
                                split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',huggingface_transform=False,
-                               augmentation_transform=None, invert_color=False,n_views=1):
+                               augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None):
     if modality == 'X':
         modality_string = 'X'
     elif modality == 'text':
@@ -228,6 +229,14 @@ def prepare_handedness_dataset_all(shard_pattern, decode_approach='pil', load_in
             #.decode(decode_approach)
             .compose(create_flattener_handedness_multimode(transform,augmentation_transform, modalities_list = ('hand', 'number_random', 'X'),
                                                 exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color)) # This replaces .map() and .select()
+            .batched(batch_size,partial=False)
+        )
+    elif grid_dict:
+        dataset = (dataset
+            #.decode(decode_approach)
+            .compose(create_flattener_handedness_grid(transform,augmentation_transform, n_views=n_views ,modality_string=modality_string,
+                                                exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
+                                                grid_dict=grid_dict)) # This replaces .map() and .select()
             .batched(batch_size,partial=False)
         )
     elif n_views > 1:
@@ -394,7 +403,6 @@ def create_flattener_handedness_multiview(transform_func,augmentation_transform,
                                 
         return flatten_samples
 
-
 def create_flattener_handedness_multimode(
     transform_func,
     augmentation_transform, 
@@ -489,6 +497,97 @@ def create_flattener_handedness_multimode(
 
                 
     return flatten_samples
+
+def create_flattener_handedness_grid(transform_func,augmentation_transform, n_views,modality_string, exclusion_set, 
+                                          huggingface_transform=False, invert_color=False, grid_dict=None):
+        def flatten_samples(src):
+            """Takes an iterator of samples and yields multiple individual images."""
+            for sample in src:
+                label = None
+                subject_id = "unknown"
+                
+                # Step A: Find the JSON file first to get the label and subject
+                for key, value in sample.items():
+                    if key.endswith("json"):
+                        try:
+                            json_str = value.decode('utf-8') if isinstance(value, bytes) else value
+                            json_data = json.loads(json_str)
+                            label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
+                            subject_id = json_data.get("subject", "unknown")
+                        except Exception as e:
+                            print(f"Error parsing JSON for sample {key}: {e}")
+                        break
+                        
+                # Step B: Filter at the sample level
+                # If the sample is missing a label or has a -1 label, skip the whole sample
+                if label is None or label.item() == -1:
+                    continue
+                    
+                # Step C: Process and YIELD images one by one
+                for key, value in sample.items():
+                    if key.endswith((".png", ".jpg", ".jpeg")):
+                        parts = key.split('.')
+                        
+                        # Expected format: q5.number_random.png
+                        if len(parts) == 3 and parts[1].lower() == modality_string.lower():
+                            questionnaire = parts[0]
+                            modality_type = parts[1]
+                            
+
+                            complete_example_id = f"{subject_id}_{questionnaire[1:]}"
+                            if complete_example_id in exclusion_set: #the exclusion set ids are the subjects_id + the questionnaire number
+                                #since the exclusion is specific for the questionnaire, no tfor the subject 
+                                continue
+                            
+                            try:
+                                if isinstance(value, bytes):
+                                    img = Image.open(io.BytesIO(value))
+                                    img = img.convert('RGB') # Standardize to RGB just in case
+                                else:
+                                    img = value # Fallback in case it somehow got decoded
+                                
+                                num,grid = grid_dict[subject_id][questionnaire][modality_type]
+                                x_coords = [0]+sorted(list(grid[0, :]))+[img.width]
+                                n_x = len(x_coords) -1
+                                y_coords = [0]+sorted(list(grid[1, :]))+[img.height]
+                                #n_y = len(y_coords) -1
+
+                                list_of_views = []
+                                for _ in range(n_views):
+                                    #sample a random number between 1 and num included
+                                    rand_num = random.randint(1,num)
+                                    coordinates = (x_coords[(rand_num-1)%n_x], y_coords[(rand_num-1)//n_x], 
+                                                   x_coords[(rand_num-1)%n_x+1], y_coords[(rand_num-1)//n_x+1])
+                                    chunk = img.crop(coordinates)
+
+                                    if augmentation_transform is not None:
+                                        img_view = augmentation_transform(chunk)
+                                    else:
+                                        img_view = chunk
+                                    if invert_color:
+                                        img_view = ImageOps.invert(img_view)
+                                    # Apply transformations
+                                    if transform_func is not None:
+                                        if huggingface_transform:
+                                            inputs = transform_func(images=img_view, return_tensors="pt")
+                                            img_tensor = inputs['pixel_values'][0]
+                                        else:
+                                            img_tensor = transform_func(img_view) 
+                                    elif isinstance(img, torch.Tensor):
+                                        img_tensor = img
+                                    else:
+                                        img_tensor = T.ToTensor()(img)
+                                    
+                                    list_of_views.append(img_tensor)
+                                
+                                stacked_views = torch.stack(list_of_views, dim=0)
+                                yield stacked_views, label, subject_id, questionnaire, modality_string
+                                
+                            except Exception as e:
+                                print(f"Skipping corrupted image {key}: {e}")
+                                
+        return flatten_samples
+
 
 def test_flattener_handedness(transform_func,augmentation_transform, modality_string, exclusion_set, huggingface_transform=False, invert_color=False):
         def flatten_samples(src):
@@ -795,3 +894,58 @@ def generate_exclusion_set_val(csv_data, data_modality, majority_class_id, balan
     majority_ids_to_include = random.sample(list(majority_class_ids), min(int(num_1*balancing_factor), len(majority_class_ids)))
     exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
     return exclusion_set
+
+#Loading the grid_file data
+def pre_load_grid_data(h5_filepath,csv_data):
+    '''
+    this function takes a csv with the samples to consider and for each 
+    saves the grid file in a csv (load grids for all modalities)
+    '''
+    import time
+    start = time.time()
+    unique_subjects = csv_data['ident_projet'].unique()
+    
+    full_dict=get_ids_data_from_h5_file_list(h5_filepath, unique_subjects)
+        
+    end = time.time()
+    print(f"Preloaded grid data for {len(unique_subjects)} subjects in {end - start:.2f} seconds.")
+    #get the memory used by the full_dict in MBs
+    total_size = sys.getsizeof(full_dict) / (1024 * 1024)
+    print(f"Total memory used by preloaded grid data: {total_size:.2f} MB")
+    return full_dict
+def get_ids_data_from_h5_file_list(file_path, target_ids):
+    """
+    Retrieves data for a list of IDs in a single file open.
+    Returns: {id: {q_name: {class_key: (scalar, array)}}}
+    IDs not found in the file are omitted (and reported).
+    """
+    target_ids = [str(i) for i in target_ids]
+    results = {}
+
+    with h5py.File(file_path, 'r') as f:
+        for i,target_id in enumerate(target_ids):
+            if target_id not in f:
+                print(f"ID {target_id} not found in {file_path}")
+                continue
+
+            id_grp = f[target_id]
+            id_data = {}
+
+            for q_name in id_grp.keys():
+                q_grp = id_grp[q_name]
+                id_data[q_name] = {
+                    class_key: (
+                        q_grp[class_key].attrs.get('scalar_value'),
+                        q_grp[class_key][()],          # [()] reads the full array
+                    )
+                    for class_key in q_grp.keys()
+                }
+
+            results[target_id] = id_data
+            if i%100 == 0:
+                print(f"Processed {i+1}/{len(target_ids)} IDs from {file_path}", flush=True)
+                total_size = sys.getsizeof(results) / (1024 * 1024)
+                print(f"Total memory used until now: {total_size:.2f} MB", flush=True)
+
+    return results
+    

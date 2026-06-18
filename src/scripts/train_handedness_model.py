@@ -26,13 +26,14 @@ from lightning.pytorch.callbacks import Callback
 import re
 import signal
 import sys
+import pickle
 
 from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, melt_df
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_dataset
-from src.utils.image_processing import ResizeLongestSide
+from src.utils.image_processing import ResizeLongestSide, PadToSquare
 from src.utils.training_utils import LitModel
 
 #PATHS
@@ -46,6 +47,7 @@ data_folder = "all_no_grids_png_whitebg"
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
+SAVE_DEBUG_PATH = "/home/a_morelli/vscode_projects/model_training/data/debug_training"
 
 
 #QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = ['5']
@@ -56,21 +58,22 @@ MODEL = 'resnet50' #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resne
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
 huggingface_transform=True if MODEL in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
 transform_override = True #if true overrides the transform defined for the model with ta custom one
-CLASSIFICATION_HEAD = 'linear' #'MLPClassifier1'#'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
+CLASSIFICATION_HEAD = 'MLPClassifier1' #'MLPClassifier1'#'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
 PARAMS = {
-    'dropout': 0.2,
-    'hidden_sizes': [32],
+    'dropout': 0.6,
+    'hidden_sizes': [64],
     'with_input_norm': 'batch_norm'
 }
 lr_backbone=1e-4
 lr_classifier_head=1e-3 
-lr_scheduling = None #'cosine' # 'cosine', 'step', None
+lr_scheduling = 'cosine' #'cosine' # 'cosine', 'step', None
 batch_size = 32
 ETA_MIN_COSINE = 1e-6
 WEIGHT_DECAY = 1e-2 #0.05 (swi) #1e-2 (resnet)
 WARMUP_FRACTION = 0.05   # ~5% of total steps as warmup
-num_epochs = 10
-patience = 10
+num_epochs = 150
+patience = 50
+input_size = 224
 layers_to_unfreeze = ['all','classifier'] #Update it for every model
 define_optimization_groups = [
         {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': 1e-5, 'lr_name': 'lr_1'},
@@ -83,9 +86,11 @@ custom_pre_trained_weights = os.path.join(
     '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
     'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
 )
-
+#resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
+#resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
 #None
-input_size = 224
+
+
 
 TEST = '' #'balanced_loss', 'balanced_data', 'balanced_data_and_loss'
 EXPERIMENT_NAME = f"{MODEL}_{data_folder}"
@@ -95,14 +100,35 @@ CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
 checkpoint_to_load='v_1/best-epoch=01-val_loss=0.69.ckpt'#best.ckpt , None last.ckpt
 DEBUG_IMGS = False
 SEED=42
-DATA_MODALITY = 'all' # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
-NUM_tiles = 1
+DATA_MODALITY = 'digit' # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+NUM_tiles = 5
+USE_GRID = True
+
 
 BALANCED_DATA = True
 USE_BALANCED_WEIGHTS = False
 BALANCING_FACTOR = 1
 MAJORITY_CLASS_ID = 0
-THRESHOLD_NUM = 8
+THRESHOLD_NUM = 1
+
+CUSTOM_TRANSFORM = T.Compose(
+            [
+                PadToSquare(fill=0),
+                T.Resize((input_size, input_size)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.06040578708052635, 0.06040578708052635, 0.06040578708052635], 
+                            std=[0.23823712766170502, 0.23823712766170502, 0.23823712766170502]),
+            ]
+        )
+'''T.Compose(
+            [
+                T.Resize((input_size, input_size)),
+                T.ToTensor(),
+                T.Normalize(mean=[0.06040578708052635, 0.06040578708052635, 0.06040578708052635], 
+                            std=[0.23823712766170502, 0.23823712766170502, 0.23823712766170502]),
+            ]
+        )
+'''
 
 def get_args():
     import argparse
@@ -194,13 +220,21 @@ def main():
     num_classes=1 #1 for BCE loss, 2 for crossentropy
     exclusion_set = set() # you can add here the ids you want to exclude from the dataset (for example because they are corrupted or for debugging purposes)
     val_exclusion_set = set()
-    apply_augmentation = True
+    apply_augmentation = False
     invert_color=True
 
     if NUM_tiles > 1 and DATA_MODALITY == 'all':
         print("Warning: Data modality = 'all' and NUM_tiles>1 are incompatible ")
         return 
-
+    if DATA_MODALITY == 'all' and USE_GRID:
+        print("Warning: Data modality = 'all' and USE_GRID=True are incompatible ")
+        return
+    
+    grid_dict = None
+    if USE_GRID:
+        with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "rb") as f:
+            grid_dict = pickle.load(f)
+        print("Grid dictionary loaded successfully. Number of entries:", len(grid_dict))
 
     if apply_augmentation:
         #add a random crop transform without resizing
@@ -212,7 +246,7 @@ def main():
                 padding_mode='constant', 
                 fill=(255,255,255) # <-- White fill for RGB PIL images
             )
-        ])
+        ]) 
     else:
         augmentation_transform = None
 
@@ -290,14 +324,7 @@ def main():
     backbone,transform = get_model(name=MODEL, pretrained=True, custom_pre_trained_weights=custom_pre_trained_weights)
     print("############# Model backbone loaded! #############")
     if transform_override:
-        transform = T.Compose(
-            [
-                T.Resize((input_size, input_size)),
-                T.ToTensor(),
-                T.Normalize(mean=[0.06040578708052635, 0.06040578708052635, 0.06040578708052635], 
-                            std=[0.23823712766170502, 0.23823712766170502, 0.23823712766170502]),
-            ]
-        )
+        transform = CUSTOM_TRANSFORM
     #check on which device the backbone is
     #print(f"Backbone device: {next(backbone.parameters()).device}")
     out=test_output(input_size, backbone)
@@ -325,13 +352,13 @@ def main():
                                                     split_workers=split_workers, batch_size=batch_size, 
                                                     transform=transform, modality=DATA_MODALITY, exclusion_set=exclusion_set, 
                                                     huggingface_transform=huggingface_transform, augmentation_transform=augmentation_transform,
-                                                    invert_color=invert_color, n_views=NUM_tiles)
+                                                    invert_color=invert_color, n_views=NUM_tiles, grid_dict=grid_dict)
         else:
             train_dataset = prepare_handedness_dataset(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
                                                     split_workers=split_workers, batch_size=batch_size, 
                                                     transform=transform, modality=DATA_MODALITY, 
                                                     rate=rate, balanced_data=BALANCED_DATA, exclusion_set=exclusion_set, augmentation_transform=augmentation_transform,
-                                                    invert_color=invert_color)
+                                                    grid_dict=grid_dict, invert_color=invert_color)
     if DEBUG_IMGS and TRAIN:
         # Iterate through the first few items to see what labels are coming out
         for i, (img, label, id,q,mode) in enumerate(train_dataset):
@@ -348,12 +375,13 @@ def main():
                                                      split_workers=split_workers, batch_size=batch_size,
                                                      transform=transform, modality=DATA_MODALITY, exclusion_set=val_exclusion_set, 
                                                      huggingface_transform=huggingface_transform, augmentation_transform=augmentation_transform,
-                                                     invert_color=invert_color, n_views=NUM_tiles)
+                                                     invert_color=invert_color, n_views=NUM_tiles, grid_dict=grid_dict)
     else:
         val_dataset = prepare_handedness_dataset(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory,
                                                     split_workers=split_workers, batch_size=batch_size, 
-                                                    transform=transform, modality=DATA_MODALITY, balanced_data=False, exclusion_set=val_exclusion_set,
-                                                    augmentation_transform=augmentation_transform)
+                                                    transform=transform, modality=DATA_MODALITY, 
+                                                    balanced_data=False, exclusion_set=val_exclusion_set, augmentation_transform=augmentation_transform, 
+                                                    grid_dict=grid_dict, invert_color=invert_color)
     if DEBUG_IMGS and TRAIN:
         #sample N data points at random from the train dataset, save them in an image with the corresponding label
         mean=[0.485, 0.456, 0.406]
@@ -361,7 +389,8 @@ def main():
         n_stacked=NUM_tiles
         if DATA_MODALITY == 'all':
             n_stacked = 3
-        debug_images_dataset(train_dataset, output_path="data/anteprima_dataset.png", num_immagini=16, mean=None, std=None, n_stacked=n_stacked)
+        debug_images_dataset(train_dataset, output_path=os.path.join(SAVE_DEBUG_PATH,'train.png'), num_immagini=16, mean=None, std=None, n_stacked=n_stacked)
+        debug_images_dataset(val_dataset, output_path=os.path.join(SAVE_DEBUG_PATH,'train.png'), num_immagini=16, mean=None, std=None, n_stacked=n_stacked)
  
     print("Preparing dataloaders .. ")
     #raise Exception("Debugging: Stopping after dataset preparation and image debugging. Check 'anteprima_dataset.png' for a visual preview of the data and verify labels in the console output.")

@@ -37,16 +37,30 @@ from matplotlib import pyplot as plt
 from src.utils.data_loading_utils import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
 
-representation_name = "clip_clip-vit-large-patch14-inter_all_tiles1_aug2"
+representation_name = "unique_resnet18_digit_tiles1_aug2"
 SOURCE_PATH = os.path.join("/mnt/beegfs02/scratch/a_morelli/model_training/handedness/feature_extraction/",
-"clip-vit-large-patch14-inter_extracted_features/", representation_name)
-STATISTICS_LOAD_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/merged_statistics_w_predictions_w_original.csv"
+"resnet18_extracted_features/", representation_name)
+STATISTICS_LOAD_PATH = os.path.join("/mnt/beegfs02/scratch/a_morelli/model_training/handedness/",
+                                    "resnet18_model_results/checkpoints/v_30/merged_statistics_w_predictions_w_original.csv")
 SEED=42
-DATA_MODALITY = "all" # text,digit,X,all 
+DATA_MODALITY = "digit" # text,digit,X,all 
 NUM_tiles = 1 #num tiles to concatenate in a single extraction
-NUM_augmentations = 2 #number of times to process the same image with a random augmentation
+NUM_augmentations = 1 #number of augmentations to consider
 SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/representations"
+MODEL_SPECIFIC_SAVE_PATH = os.path.dirname(STATISTICS_LOAD_PATH)
 use_PCA = True
+pca_size = 50
+
+metadata = {
+    "source_path": SOURCE_PATH,
+    "statistics_load_path": STATISTICS_LOAD_PATH,
+    "data_modality": DATA_MODALITY,
+    "num_tiles": NUM_tiles,
+    "num_augmentations": NUM_augmentations,
+    "seed": SEED,
+    "use_PCA": use_PCA,
+    "pca_size": pca_size,
+}
 
 def get_args():
     import argparse
@@ -128,8 +142,8 @@ def generate_umap_plot(train, val, label_col, repr_column):
 
     # choice A: standardize + euclidean
     X = StandardScaler().fit_transform(X)
-    if X.shape[1] > 50 and use_PCA:
-        X = PCA(n_components=50, random_state=0).fit_transform(X)
+    if X.shape[1] > pca_size and use_PCA:
+        X = PCA(n_components=pca_size, random_state=0).fit_transform(X)
 
     reducer = umap.UMAP(
         n_neighbors=15,      # ↑ = more global structure, ↓ = more local detail
@@ -157,13 +171,105 @@ def generate_umap_plot(train, val, label_col, repr_column):
 
     #save the associated csv ignoring the representation columns
     cols_to_drop = [col for col in train.columns if col.startswith("repr_")]    
-    train.drop(columns=cols_to_drop).to_csv(os.path.join(save_dir, f"umap_{label_col}_{repr_column}_metadata.csv"), index=False)
+    train=train.drop(columns=cols_to_drop)
+    train.to_csv(os.path.join(save_dir, f"umap_{label_col}_{repr_column}_metadata.csv"), index=False)
     
     
     return emb2d
 
-def main(generate_umaps=True, run_clustering_analysis=False,analyze_umaps=False):
+def clustering_analysis(dict_filenames,label_column='true_label',repr_column= "repr_text"):
+
+    #load the saved umap embeddings
+    emb2d = np.load(os.path.join(SAVE_PATH,representation_name, f"umap_{label_column}_{repr_column}_embeddings.npy"))
+    #load the saved data
+    metadata = pd.read_csv(os.path.join(SAVE_PATH,representation_name, f"umap_{label_column}_{repr_column}_metadata.csv"))
+    
+    # --- cluster in the RELIABLE space (high-dim / PCA), not the 2D coords ---
+    clusterer = HDBSCAN(
+        min_cluster_size=50,    # smallest group you'd accept as a "cluster" — main knob
+        min_samples=10,         # ↑ = more conservative, more points called noise
+        metric="euclidean",     # match what you used for UMAP (cosine→use a cosine-compatible setup)
+    )
+
+    #add the repr_column to the metadata dataframe, merge on the metadata when all the columns in metadata ['subject_id','true_label' ...] are the same
+    shared = metadata.columns.tolist()                     # the n matching columns
+    train, _ = load_representations_handedness(
+        output_path=os.path.join(SOURCE_PATH, dict_filenames["train"]), 
+        as_dataframe=True
+    )  
+    print("Length of train: ", len(train))
+    print("Length of metadata: ", len(metadata))
+    train = metadata.merge(train, on=shared, how="left")
+    print("Length of train after merge with metadata: ", len(train))
+
+    X = np.stack(train[repr_column].values).astype(np.float32)  
+    X = StandardScaler().fit_transform(X)
+    if X.shape[1] > pca_size and use_PCA:
+        X = PCA(n_components=pca_size, random_state=0).fit_transform(X)
+
+    cluster_labels = clusterer.fit_predict(X)   # X = the high-dim/PCA matrix, NOT emb2d
+
+    # attach labels back to the dataframe so you can pull IDs
+    train = train.copy()
+    train["cluster"] = cluster_labels
+
+    print(train["cluster"].value_counts().sort_index())  # -1 is noise
+
+    # all ids in cluster 3
+    #ids = train.loc[train["cluster"] == 3, id_col].tolist()
+
+    # ids per cluster, excluding noise, as a dict
+    '''clusters = {
+        c: train.loc[train["cluster"] == c, id_col].tolist()
+        for c in sorted(train["cluster"].unique()) if c != -1
+    }'''
+
+    plt.figure(figsize=(8, 7))
+    labs = train["cluster"].to_numpy()
+    for c in sorted(set(labs)):
+        m = labs == c
+        color = "lightgray" if c == -1 else None   # noise in gray
+        plt.scatter(emb2d[m, 0], emb2d[m, 1], s=6, alpha=0.7,
+                    label=("noise" if c == -1 else f"cluster {c}"), c=color)
+    plt.legend(markerscale=2, fontsize=8); plt.tight_layout(); 
+    # save plot
+    save_dir = os.path.join(SAVE_PATH,representation_name)
+    os.makedirs(save_dir, exist_ok=True)
+    plt.savefig(os.path.join(save_dir, f"umap_{label_column}_{repr_column}_clusters.png"), dpi=300)
+
+    #add the cluster label to the metadata dataframe and save it as a csv
+    metadata["cluster"] = cluster_labels
+    metadata.to_csv(os.path.join(save_dir, f"umap_{label_column}_{repr_column}_metadata_with_clusters.csv"), index=False)
+
+def get_ids_from_clusters(label_col, repr_column):
+    metadata_w_cluster_label = pd.read_csv(os.path.join(SAVE_PATH,representation_name, f"umap_{label_col}_{repr_column}_metadata_with_clusters.csv"))
+    #get the unique values of the cluster label
+    unique_clusters = metadata_w_cluster_label['cluster'].unique()
+    print(f"Unique clusters in metadata: {unique_clusters}")
+
+    #print numerosity of each cluster
+    cluster_counts = metadata_w_cluster_label['cluster'].value_counts()
+    print(f"Cluster counts: {cluster_counts}")
+    
+    filtered_data = metadata_w_cluster_label[metadata_w_cluster_label['cluster'] == 1]  
+    print(filtered_data.head(10))
+    return filtered_data
+
+
+def main(clean_folder=True, generate_umaps=True, run_clustering_analysis=True,analyze_umaps=False, run_get_ids_from_clusters=False,
+         copy_to_model_folder=True):
     args = get_args()
+    modalities_to_analyze = ["repr_digit"]
+    labels_to_consider = ["true_label"]
+
+    if clean_folder:
+        #clean the save folder for the representation_name
+        save_dir = os.path.join(SAVE_PATH,representation_name)
+        if os.path.exists(save_dir):
+            shutil.rmtree(save_dir)
+            print(f"Cleaned the save folder: {save_dir}")
+        else:
+            print(f"Save folder does not exist: {save_dir}")
 
     statistics = pd.read_csv(STATISTICS_LOAD_PATH)
     train, val, dict_filenames = prepare_data()
@@ -171,72 +277,24 @@ def main(generate_umaps=True, run_clustering_analysis=False,analyze_umaps=False)
     #show the unique_values of the 'augmentation_version' column in the train dataframe
     unique_augmentations = train['augmentation_version'].unique()
     print(f"Unique augmentations in train dataframe: {unique_augmentations}")
-    train = train[train['augmentation_version'].isin([0])] #keep only one version of the data
+    augmentations_to_consider=[i for i in range(NUM_augmentations)]
+    train = train[train['augmentation_version'].isin(augmentations_to_consider)] #keep only one version of the data
 
     if generate_umaps:
-        #generate_umap_plot(train, val, "true_label", "repr_digit")
-        generate_umap_plot(train, val, "true_label", "repr_text")
-        #generate_umap_plot(train, val, "true_label", "repr_X")
-        #save each as a numpy array
-        
-        
+        for modality in modalities_to_analyze:
+            for label in labels_to_consider:
+                print(f"Generating UMAP plot for label: {label} and modality: {modality}")
+                generate_umap_plot(train, val, label, modality)
         #visualize other plots changing the label_col 
      
     if run_clustering_analysis:
-        repr_column = "repr_text"  # adjust to the representation you want to cluster on
-        id_col = "subject_id"   # adjust
-
-        #load the saved umap embeddings
-        emb2d = np.load(os.path.join(SAVE_PATH,representation_name, f"umap_true_label_{repr_column}_embeddings.npy"))
-        #load the saved data
-        metadata = pd.read_csv(os.path.join(SAVE_PATH,representation_name, f"umap_true_label_{repr_column}_metadata.csv"))
-        
-        # --- cluster in the RELIABLE space (high-dim / PCA), not the 2D coords ---
-        clusterer = HDBSCAN(
-            min_cluster_size=50,    # smallest group you'd accept as a "cluster" — main knob
-            min_samples=10,         # ↑ = more conservative, more points called noise
-            metric="euclidean",     # match what you used for UMAP (cosine→use a cosine-compatible setup)
-        )
-
-        #add the repr_column to the metadata dataframe, merge on the metadata when all the columns in metadata ['subject_id','true_label' ...] are the same
-        shared = metadata.columns.tolist()                     # the n matching columns
-        train, _ = load_representations_handedness(
-            output_path=os.path.join(SOURCE_PATH, dict_filenames["train"]), 
-            as_dataframe=True
-        )  
-        train = metadata.merge(train, on=shared, how="left")
-
-        X = np.stack(train[repr_column].values).astype(np.float32)  
-
-        cluster_labels = clusterer.fit_predict(X)   # X = the high-dim/PCA matrix, NOT emb2d
-
-        # attach labels back to the dataframe so you can pull IDs
-        train = train.copy()
-        train["cluster"] = cluster_labels
-
-        print(train["cluster"].value_counts().sort_index())  # -1 is noise
-
-        # all ids in cluster 3
-        #ids = train.loc[train["cluster"] == 3, id_col].tolist()
-
-        # ids per cluster, excluding noise, as a dict
-        '''clusters = {
-            c: train.loc[train["cluster"] == c, id_col].tolist()
-            for c in sorted(train["cluster"].unique()) if c != -1
-        }'''
-
-        plt.figure(figsize=(8, 7))
-        labs = train["cluster"].to_numpy()
-        for c in sorted(set(labs)):
-            m = labs == c
-            color = "lightgray" if c == -1 else None   # noise in gray
-            plt.scatter(emb2d[m, 0], emb2d[m, 1], s=6, alpha=0.7,
-                        label=("noise" if c == -1 else f"cluster {c}"), c=color)
-        plt.legend(markerscale=2, fontsize=8); plt.tight_layout(); 
-        # save plot
-        save_dir = os.path.join(SAVE_PATH,representation_name)
-        os.makedirs(save_dir, exist_ok=True)
-        plt.savefig(os.path.join(save_dir, f"umap_true_label_{repr_column}_clusters.png"), dpi=300)
+        for modality in modalities_to_analyze:
+            for label in labels_to_consider:
+                print(f"Clustering analysis for label: {label} and modality: {modality}")
+                clustering_analysis(dict_filenames, label_column=label, repr_column=modality)
+    
+    if run_get_ids_from_clusters:
+        get_ids_from_clusters("true_label", "repr_text")
 
 
     if analyze_umaps:
@@ -248,7 +306,20 @@ def main(generate_umaps=True, run_clustering_analysis=False,analyze_umaps=False)
         classifier = get_sklearn_model("KMeans", n_clusters=2, random_state=42)
         
     
-    
+    if copy_to_model_folder:
+        #copy the generated umap plots and embeddings to the model specific folder
+        save_dir = os.path.join(SAVE_PATH,representation_name)
+        model_specific_save_dir = MODEL_SPECIFIC_SAVE_PATH
+        os.makedirs(model_specific_save_dir, exist_ok=True)
+        for file in os.listdir(save_dir):
+            full_file_name = os.path.join(save_dir, file)
+            if os.path.isfile(full_file_name):
+                shutil.copy(full_file_name, model_specific_save_dir)
+                print(f"Copied {full_file_name} to {model_specific_save_dir}")
+        #save metadata to json
+        metadata_save_path = os.path.join(model_specific_save_dir, "metadata_visualization_clustering.json")
+        with open(metadata_save_path, 'w') as f:
+            json.dump(metadata, f, indent=4)
 
 
 if __name__ == "__main__":

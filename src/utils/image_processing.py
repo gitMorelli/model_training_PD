@@ -109,3 +109,22 @@ class ResizeLongestSide:
         scale = self.size / max(h, w)
         new_h, new_w = round(h * scale), round(w * scale)
         return F.resize(img, [new_h, new_w], interpolation=self.interpolation)
+class PadToSquare:
+    """Pad a PIL Image to a square by adding equal borders to the shorter side."""
+    def __init__(self, fill=0, padding_mode="constant"):
+        self.fill = fill
+        self.padding_mode = padding_mode
+
+    def __call__(self, img):
+        w, h = img.size                      # PIL: (width, height)
+        max_side = max(w, h)
+        pad_w = max_side - w
+        pad_h = max_side - h
+        # left, top, right, bottom — split the difference, give the extra pixel to right/bottom
+        padding = (
+            pad_w // 2,
+            pad_h // 2,
+            pad_w - pad_w // 2,
+            pad_h - pad_h // 2,
+        )
+        return F.pad(img, padding, fill=self.fill, padding_mode=self.padding_mode)

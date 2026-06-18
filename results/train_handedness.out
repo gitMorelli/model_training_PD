@@ -1,26 +1,27 @@
+Grid dictionary loaded successfully. Number of entries: 33072
 Length of melted df before filtering: 429936
-Length of melted df after filtering: 286964
-142972 samples will be excluded from the dataset based on the num_filtering process for modality text
+Length of melted df after filtering: 366814
+63122 samples will be excluded from the dataset based on the num_filtering process for modality digit
 CSV after melting:   ident_projet  lateralite split
-0   A7A3K1M9_1         0.0   val
-1   K0U8N0C7_1         0.0   val
-2   F0V3Z3W8_1         0.0   val
-3   J0X5H3C1_1         0.0   val
-4   E7V4M8Q7_1         0.0   val
-Training samples with at least 8 chunck for modality text: 232586
-Class distribution in training set (after filtering for modality text):
+0   D3B2E9R1_1         1.0   val
+1   A0G7P9I7_1         0.0   val
+2   A7A3K1M9_1         0.0   val
+3   C2A9Z0V3_1         1.0   val
+4   K0U8N0C7_1         0.0   val
+Training samples with at least 1 chunck for modality digit: 297127
+Class distribution in training set (after filtering for modality digit):
 lateralite
-0.0    194349
-1.0     38237
+0.0    248234
+1.0     48893
 Name: count, dtype: int64
-Number of samples per class: Class 0 = 194349, Class 1 = 38237; Total = 232586
-Class distribution in val set (after filtering for modality text):
+Number of samples per class: Class 0 = 248234, Class 1 = 48893; Total = 297127
+Class distribution in val set (after filtering for modality digit):
 lateralite
-0.0    194349
-1.0     38237
+0.0    248234
+1.0     48893
 Name: count, dtype: int64
-299084 samples will be excluded from the training set to achieve balancing.
-Current experiment version: 13
+262463 samples will be excluded from the training set to achieve balancing.
+Current experiment version: 14
 --- GPU DIAGNOSTICS ---
 Active GPU: NVIDIA H100 80GB HBM3
 CUDA_VISIBLE_DEVICES: 0
@@ -29,44 +30,26 @@ Missing keys: ['fc.weight', 'fc.bias']
 Unexpected keys: []
 ############# Model backbone loaded! #############
 Reading from /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_no_grids_png_whitebg/train/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_no_grids_png_whitebg/val/worker*_shard-*.tar with decode approach 'pil' and load_in_memory=False
-Class distribution in val set (after filtering for modality text):
+Class distribution in val set (after filtering for modality digit):
 lateralite
-0.0    21410
-1.0     4430
+0.0    27342
+1.0     5679
 Name: count, dtype: int64
 Preparing dataloaders .. 
 ┏━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┓
 ┃   ┃                  ┃         ┃        ┃       ┃        ┃      In ┃     Out ┃
 ┃   ┃ Name             ┃ Type    ┃ Params ┃ Mode  ┃  FLOPs ┃   sizes ┃   sizes ┃
 ┡━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━┩
-│ 0 │ model            │ TiledJ… │ 23.5 M │ train │ 24.5 B │  [1, 3, │  [1, 1] │
+│ 0 │ model            │ TiledJ… │ 24.2 M │ train │ 40.9 B │  [1, 5, │  [1, 1] │
 │   │                  │         │        │       │        │ 3, 224, │         │
 │   │                  │         │        │       │        │    224] │         │
 │ 1 │ criterion        │ BCEWit… │      0 │ train │      0 │       ? │       ? │
 │ 2 │ val_balanced_acc │ Multic… │      0 │ train │      0 │       ? │       ? │
 └───┴──────────────────┴─────────┴────────┴───────┴────────┴─────────┴─────────┘
-Trainable params: 23.5 M                                                        
+Trainable params: 24.2 M                                                        
 Non-trainable params: 0                                                         
-Total params: 23.5 M                                                            
-Total estimated model params size (MB): 94                                      
-Modules in train mode: 157                                                      
+Total params: 24.2 M                                                            
+Total estimated model params size (MB): 96                                      
+Modules in train mode: 161                                                      
 Modules in eval mode: 0                                                         
-Total FLOPs: 24.5 B                                                             
-Experiment parameters successfully logged to /mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet50_model_results/checkpoints/experiments_log.csv
-
-----------------------------------------------
-|                SLURM EPILOG                |
-----------------------------------------------
-Job ID: 4655315
-Cluster: flamingo
-User/Group: a_morelli/gs_hpc_u1018
-Nodelist: gpu05
-Nodes: 1
-Cores per node: 32
-Job started at: 2026-06-12 11:10:28
-Job ended at:   2026-06-12 11:38:40
-Job Wall-clock time: 00:28:12
-CPU Utilized: 04:04:26
-CPU Efficiency: 27.09% of 15:02:24 core-walltime
-Memory Utilized: 18.83 GB
-Memory Efficiency: 29.43% of 64.00 GB
+Total FLOPs: 40.9 B                                                             

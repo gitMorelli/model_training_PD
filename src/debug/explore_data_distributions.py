@@ -40,8 +40,15 @@ import numpy as np
 #PATHS
 LIST_OF_IDS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
 STATISTICS_PATH = "/home/a_morelli/datasets/handedness/sharded_data_statistics/statistics_all_no_grids_png_whitebg_20260612-182050.csv"
-PREDICTIONS_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet50_model_results/checkpoints/v_10/predictions.csv"
+PREDICTIONS_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet18_model_results/checkpoints/v_30/predictions.csv"
 OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics"
+MODEL_SPECIFIC_OUT_PATH = os.path.dirname(PREDICTIONS_PATH)
+
+metadata = {
+    "list_of_ids_path": LIST_OF_IDS_PATH,
+    "statistics_path": STATISTICS_PATH,
+    "predictions_path": PREDICTIONS_PATH,
+}
 
 
 QUESTIONNAIRES = [str(q) for q in range(1,14)]
@@ -618,7 +625,7 @@ def confidence_prediction_analysis(df, out_dir):
     plt.savefig(os.path.join(out_dir, 'confidence_by_correctness.png'), dpi=150, bbox_inches='tight')
 
 
-def main(show_preview=False,run_validity_checks=False,generate_num_statistics=False, generate_correlations=False, 
+def main(show_preview=True,run_validity_checks=True,generate_num_statistics=False, generate_correlations=False, 
          run_metadata_analysis=False, run_confidence_prediction_analysis = False, save_file=True):
     args = get_args()
 
@@ -660,6 +667,14 @@ def main(show_preview=False,run_validity_checks=False,generate_num_statistics=Fa
         out_path = os.path.join(OUT_PATH, "merged_statistics_w_predictions_w_original.csv")
         statistics_df.to_csv(out_path, index=False)
         print(f"Saved merged statistics with predictions to {out_path}")
+        out_path = os.path.join(MODEL_SPECIFIC_OUT_PATH, "merged_statistics_w_predictions_w_original.csv")
+        statistics_df.to_csv(out_path, index=False)
+        print(f"Saved copy of merged statistics in the model folder")
+        #save metadata to json
+        with open(os.path.join(MODEL_SPECIFIC_OUT_PATH, "merged_statistics_metadata.json"), 'w') as f:
+            import json
+            json.dump(metadata, f, indent=4)
+        print("Saved metadata to json in the model folder")
     
 
 if __name__ == "__main__":

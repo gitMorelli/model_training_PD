@@ -27,7 +27,8 @@ import numpy as np
 from pathlib import Path
 import json
 
-from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, prepare_handedness_dataset, prepare_handedness_dataset_all
+from src.utils.data_loading_utils import melt_df
+from src.utils.data_loading_utils import prepare_handedness_dataset_all
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, get_model, test_output, get_classification_head, ConcatenateViews
 from src.utils.model_utils import JoinedModels, unfreeze_layers, load_backbone_from_lightning_ckpt
 from src.utils.visualization import debug_images_dataset
@@ -43,12 +44,12 @@ SOURCE_PATTERN = os.path.join(SOURCE_PATH,folder_name)
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 
-MODEL = 'clip-vit-large-patch14-inter' #'resnet18' #'resnet18', 'custom_cnn'
+MODEL = 'resnet18' #'clip-vit-large-patch14-inter' #'resnet18' #'resnet18', 'custom_cnn'
 input_size = 224
 
-#load from standard pre_trained model (eg full resnet)
-custom_pre_trained_weights = None 
-
+#If none load from standard pre_trained model (eg full resnet)
+custom_pre_trained_weights = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet18_model_results/checkpoints/v_30',
+                                          'best-epoch=09-val_loss=0.69.ckpt') #None 
 #load the backbone weights from one of your backbone+classifier weights
 #MODEL_LOAD_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
 #CHECKPOINT_PATH = os.path.join(MODEL_LOAD_PATH, "checkpoints")
@@ -58,17 +59,18 @@ OUTPUT_PATH = os.path.join(SOURCE_PATH,'feature_extraction',f"{MODEL}_extracted_
 DEBUG_IMGS = True
 GET_STATISTICS = False
 SEED=42
-DATA_MODALITY = "all" # text,digit,X,all 
+DATA_MODALITY = "digit" # text,digit,X,all 
 NUM_tiles = 1 #num tiles to concatenate in a single extraction
 NUM_augmentations = 2 #number of times to process the same image with a random augmentation
+THRESHOLD_NUM = 1 #threshold for filtering out subjects with less than this number of images for the selected modality
 invert_color = True
-exclusion_set = set()
+
 huggingface_transform = False
 huggingface_transform=True if MODEL in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
 apply_augmentation = True
 transform_override = True
 transform_override = False if MODEL in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else transform_override
-unique_name = "clip"
+unique_name = "unique"
 SAVE_FOLDER = os.path.join(OUTPUT_PATH, f"{unique_name}_{MODEL}_{DATA_MODALITY}_tiles{NUM_tiles}_aug{NUM_augmentations}")
 
 current_user = "Andrea Morelli"
@@ -81,6 +83,7 @@ custom_metadata = {
     'invert_color': invert_color,
     'custom_pre_trained_weights': custom_pre_trained_weights,
     'checkpoint_to_load': checkpoint_to_load,
+    'data_modality': DATA_MODALITY,
 }
 
 '''
@@ -174,13 +177,27 @@ def prepare_dataloaders(
         augmentation_transform=None, 
         prefetch_factor=2, 
         worker=8,
-        exclusion_set=set(),
         data_modality='text',
         huggingface_transform=False,
         invert_color=invert_color,
         n_views=1):
     data_loaders = {'train': None, 'val': None, 'test': None}
     datasets = {'train': None, 'val': None, 'test': None}
+
+    #filter the data with missing modality 
+    if DATA_MODALITY == 'all':
+        selection_modality = 'text' 
+    else:
+        selection_modality = DATA_MODALITY 
+    csv_data = pd.read_csv(LIST_OF_IDS_HANDEDNESS_PATH)
+    '''print('Test num_text exclusion:')
+    print(csv_data.loc[csv_data['ident_projet'] == 'A4V2C8D0'].T)
+    print("Columns in the CSV:", csv_data.columns.tolist())
+    return'''
+    csv_data, num_less_than_1_rows = melt_df(csv_data, modality=selection_modality, threshold=THRESHOLD_NUM)
+    exclusion_set=num_less_than_1_rows
+    val_exclusion_set=num_less_than_1_rows
+
     train_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
                                                     split_workers=split_workers, batch_size=batch_size, 
                                                     transform=transform, modality=data_modality, exclusion_set=exclusion_set, 
@@ -188,7 +205,7 @@ def prepare_dataloaders(
                                                     invert_color=invert_color, n_views=n_views)
     val_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_val, decode_approach=decode_approach, load_in_memory=load_in_memory, 
                                                     split_workers=split_workers, batch_size=batch_size, 
-                                                    transform=transform, modality=data_modality, exclusion_set=exclusion_set, 
+                                                    transform=transform, modality=data_modality, exclusion_set=val_exclusion_set, 
                                                     huggingface_transform=huggingface_transform, augmentation_transform=augmentation_transform,
                                                     invert_color=invert_color, n_views=n_views)
     
@@ -325,12 +342,14 @@ def run_inference_to_dataframe(
  
     # ---- 5. Optional save ----------------------------------------------------
     if output_path is not None:
-        stem = Path(output_path)
-        stem.parent.mkdir(parents=True, exist_ok=True)
+        #create the directory if it doesn't exist
+        os.makedirs(output_path, exist_ok=True)
+        #get the dirname
+        dirname=os.path.basename(os.path.normpath(output_path))
  
-        meta_file = stem.with_name(stem.name + '_metadata.parquet')
-        repr_file = stem.with_name(stem.name + '_representations.npy')
-        layout_file = stem.with_name(stem.name + '_layout.json')
+        meta_file = os.path.join(output_path,dirname + '_metadata.parquet')
+        repr_file = os.path.join(output_path,dirname + '_representations.npy')
+        layout_file = os.path.join(output_path,dirname + '_layout.json')
  
         metadata.to_parquet(meta_file, index=False)
         np.save(repr_file, representations)
@@ -414,7 +433,7 @@ def main():
     data_loaders,datasets = prepare_dataloaders(decode_approach=decode_approach, load_in_memory=load_in_memory, split_workers=split_workers, 
                         batch_size=batch_size, transform=transform, augmentation_transform=augmentation_transform,
                         prefetch_factor=prefetch_factor, worker=worker, 
-                        exclusion_set=exclusion_set, data_modality=DATA_MODALITY, 
+                        data_modality=DATA_MODALITY, 
                         huggingface_transform=huggingface_transform,
                         n_views=NUM_tiles)
     if DEBUG_IMGS:
@@ -439,7 +458,6 @@ def main():
     model.to(device)
     model.eval()  # Set the model to evaluation mode
     
-    import time
     '''import time
     for batch in data_loaders['train']:
         t0 = time.perf_counter()

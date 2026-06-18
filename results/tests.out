@@ -1,124 +1,39 @@
-Data for ID A0C5I2D5:
-  Questionnaire: q1
-    Class: X | Scalar Value: 113 | Array Shape: (2, 10)
-    Class: X_random | Scalar Value: 113 | Array Shape: (2, 10)
-    Class: hand | Scalar Value: 9 | Array Shape: (2, 2)
-    Class: hand_partial_full | Scalar Value: 9 | Array Shape: (2, 2)
-    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: number | Scalar Value: 31 | Array Shape: (2, 5)
-    Class: number_random | Scalar Value: 31 | Array Shape: (2, 5)
-  Questionnaire: q10
-    Class: X | Scalar Value: 93 | Array Shape: (2, 9)
-    Class: X_random | Scalar Value: 93 | Array Shape: (2, 9)
-    Class: hand | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: number | Scalar Value: 89 | Array Shape: (2, 9)
-    Class: number_random | Scalar Value: 89 | Array Shape: (2, 9)
-  Questionnaire: q11
-    Class: X | Scalar Value: 39 | Array Shape: (2, 6)
-    Class: X_random | Scalar Value: 39 | Array Shape: (2, 6)
-    Class: hand | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: number | Scalar Value: 40 | Array Shape: (2, 6)
-    Class: number_random | Scalar Value: 40 | Array Shape: (2, 6)
-  Questionnaire: q12
-    Class: X | Scalar Value: 133 | Array Shape: (2, 11)
-    Class: X_random | Scalar Value: 133 | Array Shape: (2, 11)
-    Class: hand | Scalar Value: 2 | Array Shape: (2, 1)
-    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_sentences_full | Scalar Value: 1 | Array Shape: (2, 0)
-    Class: number | Scalar Value: 46 | Array Shape: (2, 6)
-    Class: number_random | Scalar Value: 46 | Array Shape: (2, 6)
-  Questionnaire: q13
-    Class: X | Scalar Value: 171 | Array Shape: (2, 13)
-    Class: X_random | Scalar Value: 171 | Array Shape: (2, 13)
-    Class: hand | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: number | Scalar Value: 92 | Array Shape: (2, 9)
-    Class: number_random | Scalar Value: 92 | Array Shape: (2, 9)
-  Questionnaire: q2
-    Class: X | Scalar Value: 95 | Array Shape: (2, 9)
-    Class: X_random | Scalar Value: 95 | Array Shape: (2, 9)
-    Class: hand | Scalar Value: 8 | Array Shape: (2, 2)
-    Class: hand_partial_full | Scalar Value: 8 | Array Shape: (2, 2)
-    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: number | Scalar Value: 43 | Array Shape: (2, 6)
-    Class: number_random | Scalar Value: 43 | Array Shape: (2, 6)
-  Questionnaire: q3
-    Class: X | Scalar Value: 30 | Array Shape: (2, 5)
-    Class: X_random | Scalar Value: 30 | Array Shape: (2, 5)
-    Class: hand | Scalar Value: 23 | Array Shape: (2, 4)
-    Class: hand_partial_full | Scalar Value: 11 | Array Shape: (2, 3)
-    Class: hand_sentences_full | Scalar Value: 2 | Array Shape: (2, 1)
-    Class: number | Scalar Value: 17 | Array Shape: (2, 4)
-    Class: number_random | Scalar Value: 17 | Array Shape: (2, 4)
-  Questionnaire: q4
-    Class: X | Scalar Value: 18 | Array Shape: (2, 4)
-    Class: X_random | Scalar Value: 18 | Array Shape: (2, 4)
-    Class: hand | Scalar Value: 5 | Array Shape: (2, 2)
-    Class: hand_partial_full | Scalar Value: 5 | Array Shape: (2, 2)
-    Class: hand_sentences_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: number | Scalar Value: 36 | Array Shape: (2, 5)
-    Class: number_random | Scalar Value: 36 | Array Shape: (2, 5)
-  Questionnaire: q5
-    Class: X | Scalar Value: 22 | Array Shape: (2, 4)
-    Class: X_random | Scalar Value: 22 | Array Shape: (2, 4)
-    Class: hand | Scalar Value: 33 | Array Shape: (2, 5)
-    Class: hand_partial_full | Scalar Value: 6 | Array Shape: (2, 2)
-    Class: hand_sentences_full | Scalar Value: 4 | Array Shape: (2, 1)
-    Class: number | Scalar Value: 25 | Array Shape: (2, 4)
-    Class: number_random | Scalar Value: 25 | Array Shape: (2, 4)
-  Questionnaire: q6
-    Class: X | Scalar Value: 13 | Array Shape: (2, 3)
-    Class: X_random | Scalar Value: 13 | Array Shape: (2, 3)
-    Class: hand | Scalar Value: 43 | Array Shape: (2, 6)
-    Class: hand_partial_full | Scalar Value: 9 | Array Shape: (2, 2)
-    Class: hand_sentences_full | Scalar Value: 4 | Array Shape: (2, 1)
-    Class: number | Scalar Value: 18 | Array Shape: (2, 4)
-    Class: number_random | Scalar Value: 18 | Array Shape: (2, 4)
-  Questionnaire: q7
-    Class: X | Scalar Value: 32 | Array Shape: (2, 5)
-    Class: X_random | Scalar Value: 32 | Array Shape: (2, 5)
-    Class: hand | Scalar Value: 35 | Array Shape: (2, 5)
-    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_sentences_full | Scalar Value: 5 | Array Shape: (2, 2)
-    Class: number | Scalar Value: 30 | Array Shape: (2, 5)
-    Class: number_random | Scalar Value: 30 | Array Shape: (2, 5)
-  Questionnaire: q8
-    Class: X | Scalar Value: 541 | Array Shape: (2, 23)
-    Class: X_random | Scalar Value: 541 | Array Shape: (2, 23)
-    Class: hand | Scalar Value: 42 | Array Shape: (2, 6)
-    Class: hand_partial_full | Scalar Value: 2 | Array Shape: (2, 1)
-    Class: hand_sentences_full | Scalar Value: 11 | Array Shape: (2, 3)
-    Class: number | Scalar Value: 182 | Array Shape: (2, 13)
-    Class: number_random | Scalar Value: 182 | Array Shape: (2, 13)
-  Questionnaire: q9
-    Class: X | Scalar Value: 27 | Array Shape: (2, 5)
-    Class: X_random | Scalar Value: 27 | Array Shape: (2, 5)
-    Class: hand | Scalar Value: 59 | Array Shape: (2, 7)
-    Class: hand_partial_full | Scalar Value: 0 | Array Shape: (2, 0)
-    Class: hand_sentences_full | Scalar Value: 9 | Array Shape: (2, 2)
-    Class: number | Scalar Value: 107 | Array Shape: (2, 10)
-    Class: number_random | Scalar Value: 107 | Array Shape: (2, 10)
-First tile width: 52 | Tile height: 59
-Image size is (252, 267, 3) and number of tiles is 18 -> average tile size is 59.396969619669996x62.93250352560273
+Processed 1/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.00 MB
+Processed 101/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.00 MB
+Processed 201/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.01 MB
+Processed 301/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.01 MB
+Processed 401/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.02 MB
+Processed 501/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.02 MB
+Processed 601/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.02 MB
+Processed 701/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.04 MB
+Processed 801/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.04 MB
+Processed 901/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.04 MB
+Processed 1001/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
+Total memory used until now: 0.04 MB
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4508960
+Job ID: 4705241
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n16
+Nodelist: n15
 Nodes: 1
-Cores per node: 2
-Job started at: 2026-06-03 09:44:49
-Job ended at:   2026-06-03 09:44:50
-Job Wall-clock time: 00:00:01
-CPU Utilized: 00:00:01
-CPU Efficiency: 50.00% of 00:00:02 core-walltime
-Memory Utilized: 22.72 MB
-Memory Efficiency: 0.55% of 4.00 GB
+Cores per node: 10
+Job started at: 2026-06-18 12:16:02
+Job ended at:   2026-06-18 12:26:10
+Job Wall-clock time: 00:10:08
+CPU Utilized: 00:01:26
+CPU Efficiency: 1.41% of 01:41:20 core-walltime
+Memory Utilized: 540.98 MB
+Memory Efficiency: 13.21% of 4.00 GB
