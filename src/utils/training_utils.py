@@ -400,3 +400,39 @@ class LitModel(L.LightningModule):
                         if grad_abs_mean < 1e-8:
                             self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
             self.write_log("-------------------------------------\n")
+
+#tracking experiments
+class BestMetricTracker(L.Callback):
+    def __init__(self):
+        super().__init__()
+        self.best_train_acc = 0.0
+        self.best_val_acc = 0.0
+        self.best_val_loss = float('inf')
+        self.best_epoch = 0
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        # Prevent tracking during the initial sanity check pass
+        if trainer.sanity_checking:
+            return
+
+        # Fetch the logged metrics dictionary
+        metrics = trainer.callback_metrics
+        
+        # Extract values (handling the _epoch suffix for training metrics)
+        train_acc = metrics.get("train_acc_epoch") 
+        val_loss = metrics.get("val_loss")
+        val_acc = metrics.get("val_acc")
+        
+        current_epoch = trainer.current_epoch
+
+        # Keep track of global maximums / minimums
+        if train_acc is not None:
+            self.best_train_acc = max(self.best_train_acc, train_acc.item())
+        
+        if val_acc is not None:
+            self.best_val_acc = max(self.best_val_acc, val_acc.item())
+            
+        if val_loss is not None and val_loss.item() < self.best_val_loss:
+            self.best_val_loss = val_loss.item()
+            # If you want the epoch where the best validation loss happened:
+            self.best_epoch = current_epoch

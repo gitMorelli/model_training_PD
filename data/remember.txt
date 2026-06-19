@@ -28,7 +28,24 @@ B6S9B6X9.json (23 bytes)
 
 Note su preparazione degli shard
 (per HANDEDNESS) Le immagini con num_modality<1 sono rimosse durante la preparazione degli shards 
-(per PD) Salvo quanti chunks ci sono in un immagine nel json per ogni questionario e modalità, ma lascio anche le immagini vuote
+(per PD) 
+Salvo:
+  quanti chunks ci sono in un immagine nel json per ogni questionario e modalità, ma lascio anche le immagini vuote
+  the number of years before the censorign at which the questionnaire was compiled -> questionnaire_info[questionnaire]['case_dt_dateq']
+  rescaling information (was the input rescaled? by how much?) -> questionnaire_info[questionnaire]['to_rescale'], questionnaire_info[questionnaire]['rescale_factor']
+  warning==1 if the control was selected with at least -> "at_least_warning": at_least_warning,
+  pattern of available questionnaires for the corresponding case-> 'case_grid_pattern': case_grid_pattern,
+  subject_id in the XXXXX_YY format with YY the matching group
+  shard name: 'shard_name' -> current_shard_name
+I forget 
+  all questionnaires after censoring -> they are not put in the shard
+  all questionnaires of controls for which the corresponding case file is missing -> tehy are not in the shards
+I don't exclude any data based on the number of marks in the modalities
+
+NOte su file rilevanti
+"/home/a_morelli/datasets/id_lists/final_data_for_training.parquet" has the q_X_num_Y column only for Y = X, text and digit; If you want sentences you have to re-generate 
+questionnaire_templates_PATH="/home/a_morelli/datasets/others/template_sizes.json" -> file con le dimensioni dei templates (risoluzione documenti e3n usati per template matchign)
+
 
 Nomenclatura ->
 Data modalities:

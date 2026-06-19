@@ -4,7 +4,7 @@
 #SBATCH --nodes=1                     # 1 Node per array task
 #SBATCH --cpus-per-task=32           
 #SBATCH --mem=64G                     # Request enough RAM for 16 parallel processes
-#SBATCH --time=02:00:00               # Estimated time for 500 images
+#SBATCH --time=03:00:00               # Estimated time for 500 images
 #SBATCH --partition=shortq
 #SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/parallel_restructure/job_%A_%a.out
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/parallel_restructure/job_%A_%a.err

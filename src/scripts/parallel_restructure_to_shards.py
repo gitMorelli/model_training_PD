@@ -42,12 +42,12 @@ QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(i) for i in range(1,14)] # q1 to q12
 MODALITIES_TO_INCLUDE = ["hand_sentences_full","hand", "number_random", "X"] # ["hand", "number_random", "X","sentence"] # Adjust as needed based on which modalities you want to include in the WDS samples
 
 
-CODE_TO_RUN = "for_handedness" #"for_handedness" #for_PD or for_handedness or for_PD_test
+CODE_TO_RUN = "for_PD" #"for_handedness" #for_PD or for_handedness or for_PD_test
 
 #OUTPUT_PATH = "/mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel"
 OUTPUT_PATH = f"/mnt/beegfs02/scratch/a_morelli/model_training/{CODE_TO_RUN.split('_', 1)[1]}/"
 
-NAME = "full_sentences"
+NAME = "final"
 
 OUTPUT_PATH = os.path.join(OUTPUT_PATH,NAME)
 
@@ -360,17 +360,16 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                 last_q = id_row['last_avail_q']
                 #grid_pattern = id_row['grid_pattern']
                 case_grid_pattern = id_row['case_grid_pattern']
-                label = id_row['diag_park_final1_quest']
-                at_least_warning = id_row['at_least_warning']
+                label = id_row['diag_park_final1_quest'].item()
+                at_least_warning = id_row['at_least_warning'].item()
                 
                 questionnaire_info = {}
-                tile_coords = {}
                 # 3. Add images
                 for questionnaire, files in sequences.items():
                     files.sort(key=lambda x: x.name) 
                     questionnaire_info[questionnaire] = {}
 
-                    #forget all questionnaires after censoring
+                    #forget all questionnaires after censoring 
                     if int(questionnaire) > int(last_q):
                         #print(f"Skipping questionnaire {questionnaire} for subject {subject_id} because it is after the last_q ({last_q})")
                         continue
@@ -390,8 +389,9 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                     questionnaire_info[questionnaire]['to_rescale'] = to_rescale
                     questionnaire_info[questionnaire]['rescale_factor'] = rescale_factor
                     #save the number of years before the censorign at which the questionnaire was compiled (for the case)
-                    questionnaire_info[questionnaire]['case_dt_dateq'] = id_row[f'case_dt_dateq{questionnaire}']
-                    tile_coords['q'+questionnaire] = {}
+                    questionnaire_info[questionnaire]['case_dt_dateq'] = id_row[f'case_dt_dateq{questionnaire}'].item()
+                    #print the types of the rescale_factor and case_dt_dateq for debugging
+                    #print(f"Subject {subject_id}, Questionnaire {questionnaire}: rescale_factor type: {type(rescale_factor)}, case_dt_dateq type: {type(questionnaire_info[questionnaire]['case_dt_dateq'])}")
 
                     
                     for m in files: #iterate on the data modalities
@@ -400,10 +400,10 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                         clean_name = os.path.basename(m.name).split('.')[0]
 
                         #get info on the number of chunks and save it for each questionnaire and modality
-                        corresp_name = name_mapping[clean_name]
+                        '''corresp_name = name_mapping[clean_name]
                         key_num_marks = f'q_{questionnaire}_num_{corresp_name}'
                         num_marks = data[data['unique_id'] == subject_id][key_num_marks].values[0]
-                        questionnaire_info[questionnaire][key_num_marks] = num_marks
+                        questionnaire_info[questionnaire][key_num_marks] = num_marks'''
 
                         file_bytes = old_tar.extractfile(m).read()
                         np_arr = np.frombuffer(file_bytes, np.uint8)
@@ -418,7 +418,6 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                         num_tiles = id_data['q'+questionnaire][clean_name][0]
                         coords = get_tiles(img,array_val,num_tiles) #returns a list of [(xtl, ytl, xbr, ybr),x] 
                         #with x=tile number if tile contains a mark, -1 otherwise 
-                        tile_coords['q'+questionnaire][clean_name] = coords[:]
 
                         if CONVERT_TO_WHITE:
                             img = recolor_border_via_profiles(img, coords)
@@ -448,7 +447,7 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                 
                 # 2. Build ONE single WDS sample dictionary for the subject
                 # 1. Define your list of target keys
-                variables_to_add = ['etudegp', 'profq2', 'lateralite', 'relative_age', 'birth_date', 'follow_up_time']
+                
                 # 2. Initialize the dictionary with your base data
                 inner_data = {
                     "subject": subject_id, 
@@ -456,12 +455,9 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                     "at_least_warning": at_least_warning,
                     'case_grid_pattern': case_grid_pattern,
                     "questionnaire_info": questionnaire_info,
-                    "tile_coords": tile_coords,
                     'shard_name' : current_shard_name
                 }
-                # 3. Dynamically loop through your list and add them to inner_data
-                for var in variables_to_add:
-                    inner_data[var] = id_row[var]
+                
                 # 4. Serialize and encode exactly once
                 sample["__key__"]=subject_id
                 sample["json"] = json.dumps(inner_data).encode("utf-8")
@@ -487,8 +483,8 @@ def get_images_to_rescale(data,questionnaire, template_data, scale_tolerance=0.1
             #print(f"Page {page_number} has a scale factor outside the tolerance: (x: {scale_x:.2f}, y: {scale_y:.2f})")
             rescaling_factors.append((page_number, 1/scale_x, 1/scale_y))
     #get the average x and y rescaling factor across the pages that need to be rescaled
-    avg_rescale_x = np.mean([f[1] for f in rescaling_factors]) if rescaling_factors else 1.0
-    avg_rescale_y = np.mean([f[2] for f in rescaling_factors]) if rescaling_factors else 1.0
+    avg_rescale_x = np.mean([f[1] for f in rescaling_factors]).item() if rescaling_factors else 1.0
+    avg_rescale_y = np.mean([f[2] for f in rescaling_factors]).item() if rescaling_factors else 1.0
     if n_images>0 and len(rescaling_factors)>=int(n_images/2):
         return True, (avg_rescale_x, avg_rescale_y)
     else:
@@ -622,7 +618,7 @@ if __name__ == "__main__":
             id_list = split_data['unique_id'].tolist()[:] #unique_id is in the form XXXXX_YY with YY the matching group, 
             #while ident_projet is just XXXXX
             output_path = os.path.join(OUTPUT_PATH,train_split)
-            convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD,num_test_ids=1000,data=split_data) 
+            convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD,num_test_ids=None,data=split_data) 
             # Run checks only on Task 0 to avoid messy logs
             if int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)) == 0:
                 run_checks(output_path)

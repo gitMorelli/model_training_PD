@@ -58,7 +58,7 @@ MODEL = 'resnet50' #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resne
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
 huggingface_transform=True if MODEL in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
 transform_override = True #if true overrides the transform defined for the model with ta custom one
-CLASSIFICATION_HEAD = 'MLPClassifier1' #'MLPClassifier1'#'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
+CLASSIFICATION_HEAD = 'linear' #'MLPClassifier1'#'MLPClassifier1' # 'linear', 'regularized_linear', 'MLPClassifier1'
 PARAMS = {
     'dropout': 0.6,
     'hidden_sizes': [64],
@@ -82,10 +82,11 @@ define_optimization_groups = [
         {'names': ['layer4'],'lr': 3e-4, 'lr_name': 'lr_4'},
         {'names': ['classifier'], 'lr': lr_classifier_head, 'lr_name': 'lr_head'},
     ] # or None or other configurations fo other models'''
-custom_pre_trained_weights = os.path.join(
+custom_pre_trained_weights = None
+'''os.path.join(
     '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
     'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
-)
+)'''
 #resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
 #resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
 #None
@@ -98,10 +99,10 @@ OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{MODEL}_model_results")
 TRAIN = True  # Set to False to skip training and only run validation evaluation
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
 checkpoint_to_load='v_1/best-epoch=01-val_loss=0.69.ckpt'#best.ckpt , None last.ckpt
-DEBUG_IMGS = False
+DEBUG_IMGS = True
 SEED=42
 DATA_MODALITY = 'digit' # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
-NUM_tiles = 5
+NUM_tiles = 3
 USE_GRID = True
 
 
@@ -116,8 +117,11 @@ CUSTOM_TRANSFORM = T.Compose(
                 PadToSquare(fill=0),
                 T.Resize((input_size, input_size)),
                 T.ToTensor(),
-                T.Normalize(mean=[0.06040578708052635, 0.06040578708052635, 0.06040578708052635], 
-                            std=[0.23823712766170502, 0.23823712766170502, 0.23823712766170502]),
+                #normalize with imagenet mean and std
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                #normalize with your dataset mean and std
+                #T.Normalize(mean=[0.06040578708052635, 0.06040578708052635, 0.06040578708052635], 
+                 #           std=[0.23823712766170502, 0.23823712766170502, 0.23823712766170502]),
             ]
         )
 '''T.Compose(
@@ -390,7 +394,7 @@ def main():
         if DATA_MODALITY == 'all':
             n_stacked = 3
         debug_images_dataset(train_dataset, output_path=os.path.join(SAVE_DEBUG_PATH,'train.png'), num_immagini=16, mean=None, std=None, n_stacked=n_stacked)
-        debug_images_dataset(val_dataset, output_path=os.path.join(SAVE_DEBUG_PATH,'train.png'), num_immagini=16, mean=None, std=None, n_stacked=n_stacked)
+        debug_images_dataset(val_dataset, output_path=os.path.join(SAVE_DEBUG_PATH,'val.png'), num_immagini=16, mean=None, std=None, n_stacked=n_stacked)
  
     print("Preparing dataloaders .. ")
     #raise Exception("Debugging: Stopping after dataset preparation and image debugging. Check 'anteprima_dataset.png' for a visual preview of the data and verify labels in the console output.")

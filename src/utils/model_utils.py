@@ -590,6 +590,18 @@ def load_backbone_from_lightning_ckpt(backbone, ckpt_path):
     print(f"Successfully loaded {len(backbone_state_dict)} tensors into the backbone.")
     return backbone
 
+#Multiple instance learning
+class GatedAttentionPool(nn.Module):
+    def __init__(self, dim, hidden=128):
+        super().__init__()
+        self.V = nn.Linear(dim, hidden)
+        self.U = nn.Linear(dim, hidden)
+        self.w = nn.Linear(hidden, 1)
+    def forward(self, x):                                   # (N, k, F)
+        a = self.w(torch.tanh(self.V(x)) * torch.sigmoid(self.U(x)))
+        alpha = torch.softmax(a, dim=1)
+        return (alpha * x).sum(1), alpha.squeeze(-1)
+
 #Wrappers
 class JoinedModels(nn.Module):
     def __init__(self, vision_model, classifier):
@@ -653,6 +665,71 @@ class ConcatenateViews(nn.Module):
 
         
         return features
+#Wrappers for PD models
+class SequenceClassifierHead(nn.Module):
+    """Everything after the CNN: view aggregation + slot transformer + classification.
+    All params land under `classifier.*` in the parent's named_parameters()."""
+    def __init__(self, feat_dim, n_slots, n_classes,
+                 d_model=512, n_heads=8, n_layers=4, ff_mult=4,
+                 view_agg='attention', dropout=0.1):
+        super().__init__()
+        self.proj = nn.Linear(feat_dim, d_model) if feat_dim != d_model else nn.Identity()
+
+        self.view_agg  = view_agg
+        self.view_pool = GatedAttentionPool(d_model) if view_agg == 'attention' else None
+
+        self.n_slots  = n_slots
+        self.slot_pos = nn.Embedding(n_slots, d_model)
+        self.cls      = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
+
+        layer = nn.TransformerEncoderLayer(
+            d_model, n_heads, dim_feedforward=ff_mult * d_model,
+            dropout=dropout, batch_first=True, norm_first=True)
+        self.transformer = nn.TransformerEncoder(layer, n_layers)
+        self.norm = nn.LayerNorm(d_model)
+        self.head = nn.Linear(d_model, n_classes)
+
+    def forward(self, feats, N, k, seq_ids, slot_ids, lengths, return_view_attn=False):
+        # feats: (N*k, feat_dim) straight from the CNN
+        x = self.proj(feats).view(N, k, -1)                 # (N, k, d_model)
+
+        if self.view_pool is not None:
+            q_repr, view_attn = self.view_pool(x)           # (N, d_model)
+        else:
+            q_repr, view_attn = x.mean(1), None
+
+        B   = lengths.size(0)
+        D   = q_repr.size(-1)
+        dev = q_repr.device
+
+        buffer = q_repr.new_zeros(B, self.n_slots, D)
+        buffer[seq_ids, slot_ids] = q_repr
+        pad_mask = torch.ones(B, self.n_slots, dtype=torch.bool, device=dev)
+        pad_mask[seq_ids, slot_ids] = False
+
+        pos    = self.slot_pos(torch.arange(self.n_slots, device=dev))
+        buffer = buffer + pos.unsqueeze(0)
+
+        cls  = self.cls.expand(B, -1, -1)
+        seq  = torch.cat([cls, buffer], dim=1)              # (B, 1+Q, D)
+        mask = torch.cat([torch.zeros(B, 1, dtype=torch.bool, device=dev),
+                          pad_mask], dim=1)
+
+        out    = self.transformer(seq, src_key_padding_mask=mask)
+        logits = self.head(self.norm(out[:, 0]))
+        return (logits, view_attn) if return_view_attn else logits
+class SequenceQuestionnaireModel(nn.Module):
+    def __init__(self, vision_model, feat_dim, n_slots, n_classes, **head_kwargs):
+        super().__init__()
+        self.vision_model = vision_model                               # -> cnn.*
+        self.classifier = SequenceClassifierHead(           # -> classifier.*
+            feat_dim, n_slots, n_classes, **head_kwargs)
+
+    def forward(self, frames, seq_ids, slot_ids, lengths, return_view_attn=False):
+        N, k  = frames.shape[:2]
+        feats = self.cnn(frames.flatten(0, 1))             # (N*k, feat_dim)  <- only heavy step
+        return self.classifier(feats, N, k, seq_ids, slot_ids, lengths, return_view_attn)
+
 #others
 def test_output(size, model):
     dummy_input = torch.rand(1, 3, size, size)
