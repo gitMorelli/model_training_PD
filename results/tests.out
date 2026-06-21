@@ -1,39 +1,19 @@
-Processed 1/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.00 MB
-Processed 101/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.00 MB
-Processed 201/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.01 MB
-Processed 301/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.01 MB
-Processed 401/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.02 MB
-Processed 501/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.02 MB
-Processed 601/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.02 MB
-Processed 701/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.04 MB
-Processed 801/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.04 MB
-Processed 901/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.04 MB
-Processed 1001/33072 IDs from /mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5
-Total memory used until now: 0.04 MB
+Total cases: 12122
+Cases with negative case_dt_dateq{last_avail_q}: 12122
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4705241
+Job ID: 4728499
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n15
+Nodelist: n22
 Nodes: 1
 Cores per node: 10
-Job started at: 2026-06-18 12:16:02
-Job ended at:   2026-06-18 12:26:10
-Job Wall-clock time: 00:10:08
-CPU Utilized: 00:01:26
-CPU Efficiency: 1.41% of 01:41:20 core-walltime
-Memory Utilized: 540.98 MB
-Memory Efficiency: 13.21% of 4.00 GB
+Job started at: 2026-06-20 11:48:57
+Job ended at:   2026-06-20 11:49:06
+Job Wall-clock time: 00:00:09
+CPU Utilized: 00:00:06
+CPU Efficiency: 6.67% of 00:01:30 core-walltime
+Memory Utilized: 1.55 MB
+Memory Efficiency: 0.04% of 4.00 GB

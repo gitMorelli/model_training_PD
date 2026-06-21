@@ -276,19 +276,34 @@ def recolor_border_via_profiles(image, coords, black_tolerance=5):
         image[y1:y2, x1:x2] = white_background.copy()
     return image
 
+def inspect_00000():
+    id_to_check = 'F1A0F2H5'
+    group_to_check = '0998'
+    load_path = "/home/a_morelli/datasets/id_lists/final_data_for_training.parquet"
+    csv_data = pd.read_parquet(load_path)
+    csv_data['subject_id'] = csv_data['unique_id'].str.split('_').str[0]
+    csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1]
+    #filter the csv_data to only include the id_to_check
+    csv_data = csv_data[csv_data['subject_id'] == id_to_check]
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(csv_data) 
+    '''
+    csv_data = csv_data[csv_data['group_id'] == group_to_check]
+    csv_data = csv_data[['group_id','subject_id','unique_id','case_control','grid_pattern','case_grid_pattern']]
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(csv_data)'''
+    
 if __name__ == "__main__":
-    #get_h5_data()
-    #test_read_json()
-    #test_read_templates()
-    csv_data = pd.read_csv("/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv")
-    result=pre_load_grid_data("/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5",
-                       csv_data)
-    with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "wb") as f:
-        pickle.dump(result, f, protocol=pickle.HIGHEST_PROTOCOL)
-    start = time.time()
-    with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "rb") as f:
-        data = pickle.load(f)
-    end = time.time()
-    print(f"Data loaded from pickle in {end - start:.2f} seconds.")
+    load_path = "/home/a_morelli/datasets/id_lists/final_data_for_training.parquet"
+    csv_data = pd.read_parquet(load_path)
+    csv_data['subject_id'] = csv_data['unique_id'].str.split('_').str[0]
+    csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1]
+    #'last_avail_q' (is an int)
+    # case_dt_dateq{last_avail_q} should be negative
+    cases = csv_data.copy()#[csv_data['case_control'] == 1]
+    print(f"Total cases: {len(cases)}") 
+    #check how many cases have a negative case_dt_dateq{last_avail_q}
+    cases_with_negative_date = cases[cases.apply(lambda row: row[f'case_dt_dateq{row["last_avail_q"]}'] < 0, axis=1)]
+    print(f"Cases with negative case_dt_dateq{{last_avail_q}}: {len(cases_with_negative_date)}")
     
     

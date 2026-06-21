@@ -9,7 +9,7 @@ import os
 import pandas as pd
 import torch.nn as nn
 import time
-import webdataset as wds
+import webdataset as wds 
 import glob
 from tqdm import tqdm
 import torch.optim as optim
@@ -34,55 +34,54 @@ from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_han
 from src.utils.image_processing import ResizeLongestSide
 from src.utils.visualization import debug_images_dataset
 
-SELECTED_PROBLEM = "PD" #"handedness"
+SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
+CSV_LOAD_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/merged_statistics_w_predictions_w_original.csv"
 
-if SELECTED_PROBLEM == "handedness":
-    SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
-    CSV_LOAD_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/merged_statistics_w_predictions_w_original.csv"
+#LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
+LIST_OF_IDS_HANDEDNESS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
 
-    #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-    LIST_OF_IDS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
-
-    #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
-    data_folder = "all_no_grids_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
-    SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/dataset_info"
-else:
-    pass
-
+#data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
+data_folder = "all_no_grids_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
+
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 
+#QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = ['5']
+QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(q) for q in range(1,14)]
+
+SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/dataset_info"
 input_size = 224
+DEBUG_IMGS = True
 SEED=42
 DATA_MODALITY = 'digit' #'all' # 'X', 'text', 'digit', 'all'
+
 BALANCED_DATA = True
 BALANCING_FACTOR = 1
 MAJORITY_CLASS_ID = 0
 THRESHOLD_NUM = 1
 NUM_tiles = 3
 
-dataloader_params={
-    'mean_and_std': 'handedness'
-}
-
+MEAN = [0.06040578708052635, 0.06040578708052635, 0.06040578708052635]
+STD = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
 
 
 def main(run_random_samples_from_loader=False, run_study_loader = False, show_grids=True, run_compute_time=True, run_debug_from_shards=False,
          run_explore_files=False):
     args = get_args()
     random.seed(SEED)
-    mean,std = get_mean_std(dataloader_params['mean_and_std'])
 
     if run_random_samples_from_loader:
-        random_samples_from_dataloader(args, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, mean=mean, std=std)
+        random_samples_from_dataloader(args, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3)
     
+    #to update
     if show_grids:
-        grids_of_random_samples(args, out_folder=os.path.join(SAVE_PATH, "grids"), batches_to_show=3, mean=mean, std=std)
+        grids_of_random_samples(args, out_folder=os.path.join(SAVE_PATH, "grids"), batches_to_show=3)
     
+    #to update
     if run_compute_time:
         compute_time_to_iterate_on_dataloader(args)
-        
+    
     if run_study_loader:
         study_dataloader(args)
     
@@ -100,27 +99,19 @@ def main(run_random_samples_from_loader=False, run_study_loader = False, show_gr
         transform = T.Compose([
             T.Resize((224, 224)),
             T.ToTensor(),          # Scales pixels to [0, 1]
-            T.Normalize(mean=mean, 
-                            std=std),
+            T.Normalize(mean=MEAN, 
+                            std=STD),
         ])
         debug_from_shards(args, out_folder=os.path.join(SAVE_PATH, "debug_from_shards"), 
                           augmentation_transform=augmentation_transform, transform=transform, invert_color=True)
         #add some other grids (eg larger than higher, bad predictions, ...)
+    
     if run_explore_files:
         explore_files(filename='worker94_shard-000000/D3I3J0N6.q1.hand.png')
 
 
 
 ########### Tensor visualization utils ############
-def get_mean_std(mean_and_std):
-    if mean_and_std == 'handedness':
-        mean = [0.06040578708052635, 0.06040578708052635, 0.06040578708052635]
-        std = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
-    else:
-        raise ValueError(f"Unknown mean/std setting: {mean_and_std}")
-    return mean, std
-
-
 def save_img_with_info(image_data,properties_text,path):
     # Create a 1-row, 2-column figure layout
     fig, axs = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={'width_ratios': [1.5, 1]})
@@ -462,7 +453,7 @@ def dataset_overview(loader, num_modalities=None, num_classes=None, max_batches=
     }
 #########################################################################
 
-def get_dataloader(args,dataloader_params,normalized=True):
+def get_dataloader(args,normalized=True):
     worker = args.num_workers
     batch_size = 32
     prefetch_factor = 2
@@ -473,8 +464,6 @@ def get_dataloader(args,dataloader_params,normalized=True):
     apply_augmentation = False
     invert_color=True
     use_grid = True
-
-    mean,std = get_mean_std(dataloader_params['mean_and_std'])
 
     grid_dict = None
     if use_grid:
@@ -500,8 +489,8 @@ def get_dataloader(args,dataloader_params,normalized=True):
         transform = T.Compose([
             T.Resize((224, 224)),
             T.ToTensor(),          # Scales pixels to [0, 1]
-            T.Normalize(mean=mean, 
-                            std=std),
+            T.Normalize(mean=MEAN, 
+                            std=STD),
         ])
     else:
         transform = T.Compose([
@@ -517,7 +506,7 @@ def get_dataloader(args,dataloader_params,normalized=True):
         selection_modality = 'text' 
     else:
         selection_modality = DATA_MODALITY 
-    csv_data = pd.read_csv(LIST_OF_IDS_PATH)
+    csv_data = pd.read_csv(LIST_OF_IDS_HANDEDNESS_PATH)
     print("Columns in the CSV:", csv_data.columns.tolist())
     csv_data, num_less_than_1_rows = melt_df(csv_data, modality=selection_modality, threshold=THRESHOLD_NUM)
     exclusion_set.update(num_less_than_1_rows)
@@ -588,7 +577,7 @@ def compute_time_to_iterate_on_dataloader(args):
     end = time.time()
     elapsed_time = end - start
     print(f"Time taken to iterate over the dataloader: {elapsed_time:.2f} seconds")
-def random_samples_from_dataloader(args,out_folder,batches_to_show=3, mean=None,std=None):
+def random_samples_from_dataloader(args,out_folder,batches_to_show=3):
     os.makedirs(out_folder, exist_ok=True)
     #this functions shows images and properties of a random sample of images from the dataloader
     train_loader, expected_shape = get_dataloader(args)
@@ -615,12 +604,12 @@ def random_samples_from_dataloader(args,out_folder,batches_to_show=3, mean=None,
                 else:
                     single_img = img_tensor[i]
                 
-                properties_text = tensor_debug_info(single_img, name=f"view {len(list_of_views)}", norm_mean=mean, norm_std=std)
+                properties_text = tensor_debug_info(single_img, name=f"view {len(list_of_views)}", norm_mean=MEAN, norm_std=STD)
 
                 tensor_debug_info(single_img, name=f"view {len(list_of_views)}")
 
                 # Convert the single 3D tensor to PIL
-                img_pil = T.ToPILImage()(denorm(single_img, mean, std))
+                img_pil = T.ToPILImage()(denorm(single_img, MEAN, STD))
                 image_data = np.array(img_pil)
                 list_of_views.append(image_data)
                 
@@ -629,7 +618,7 @@ def random_samples_from_dataloader(args,out_folder,batches_to_show=3, mean=None,
             save_img_with_info_views(list_of_views, list_of_properties, os.path.join(out_folder_this_batch, f"sample_{i}.png"))
         if n_batches >= batches_to_show:
             break
-def grids_of_random_samples(args,out_folder,batches_to_show=3,mean=None,std=None):
+def grids_of_random_samples(args,out_folder,batches_to_show=3):
     if os.path.exists(out_folder):
         #delete all files in the folder
         for entry in os.listdir(out_folder):
@@ -657,8 +646,8 @@ def grids_of_random_samples(args,out_folder,batches_to_show=3,mean=None,std=None
             imgs = imgs.unsqueeze(1)  # Add a modality dimension if only one view
         else:
             n = imgs.shape[1]
-        mean = torch.as_tensor(mean).expand(n, -1)   # (n, C), no copy
-        std  = torch.as_tensor(std).expand(n, -1)
+        mean = torch.as_tensor(MEAN).expand(n, -1)   # (n, C), no copy
+        std  = torch.as_tensor(STD).expand(n, -1)
         show_batch_grid(
             imgs, mean, std,
             nrow=8, max_imgs=32,

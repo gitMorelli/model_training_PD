@@ -33,7 +33,7 @@ try:
 except ImportError:  # pandas only needed if reading IDs from a CSV
     pd = None
 
-
+EXPERIMENT = 'PD' #'handedness'
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -151,7 +151,10 @@ def pre_load_grid_data(h5_filepath, csv_data, n_workers=4):
     Returns the aggregated nested dict.
     """
     start = time.time()
-    unique_subjects = csv_data["ident_projet"].unique()
+    if EXPERIMENT == 'handedness':
+        unique_subjects = csv_data["ident_projet"].unique()
+    else:
+        unique_subjects = csv_data['unique_id'].str.split('_').str[0].unique()
 
     full_dict = get_ids_data_from_h5_file_list(
         h5_filepath, unique_subjects, n_workers=n_workers
@@ -186,7 +189,13 @@ def _parse_args():
 def main():
     args = _parse_args()
 
-    csv_data = pd.read_csv('/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv')
+    if EXPERIMENT == 'handedness':
+        csv_data = pd.read_csv('/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv')
+        save_path = f"/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl"
+    elif EXPERIMENT == 'PD':
+        csv_data = pd.read_parquet('/home/a_morelli/datasets/id_lists/final_data_for_training.parquet')
+        save_path = f"/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl"
+    
     data = pre_load_grid_data(
         "/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5", 
         csv_data, n_workers=args.n_workers
@@ -194,10 +203,10 @@ def main():
 
     print(f"Loaded {len(data)} IDs.")
 
-    with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "wb") as f:
+    with open(save_path, "wb") as f:
         pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
     start = time.time()
-    with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "rb") as f:
+    with open(save_path, "rb") as f:
         data = pickle.load(f)
     end = time.time()
     print(f"Data loaded from pickle in {end - start:.2f} seconds.")

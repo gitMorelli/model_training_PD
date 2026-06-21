@@ -4,13 +4,13 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=8              # Number of CPU cores per task
+#SBATCH --cpus-per-task=32              # Number of CPU cores per task
 #SBATCH --mem=64G                      # Job memory request
-#SBATCH --time=00:10:00                # Time limit hrs:min:sec
-#SBATCH --partition=shortq
-#--partition=visuq,gpgpuq
+#SBATCH --time=06:00:00                # Time limit hrs:min:sec
+#--partition=shortq
+#SBATCH --partition=visuq,gpgpuq
 #--gres=gpu:1
-#--gres=gpu:h100:1
+#SBATCH --gres=gpu:h100:1
 #--gres=gpu:v100:1
 #--gres=gpu:p40:1
 #--nodelist=gpu04
@@ -34,4 +34,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.train_PD_model \
-    --num_workers 6
+    --num_workers 30

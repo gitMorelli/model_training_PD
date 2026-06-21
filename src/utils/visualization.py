@@ -169,7 +169,7 @@ def debug_images_dataset_stacked(
         
         print(f"Anteprima [{name}] salvata con successo in: {modality_output_path}")
 
-def debug_images_PD(mean,std,loader,out_dir):
+def debug_images_PD(mean,std,loader,out_dir): #(N, k, C, H, W), N = sum(T_i) - Format
     def _denorm_to_hwc(img, mean, std):
         """(C,H,W) tensor -> (H,W[,C]) numpy in [0,1] for imshow."""
         img = img.detach().cpu().float()
@@ -196,7 +196,7 @@ def debug_images_PD(mean,std,loader,out_dir):
         slot_to_q   : optional dict/callable slot->label (else "q{slot+1}")
         mean,std    : denormalization; pass None, None if frames already in [0,1]
         """
-        frames, seq_ids, slot_ids, lengths, labels = batch
+        frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities = batch
         seq_ids, slot_ids = seq_ids.cpu(), slot_ids.cpu()
         B = lengths.size(0)
 
@@ -217,6 +217,7 @@ def debug_images_PD(mean,std,loader,out_dir):
                 continue
             sel = sel[torch.argsort(slot_ids[sel])]            # questionnaires in slot order
             slots = slot_ids[sel].tolist()
+            modes = [modalities[i] for i in sel.tolist()]
 
             sub = frames[sel]                                  # (T_b, k, C, H, W)
             T_b, k, C = sub.shape[:3]
@@ -230,14 +231,14 @@ def debug_images_PD(mean,std,loader,out_dir):
                             cmap="gray" if C == 1 else None)
                     ax.set_xticks([]); ax.set_yticks([])
                     if j == 0:
-                        ax.set_ylabel(f"view {i}", fontsize=9)
+                        ax.set_ylabel(f"{modes[j][i]}", fontsize=9)
 
             sid = subject_ids[b] if subject_ids is not None else f"subject_{b}"
             lab = labels[b].item() if torch.is_tensor(labels) else labels[b]
             fig.suptitle(f"{sid}   label={lab}   T={T_b}  k={k}", fontsize=11)
             fig.tight_layout()
 
-            path = os.path.join(out_dir, f"{sid}.png")
+            path = os.path.join(out_dir, f"subject_{b}.png")
             fig.savefig(path, dpi=dpi, bbox_inches="tight")
             plt.close(fig)
             paths.append(path)
@@ -251,15 +252,13 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
     """
     Print all non-image elements of a batch from collate_variable_sequences.
 
-    batch : (frames, seq_ids, slot_ids, lengths, labels[, subject_ids])
+    batch : (frames, seq_ids, slot_ids, lengths, labels, resizing_factors, subjects)
         frames is skipped; everything else is printed.
     subject_ids : optional list[str] (used if batch doesn't already carry it)
     slot_to_q   : optional dict/callable slot->label (else "q{slot+1}")
     """
     # unpack, tolerating the 5- or 6-element variant
-    frames, seq_ids, slot_ids, lengths, labels = batch[:5]
-    if subject_ids is None and len(batch) >= 6:
-        subject_ids = batch[5]
+    frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities = batch
 
     seq_ids  = seq_ids.cpu()
     slot_ids = slot_ids.cpu()
@@ -285,8 +284,9 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
           f"{labels.tolist() if torch.is_tensor(labels) else labels}")
     print(f"seq_ids   ({tuple(seq_ids.shape)}): {seq_ids.tolist()}")
     print(f"slot_ids  ({tuple(slot_ids.shape)}): {slot_ids.tolist()}")
-    if subject_ids is not None:
-        print(f"subject_ids ({len(subject_ids)}): {list(subject_ids)}")
+    print(f"resizing_factors ({len(resizing_factors)}): {resizing_factors}")
+    print(f"subject_ids ({len(subject_ids)}): {list(subject_ids)}")
+    print(f"modalities ({len(modalities)}): {modalities}")
 
     # consistency check: lengths must match the frame counts implied by seq_ids
     counts = torch.bincount(seq_ids, minlength=B)

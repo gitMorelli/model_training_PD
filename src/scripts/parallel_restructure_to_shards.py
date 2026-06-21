@@ -357,7 +357,7 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                 #get info for this id 
                 #get last questionnaire for this id (the last_q of the corresponding case)
                 id_row = data.loc[data['unique_id'] == subject_id].iloc[0]
-                last_q = id_row['last_avail_q']
+                last_q = int(id_row['last_avail_q'])
                 #grid_pattern = id_row['grid_pattern']
                 case_grid_pattern = id_row['case_grid_pattern']
                 label = id_row['diag_park_final1_quest'].item()
@@ -369,10 +369,10 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                     files.sort(key=lambda x: x.name) 
                     questionnaire_info[questionnaire] = {}
 
-                    #forget all questionnaires after censoring 
+                    '''#forget all questionnaires after censoring 
                     if int(questionnaire) > int(last_q):
                         #print(f"Skipping questionnaire {questionnaire} for subject {subject_id} because it is after the last_q ({last_q})")
-                        continue
+                        continue'''
                     #ignore questionnaires that are missing in the case grid pattern
                     if case_grid_pattern[int(questionnaire)-1]=='0':
                         #print(f"Skipping questionnaire {questionnaire} for subject {subject_id} because it is missing in the case grid pattern")
@@ -455,7 +455,8 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                     "at_least_warning": at_least_warning,
                     'case_grid_pattern': case_grid_pattern,
                     "questionnaire_info": questionnaire_info,
-                    'shard_name' : current_shard_name
+                    'shard_name' : current_shard_name,
+                    'last_q': last_q
                 }
                 
                 # 4. Serialize and encode exactly once

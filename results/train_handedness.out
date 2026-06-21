@@ -108,3 +108,21 @@ Total estimated model params size (MB): 94
 Modules in train mode: 157                                                      
 Modules in eval mode: 0                                                         
 Total FLOPs: 24.5 B                                                             
+Experiment parameters successfully logged to /mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet50_model_results/checkpoints/experiments_log.csv
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 4722279
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: gpu06
+Nodes: 1
+Cores per node: 32
+Job started at: 2026-06-19 19:19:12
+Job ended at:   2026-06-19 23:17:38
+Job Wall-clock time: 03:58:26
+CPU Utilized: 18:08:16
+CPU Efficiency: 14.26% of 5-07:09:52 core-walltime
+Memory Utilized: 22.27 GB
+Memory Efficiency: 34.79% of 64.00 GB

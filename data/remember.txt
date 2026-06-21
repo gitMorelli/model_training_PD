@@ -43,8 +43,16 @@ I forget
 I don't exclude any data based on the number of marks in the modalities
 
 NOte su file rilevanti
-"/home/a_morelli/datasets/id_lists/final_data_for_training.parquet" has the q_X_num_Y column only for Y = X, text and digit; If you want sentences you have to re-generate 
-questionnaire_templates_PATH="/home/a_morelli/datasets/others/template_sizes.json" -> file con le dimensioni dei templates (risoluzione documenti e3n usati per template matchign)
+"/home/a_morelli/datasets/id_lists/final_data_for_training.parquet" 
+  has the q_X_num_Y column only for Y = X, text and digit; If you want sentences you have to re-generate (but you can also get from grid file)
+  last_avail_q: is the last_avail_q for the case of the group
+  case_dt_dateq{last_avail_q} should be negative -> i have checked and is indeed always negative 
+questionnaire_templates_PATH="/home/a_morelli/datasets/others/template_sizes.json" 
+  -> file con le dimensioni dei templates (risoluzione documenti e3n usati per template matchign)
+"/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl", grid_file 
+  when loaded the structure of the dict is subject->questionnaire->modality
+  questionnaire is in format: qX
+  modality is same format as h5 file e shards
 
 
 Nomenclatura ->

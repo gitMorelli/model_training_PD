@@ -2,7 +2,7 @@
 #SBATCH --job-name=par_restructure_to_shards
 #SBATCH --array=0-3
 #SBATCH --nodes=1                     # 1 Node per array task
-#SBATCH --cpus-per-task=32           
+#SBATCH --cpus-per-task=12           
 #SBATCH --mem=64G                     # Request enough RAM for 16 parallel processes
 #SBATCH --time=03:00:00               # Estimated time for 500 images
 #SBATCH --partition=shortq

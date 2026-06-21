@@ -727,7 +727,7 @@ class SequenceQuestionnaireModel(nn.Module):
 
     def forward(self, frames, seq_ids, slot_ids, lengths, return_view_attn=False):
         N, k  = frames.shape[:2]
-        feats = self.cnn(frames.flatten(0, 1))             # (N*k, feat_dim)  <- only heavy step
+        feats = self.vision_model(frames.flatten(0, 1))             # (N*k, feat_dim)  <- only heavy step
         return self.classifier(feats, N, k, seq_ids, slot_ids, lengths, return_view_attn)
 
 #others
@@ -746,4 +746,4 @@ def test_output(size, model):
         output = model(dummy_input)
     return output
 
-
+ 
