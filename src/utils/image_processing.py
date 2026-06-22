@@ -1,5 +1,9 @@
 import cv2
 import numpy as np
+import torchvision.transforms.functional as F
+from torchvision.transforms import InterpolationMode
+import torchvision.transforms as T
+import os
 
 def convert_background_to_white(image):
     img = image.copy()
@@ -97,8 +101,6 @@ def recolor_border_via_profiles(image, coords, black_tolerance=5):
 
 
 # custom torch transforms
-import torchvision.transforms.functional as F
-from torchvision.transforms import InterpolationMode
 class ResizeLongestSide:
     def __init__(self, size, interpolation=InterpolationMode.BILINEAR):
         self.size = size
@@ -128,3 +130,97 @@ class PadToSquare:
             pad_h - pad_h // 2,
         )
         return F.pad(img, padding, fill=self.fill, padding_mode=self.padding_mode)
+
+# Load transforms
+def get_transforms(exp_params, transform):
+    if exp_params['custom_transform'] is None:
+        return transform
+    elif exp_params['custom_transform'] == 'pad_resize_normalize':
+        return T.Compose(
+                [
+                    PadToSquare(fill=0),
+                    T.Resize((exp_params['input_size'], exp_params['input_size'])),
+                    T.ToTensor(),
+                    T.Normalize(mean=exp_params['norm_mu'], 
+                                std=exp_params['norm_std']),
+                ]
+            )
+    elif exp_params['custom_transform'] == 'pad_resize':
+        return T.Compose(
+                [
+                    PadToSquare(fill=0),
+                    T.Resize((exp_params['input_size'], exp_params['input_size'])),
+                    T.ToTensor(),
+                ]
+            )
+    elif exp_params['custom_transform'] == 'resize_normalize':
+        return T.Compose(
+                [
+                    T.Resize((exp_params['input_size'], exp_params['input_size'])),
+                    T.ToTensor(),
+                    T.Normalize(mean=exp_params['norm_mu'], 
+                                std=exp_params['norm_std']),
+                ]
+            )
+    elif exp_params['custom_transform'] == 'resize':
+        return T.Compose(
+                [
+                    T.Resize((exp_params['input_size'], exp_params['input_size'])),
+                    T.ToTensor(),
+                ]
+            )
+    else:
+        raise ValueError(f"Unknown custom_transform: {exp_params['custom_transform']}")
+
+def get_augmentation_transform(exp_params):
+    def get_single_augmentation_transform(t_modality):
+        if t_modality is None:
+            return None
+        elif t_modality == 'random_crop_half':
+            return T.Compose([
+                T.RandomCrop(
+                    int(exp_params['input_size'] / 2), 
+                    pad_if_needed=True, 
+                    padding_mode='constant', 
+                    fill=(255,255,255) # <-- White fill for RGB PIL images
+                )
+            ]) 
+        elif t_modality == 'random_crop':
+            return T.Compose([
+                T.RandomCrop(
+                    int(exp_params['input_size']), 
+                    pad_if_needed=True, 
+                    padding_mode='constant', 
+                    fill=(255,255,255) # <-- White fill for RGB PIL images
+                )
+            ]) 
+        elif t_modality == 'grid':
+            return 'grid'
+        else:
+            raise ValueError(f"Unknown augmentation_transform: {exp_params['apply_augmentation']}")
+    if isinstance(exp_params['data_modality'], list):
+        '''in this case i have to return a list of transforms
+        for the grid sampling it returns grid because i cnanot pre-load a transform'''
+        print("Multiple data modalities detected. Applying augmentation transforms based on modality:")
+        list_of_transforms = []
+        modality_to_transform = {
+            'digit_full': None,
+            'digit_crop': 'random_crop',
+            'digit':'grid',
+            'text_full': None,
+            'text_crop': 'random_crop',
+            'text':'grid',
+            'X_crop' : 'random_crop',
+            'X_full' : None,
+            'X' : 'grid',
+        }
+        for t in exp_params['data_modality']:
+            if t in modality_to_transform:
+                list_of_transforms.append(get_single_augmentation_transform(modality_to_transform[t]))
+            else:
+                raise ValueError(f"Unknown data_modality: {t}")
+        return list_of_transforms
+    else:
+        print("Single data modality detected. Applying augmentation transform:", exp_params['apply_augmentation'])
+        return get_single_augmentation_transform(exp_params['apply_augmentation'])
+   

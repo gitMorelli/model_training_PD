@@ -524,8 +524,12 @@ class ModelPD(L.LightningModule):
 
         opt = self.optimizers()
         if self.opt_groups:
-            for i, group in enumerate(self.opt_groups):
-                self.log(group['lr_name'], opt.param_groups[i]['lr'], on_step=False, on_epoch=True)
+            logged = set()
+            for g in opt.param_groups:
+                name = g.get('lr_name')
+                if name and name not in logged:
+                    self.log(name, g['lr'], on_step=False, on_epoch=True)
+                    logged.add(name)
         else:
             self.log("lr_backbone",        opt.param_groups[0]['lr'], on_step=False, on_epoch=True)
             self.log("lr_classifier_head", opt.param_groups[1]['lr'], on_step=False, on_epoch=True)
@@ -627,12 +631,12 @@ class ModelPD(L.LightningModule):
                     decay.append(p)
             return decay, no_decay
 
-        def add_group(named, lr):
+        def add_group(named, lr, lr_name):
             decay, no_decay = split_decay(named)
             if decay:
-                param_groups.append({'params': decay,    'lr': lr, 'weight_decay': self.weight_decay})
+                param_groups.append({'params': decay,    'lr': lr, 'weight_decay': self.weight_decay, 'lr_name': lr_name})
             if no_decay:
-                param_groups.append({'params': no_decay, 'lr': lr, 'weight_decay': 0.0})
+                param_groups.append({'params': no_decay, 'lr': lr, 'weight_decay': 0.0, 'lr_name': lr_name})
 
         param_groups = []
 
@@ -640,7 +644,7 @@ class ModelPD(L.LightningModule):
             for group in self.opt_groups:
                 named = [(name, param) for name, param in self.model.named_parameters()
                         if any(key in name.lower() for key in group['names']) and param.requires_grad]
-                add_group(named, group['lr'])
+                add_group(named, group['lr'], group['lr_name'])
         else:
             backbone, head = [], []
             for name, param in self.model.named_parameters():
@@ -650,8 +654,8 @@ class ModelPD(L.LightningModule):
                     head.append((name, param))
                 else:
                     backbone.append((name, param))
-            add_group(backbone, self.lr_backbone)
-            add_group(head, self.lr_classifier_head)
+            add_group(backbone, self.lr_backbone, 'lr_backbone')
+            add_group(head, self.lr_classifier_head, 'lr_head')
 
         optimizer = optim.AdamW(param_groups)   # weight_decay now lives per-group
 
@@ -689,9 +693,10 @@ class ModelPD(L.LightningModule):
             return {"optimizer": optimizer}
 
     def predict_step(self, batch, batch_idx):
-        frames, seq_ids, slot_ids, lengths, labels = batch[:5]
-        #subject_id    = batch[5] if len(batch) > 5 else None
-        #questionnaire = batch[6] if len(batch) > 6 else None
+
+        frames, seq_ids, slot_ids, lengths, labels, \
+            resizing_factors, subject_ids, modalities = batch
+        
 
         outputs = self(frames, seq_ids, slot_ids, lengths)
 
@@ -707,8 +712,7 @@ class ModelPD(L.LightningModule):
             "probs": probs.detach().cpu(),
             "preds": preds.detach().cpu(),
             "labels": labels.detach().cpu().flatten(),
-            #"subject_id": subject_id,
-            #"questionnaire": questionnaire,
+            "subject_ids": subject_ids,
         }
     
     def on_after_backward(self):

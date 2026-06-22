@@ -20,6 +20,9 @@ import numpy as np
 import h5py
 import sys
 from functools import partial
+import pickle
+
+from src.utils.image_processing import get_augmentation_transform
 
 #Datasets and dataloaders for speed tests
 class InMemoryWdsDataset(torch.utils.data.Dataset):
@@ -749,6 +752,7 @@ def load_representations_handedness(output_path, as_dataframe=False, to_torch=Fa
         reps_by_name = {k: torch.from_numpy(v) for k, v in reps_by_name.items()}
  
     return metadata, reps_by_name
+###################################################################################################################
 
 #Datasets and dataloaders for PD model
 #change the exclusion criteria to use only the id, not id+questionnaire
@@ -878,7 +882,7 @@ def create_sequence_flattener_PD_grid(transform_func, augmentation_transform, n_
 
 def create_sequence_flattener_PD_multiview(transform_func, augmentation_transform_list, n_views, modality_string_list, original_modality_names,
                                               exclusion_set, huggingface_transform=False, invert_color=False,
-                                              grid_dict=None, censor_time=0):
+                                              grid_dict=None, censor_time=0, filter_modality='number_random'):
     all_modalities = ['hand', 'number_random', 'X']
     def flatten_samples(src):
         for sample in src:
@@ -935,14 +939,15 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                 list_of_views = []
                 list_of_modality_names = []
 
+                
+                num_filter_modality, _ = grid_dict[original_id]['q'+str(X)][filter_modality] 
+                if num_filter_modality <= 0: #if the filter modality is not present i skip the questionnaire
+                    #else i impute the other missing modalities
+                    continue
+
                 for current_mode in all_modalities:
                     num, grid = grid_dict[original_id]['q'+str(X)][current_mode] #in grid dict X is uppercase
-                    if num <=0:
-                        continue
-                    else:
-                        rescale_factor= questionnaire_info[str(X)]['rescale_factor']#if the image was rescaled i have to rescale the grid coordinates too
-                        grid[0,:] = grid[0,:]*rescale_factor[0]
-                        grid[1,:] = grid[1,:]*rescale_factor[1]
+                        
                     #select the indexes of modality_string for which modality_string[i]==current_mode
                     mask = [i for i, m in enumerate(modality_string_list) if m == current_mode]
                     if len(mask) == 0: #if the current_mode is not in the modality_string_list i skip it
@@ -953,28 +958,36 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                     selected_modality_names = [original_modality_names[i] for i in mask]
                     raw_image_data = image_pool[X].get(current_mode.lower()) #in the dictionary i have converted the keys to lower
                     #-> hence i have to convet curren_mode to lower or i get a None
+                    rescale_factor = questionnaire_info[str(X)]['rescale_factor']#if the image was rescaled i have to rescale the grid coordinates too
 
                     if isinstance(raw_image_data, bytes):
                         img = Image.open(io.BytesIO(raw_image_data)).convert('RGB')
+                    elif num == 0: #if the modality is not present i create a blank image 
+                        img = Image.new('RGB', (224,224), color=(255,255,255))
                     elif raw_image_data is None: #if missing i create a blank image taking the size from grid
+                        grid[0,:] = grid[0,:]*rescale_factor[0]
+                        grid[1,:] = grid[1,:]*rescale_factor[1]
                         max_x = int(np.max(grid[0,:]))
                         max_y = int(np.max(grid[1,:]))
                         img = Image.new('RGB', (max_x+20, max_y+20), color=(255,255,255))
                         print(f"Warning: Missing modality {current_mode} for questionnaire q{X} in sample {subject_id}. Using blank image of size {(max_x+5, max_y+5)}.")
                     else:
                         img = raw_image_data
-                    x_coords = [0] + sorted(list(grid[0, :])) + [img.width]
-                    n_x = len(x_coords) - 1
-                    y_coords = [0] + sorted(list(grid[1, :])) + [img.height]
 
                     for i,augmentation_transform in enumerate(selected_transforms):
                         
                         if isinstance(augmentation_transform,str) and augmentation_transform == 'grid':
                             #select random crop
-                            rand_num = random.randint(1, num)
-                            coordinates = (x_coords[(rand_num - 1) % n_x],     y_coords[(rand_num - 1) // n_x],
-                                            x_coords[(rand_num - 1) % n_x + 1], y_coords[(rand_num - 1) // n_x + 1])
-                            img_view = img.crop(coordinates)
+                            if num > 0:
+                                x_coords = [0] + sorted(list(grid[0, :])) + [img.width]
+                                n_x = len(x_coords) - 1
+                                y_coords = [0] + sorted(list(grid[1, :])) + [img.height]
+                                rand_num = random.randint(1, num)
+                                coordinates = (x_coords[(rand_num - 1) % n_x],     y_coords[(rand_num - 1) // n_x],
+                                                x_coords[(rand_num - 1) % n_x + 1], y_coords[(rand_num - 1) // n_x + 1])
+                                img_view = img.crop(coordinates)
+                            else:
+                                img_view = img.copy()
                         elif augmentation_transform is None:
                             img_view = img.copy()
                         else:
@@ -1047,7 +1060,7 @@ def collate_variable_sequences_PD(samples, questionnaire_to_slot=None):
 
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
                        huggingface_transform=False,augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None,
-                       censor_time=0):
+                       censor_time=0, filter_modality='digit'):
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
@@ -1064,6 +1077,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
         modality_string = modalities_map[modality]
     else:
         modality_string = 'all'
+    filter_modality = modalities_map.get(filter_modality)  # Normalize filter modality
 
     # 2. File gathering
     shard_files = glob.glob(shard_pattern)
@@ -1091,7 +1105,8 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                 #.decode(decode_approach)
                 .compose(create_sequence_flattener_PD_multiview(transform,augmentation_transform, n_views=n_views ,modality_string_list=modality_string,
                                                     exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
-                                                    grid_dict=grid_dict, censor_time=censor_time, original_modality_names=modality)) # This replaces .map() and .select()
+                                                    grid_dict=grid_dict, censor_time=censor_time, 
+                                                    original_modality_names=modality, filter_modality=filter_modality)) # This replaces .map() and .select()
                 .batched(batch_size,
                         collation_fn=partial(collate_variable_sequences_PD, questionnaire_to_slot=None),
                         partial=False)
@@ -1102,6 +1117,38 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     
     return dataset
 
+#pipelines
+def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, SHARD_PATTERN_train, SHARD_PATTERN_val):
+    print(f"Reading from {SHARD_PATTERN_train} and {SHARD_PATTERN_val}..")
+    augmentation_transform = get_augmentation_transform(exp_params)
+    print("Augmentation transform:", augmentation_transform)
+    #assert 1==0 , "STOPPED HERE TO CHECK AUGMENTATION TRANSFORM"
+
+    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, split_workers=True, batch_size=exp_params['batch_size'], transform=transform, exclusion_set=exclusion_set, modality=exp_params['data_modality'],
+                       huggingface_transform=exp_params['huggingface_transform'],augmentation_transform=augmentation_transform, 
+                       invert_color=exp_params['invert_color'],n_views=exp_params['num_tiles'], grid_dict = grid_dict, 
+                       censor_time=exp_params['censor_time'], filter_modality=exp_params['filter_modality'])
+    val_dataset = prepare_PD_dataset(SHARD_PATTERN_val, split_workers=True, batch_size=exp_params['batch_size'], transform=transform, exclusion_set=val_exclusion_set, modality=exp_params['data_modality'],
+                       huggingface_transform=exp_params['huggingface_transform'],augmentation_transform=augmentation_transform, 
+                       invert_color=exp_params['invert_color'],n_views=exp_params['num_tiles'], grid_dict = grid_dict,
+                       censor_time=exp_params['censor_time'], filter_modality=exp_params['filter_modality'])
+    
+    train_loader = DataLoader(
+        train_dataset, 
+        num_workers=worker, 
+        batch_size=None, 
+        prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
+        pin_memory=True
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        num_workers=worker, 
+        batch_size=None, 
+        prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
+        pin_memory=True
+    )
+    return train_loader, val_loader, train_dataset, val_dataset
+####################################################################################################################
 
 # Functions and datasets for extracting debug information
 def explore_data(shard_pattern, load_in_memory=False, 
@@ -1235,7 +1282,7 @@ def melt_df(df,modality,threshold=1, questionnaires_to_include=None):
     return new_df,ident_projets_to_exclude
 
 
-# Class rebalancing
+# Class rebalancing / exclusion
 def generate_exclusion_set_val(csv_data, data_modality, majority_class_id, balancing_factor, label_col='lateralite',id_col='ident_projet',split='train'):
     train_data = csv_data[csv_data['split'] == split]
     class_counts = train_data[label_col].value_counts()
@@ -1302,6 +1349,36 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train'):
     
     return ids_to_exclude
 
+def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col=''):
+    exclusion_set = set()
+    val_exclusion_set = set()
+     
+    csv_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+    if verbose:
+        print("Initial CSV data loaded. First row example:")
+        for col in csv_data.columns:
+            print(f"{col}: {csv_data[col].iloc[0]}")
+        print('#' * 50)
+        print("Unique subjects in the dataset:", csv_data['unique_id'].nunique())
+        print("Unique subjects in training set:", csv_data[csv_data['split'] == 'train']['unique_id'].nunique())
+        print("Unique subjects in validation set:", csv_data[csv_data['split'] == 'val']['unique_id'].nunique())
+        print('#' * 50)
+        print("Class distribution in the entire dataset:\n", csv_data[class_col].value_counts())
+        print('#' * 50)
+    
+    #compute the number of samples for each class in the training set
+    num_0 = len(csv_data[(csv_data[class_col] == 0) & (csv_data['split'] == 'train')])
+    num_1 = len(csv_data[(csv_data[class_col] == 1) & (csv_data['split'] == 'train')])
+
+    if exp_params['balanced_data']:
+        exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train') 
+    if exp_params['balance_validation']:
+        val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val')
+    if verbose:
+        print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
+        print('#' * 50)
+    return exclusion_set, val_exclusion_set, num_0,num_1
+
 #Loading the grid_file data
 def pre_load_grid_data(h5_filepath,csv_data):
     '''
@@ -1355,4 +1432,13 @@ def get_ids_data_from_h5_file_list(file_path, target_ids):
                 print(f"Total memory used until now: {total_size:.2f} MB", flush=True)
 
     return results
-    
+def load_grid_dict(exp_params):
+    if exp_params['use_grid']:
+        """Load the grid dictionary from a pickle file."""
+        with open(exp_params['grid_dict_path'], "rb") as f:
+            grid_dict = pickle.load(f)
+        print("Grid dictionary loaded successfully. Number of entries:", len(grid_dict))
+        return grid_dict
+    else:
+        print("Grid usage is disabled. No grid dictionary will be loaded.")
+        return None

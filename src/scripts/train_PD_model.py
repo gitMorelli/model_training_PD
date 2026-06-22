@@ -28,12 +28,12 @@ import signal
 import sys
 import pickle
 
-from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, melt_df
-from src.utils.data_loading_utils import prepare_PD_dataset, generate_exclusion_set_PD
+from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict
+from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD
 from src.utils.model_utils import SequenceQuestionnaireModel
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
-from src.utils.image_processing import ResizeLongestSide, PadToSquare
+from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms
 from src.utils.training_utils import ModelPD, BestMetricTracker
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
@@ -43,7 +43,8 @@ exp_params = {
     'grid_dict_path': "/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl",
 
     #experiment parameters
-    'data_modality': ['digit_full','digit_crop']+['digit' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+    'data_modality': ['X_crop','X']+['digit_full','digit_crop']+['digit' for _ in range(3)]+
+    ['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
@@ -57,6 +58,7 @@ exp_params = {
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
     'censor_time': -1, #0, -1 (if keep all) or a positive value
+    'filter_modality' : 'digit',
 
     #model definition
     'model':"resnet18", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
@@ -66,6 +68,13 @@ exp_params = {
     'resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt'
 ), #None, see options below
     'model_structure': 'SequenceQuestionnaireModel',
+    'model_parameters': {
+        'd_model': 128, 
+        'n_heads': 4,
+        'n_layers':2,
+        'ff_mult':2,
+        'dropout': 0.4,
+    },
 
     #Transforms definitions
     'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
@@ -79,14 +88,14 @@ exp_params = {
     'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 8,
-    'num_epochs': 250,
-    'patience': 250,
+    'batch_size': 4,
+    'num_epochs': 100,
+    'patience': 50,
     'eta_min_cosine': 1e-6,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['all','classifier'], #Update it for every model
+    'layers_to_unfreeze': ['classifier'],#['all','classifier'], #Update it for every model
     'seed': 42,
 }
 if isinstance(exp_params['data_modality'],list):
@@ -140,14 +149,15 @@ def main():
     grid_dict = load_grid_dict(exp_params)
 
     #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
-    exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets(exp_params,verbose=VERBOSE)
+    exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=CLASS_COL)
 
     write_log, current_version = logging_initialization() 
 
     model, transform = model_initialization(write_log,exp_params, verbose=VERBOSE)
     
-    train_loader,val_loader,train_dataset,val_dataset= prepare_loaders(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
-                                                                       grid_dict, transform)
+    train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
+                                                                       grid_dict, transform, 
+                                                                       SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val)
     
     if DEBUG_IMGS:
         debug(train_loader,val_loader,exp_params)
@@ -255,37 +265,6 @@ def debug(train_dataloader,val_dataloader,exp_params):
     debug_images_PD(mean=exp_params['norm_mu'], std=exp_params['norm_std'], loader=train_dataloader, out_dir=os.path.join(SAVE_DEBUG_PATH,'train'))
     debug_images_PD(mean=exp_params['norm_mu'], std=exp_params['norm_std'], loader=val_dataloader, out_dir=os.path.join(SAVE_DEBUG_PATH,'val'))
 
-def prepare_loaders(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform):
-    print(f"Reading from {SHARD_PATTERN_train} and {SHARD_PATTERN_val}..")
-    augmentation_transform = get_augmentation_transform(exp_params)
-    print("Augmentation transform:", augmentation_transform)
-    #assert 1==0 , "STOPPED HERE TO CHECK AUGMENTATION TRANSFORM"
-
-    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, split_workers=True, batch_size=exp_params['batch_size'], transform=transform, exclusion_set=exclusion_set, modality=exp_params['data_modality'],
-                       huggingface_transform=exp_params['huggingface_transform'],augmentation_transform=augmentation_transform, 
-                       invert_color=exp_params['invert_color'],n_views=exp_params['num_tiles'], grid_dict = grid_dict, 
-                       censor_time=exp_params['censor_time'])
-    val_dataset = prepare_PD_dataset(SHARD_PATTERN_val, split_workers=True, batch_size=exp_params['batch_size'], transform=transform, exclusion_set=val_exclusion_set, modality=exp_params['data_modality'],
-                       huggingface_transform=exp_params['huggingface_transform'],augmentation_transform=augmentation_transform, 
-                       invert_color=exp_params['invert_color'],n_views=exp_params['num_tiles'], grid_dict = grid_dict,
-                       censor_time=exp_params['censor_time'])
-    
-    train_loader = DataLoader(
-        train_dataset, 
-        num_workers=worker, 
-        batch_size=None, 
-        prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
-        pin_memory=True
-    )
-    val_loader = DataLoader(
-        val_dataset, 
-        num_workers=worker, 
-        batch_size=None, 
-        prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
-        pin_memory=True
-    )
-    return train_loader, val_loader, train_dataset, val_dataset
-
 def model_initialization(write_log,exp_params, verbose=True):
     backbone,transform = get_model(name=exp_params['model'], pretrained=True, 
                                    custom_pre_trained_weights=exp_params['custom_pre_trained_weights'])
@@ -347,113 +326,6 @@ def logging_initialization():
         write_log(f"GPU detected: {gpu} (Device ID: {device_id})")
     return write_log, current_version
 
-def prepare_exclusion_sets(exp_params,verbose=True):
-    exclusion_set = set()
-    val_exclusion_set = set()
-     
-    csv_data = pd.read_parquet(exp_params['list_of_ids_paths'])
-    if verbose:
-        print("Initial CSV data loaded. First row example:")
-        for col in csv_data.columns:
-            print(f"{col}: {csv_data[col].iloc[0]}")
-        print('#' * 50)
-        print("Unique subjects in the dataset:", csv_data['unique_id'].nunique())
-        print("Unique subjects in training set:", csv_data[csv_data['split'] == 'train']['unique_id'].nunique())
-        print("Unique subjects in validation set:", csv_data[csv_data['split'] == 'val']['unique_id'].nunique())
-        print('#' * 50)
-        print("Class distribution in the entire dataset:\n", csv_data[CLASS_COL].value_counts())
-        print('#' * 50)
-    
-    #compute the number of samples for each class in the training set
-    num_0 = len(csv_data[(csv_data[CLASS_COL] == 0) & (csv_data['split'] == 'train')])
-    num_1 = len(csv_data[(csv_data[CLASS_COL] == 1) & (csv_data['split'] == 'train')])
-
-    if exp_params['balanced_data']:
-        exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train') 
-    if exp_params['balance_validation']:
-        val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val')
-    if verbose:
-        print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
-        print('#' * 50)
-    return exclusion_set, val_exclusion_set, num_0,num_1
-
-def load_grid_dict(exp_params):
-    if exp_params['use_grid']:
-        """Load the grid dictionary from a pickle file."""
-        with open(exp_params['grid_dict_path'], "rb") as f:
-            grid_dict = pickle.load(f)
-        print("Grid dictionary loaded successfully. Number of entries:", len(grid_dict))
-        return grid_dict
-    else:
-        print("Grid usage is disabled. No grid dictionary will be loaded.")
-        return None
-
-def get_transforms(exp_params, transform):
-    if exp_params['custom_transform'] is None:
-        return transform
-    elif exp_params['custom_transform'] == 'pad_resize_normalize':
-        return T.Compose(
-                [
-                    PadToSquare(fill=0),
-                    T.Resize((exp_params['input_size'], exp_params['input_size'])),
-                    T.ToTensor(),
-                    T.Normalize(mean=exp_params['norm_mu'], 
-                                std=exp_params['norm_std']),
-                ]
-            )
-    elif exp_params['custom_transform'] == 'resize_normalize':
-        return T.Compose(
-                [
-                    T.Resize((exp_params['input_size'], exp_params['input_size'])),
-                    T.ToTensor(),
-                    T.Normalize(mean=exp_params['norm_mu'], 
-                                std=exp_params['norm_std']),
-                ]
-            )
-    else:
-        raise ValueError(f"Unknown custom_transform: {exp_params['custom_transform']}")
-
-def get_augmentation_transform(exp_params):
-    def get_single_augmentation_transform(t_modality):
-        if t_modality is None:
-            return None
-        elif t_modality == 'random_crop_half':
-            return T.Compose([
-                T.RandomCrop(
-                    int(exp_params['input_size'] / 2), 
-                    pad_if_needed=True, 
-                    padding_mode='constant', 
-                    fill=(255,255,255) # <-- White fill for RGB PIL images
-                )
-            ]) 
-        elif t_modality == 'grid':
-            return 'grid'
-        else:
-            raise ValueError(f"Unknown augmentation_transform: {exp_params['apply_augmentation']}")
-    if isinstance(exp_params['data_modality'], list):
-        '''in this case i have to return a list of transforms
-        for the grid sampling it returns grid because i cnanot pre-load a transform'''
-        print("Multiple data modalities detected. Applying augmentation transforms based on modality:")
-        list_of_transforms = []
-        modality_to_transform = {
-            'digit_full': None,
-            'digit_crop': 'random_crop_half',
-            'digit':'grid',
-            'text_full': None,
-            'text_crop': 'random_crop_half',
-            'text':'grid',
-        }
-        for t in exp_params['data_modality']:
-            if t in modality_to_transform:
-                list_of_transforms.append(get_single_augmentation_transform(modality_to_transform[t]))
-            else:
-                raise ValueError(f"Unknown data_modality: {t}")
-        return list_of_transforms
-    else:
-        print("Single data modality detected. Applying augmentation transform:", exp_params['apply_augmentation'])
-        return get_single_augmentation_transform(exp_params['apply_augmentation'])
-    
-
 def get_args():
     import argparse
     parser = argparse.ArgumentParser(description="I/O Benchmark for Multi-Tar Dataset")
@@ -482,10 +354,6 @@ def get_trainable_parameters_string(model):
 def save_experiment_logs(params_dict, status_suffix=""):
     """Helper function to write/append dictionary to the CSV log file."""
     log_path = os.path.join(CHECKPOINT_PATH, "experiments_log.csv")
-    
-    # Modify the experiment name if it was cancelled to explicitly track it
-    if status_suffix:
-        params_dict["EXPERIMENT_NAME"] = f"{params_dict['EXPERIMENT_NAME']}_{status_suffix}"
         
     if not os.path.exists(log_path):
         df = pd.DataFrame([params_dict])

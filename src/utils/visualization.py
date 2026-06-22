@@ -169,6 +169,7 @@ def debug_images_dataset_stacked(
         
         print(f"Anteprima [{name}] salvata con successo in: {modality_output_path}")
 
+# Visualization for PD time series data
 def debug_images_PD(mean,std,loader,out_dir): #(N, k, C, H, W), N = sum(T_i) - Format
     def _denorm_to_hwc(img, mean, std):
         """(C,H,W) tensor -> (H,W[,C]) numpy in [0,1] for imshow."""
@@ -247,6 +248,143 @@ def debug_images_PD(mean,std,loader,out_dir): #(N, k, C, H, W), N = sum(T_i) - F
     batch = next(iter(loader))                  # WebLoader(batch_size=None)
     os.makedirs(out_dir, exist_ok=True)
     debug_show_batch(batch, out_dir=out_dir)
+def debug_images_PD_with_meta(mean, std, batch, out_dir,
+                              slot_to_q=None,
+                              max_subjects=None, dpi=110,
+                              meta_fontsize=5.5,
+                              img_h=2.4, meta_h=2.8,
+                              compact=False):
+    """
+    Same idea as debug_images_PD, but prints a metadata panel directly UNDER
+    every image of the timeseries.
+
+    Layout, one PNG per subject:
+        columns = questionnaires / timepoints (slot order)  -> the timeseries
+        rows    = views (k); each view takes TWO physical rows:
+                    - image row
+                    - metadata row (tensor_debug_info for that exact frame)
+
+    So for each subject you get a grid: one line (row) per view, the line being a
+    timeseries of images, with the metadata for each image shown right below it.
+
+    Params
+    ------
+    mean, std     : denormalization (pass None, None if frames already in [0,1])
+    slot_to_q     : optional dict or callable slot -> label (else "q{slot+1}")
+    meta_fontsize : font size of the metadata text (small, since cells are tiny)
+    img_h, meta_h : relative heights of the image row vs the metadata row
+    compact       : if True, use a short summary instead of full tensor_debug_info
+    """
+
+    # ---- denorm helper (unchanged) -------------------------------------
+    def _denorm_to_hwc(img, mean, std):
+        """(C,H,W) tensor -> (H,W[,C]) numpy in [0,1] for imshow."""
+        img = img.detach().cpu().float()
+        if mean is not None and std is not None:
+            m = torch.tensor(mean).view(-1, 1, 1)
+            s = torch.tensor(std).view(-1, 1, 1)
+            img = img * s + m
+        img = img.clamp(0, 1).permute(1, 2, 0).numpy()
+        return img[:, :, 0] if img.shape[-1] == 1 else img
+
+    # ---- compact fallback metadata -------------------------------------
+    def _compact_meta(t, name="tensor", norm_mean=None, norm_std=None):
+        tc = t.detach().cpu().float()
+        vmin, vmax = tc.min().item(), tc.max().item()
+        out = (f"{name}\n"
+               f"shape {tuple(t.shape)}\n"
+               f"min {vmin:+.3f}  max {vmax:+.3f}\n"
+               f"mean {tc.mean().item():+.3f}  std {tc.std().item():+.3f}")
+        if norm_mean is not None and norm_std is not None and tc.ndim == 3:
+            m = torch.as_tensor(norm_mean, dtype=torch.float32).view(-1, 1, 1)
+            s = torch.as_tensor(norm_std,  dtype=torch.float32).view(-1, 1, 1)
+            if m.shape[0] == tc.shape[0]:
+                d = tc * s + m
+                out += f"\ndenorm [{d.min().item():+.3f}, {d.max().item():+.3f}]"
+        return out
+
+    # choose metadata generator
+    if compact:
+        meta_fn = _compact_meta
+    else:
+        try:
+            meta_fn = tensor_debug_info          # your full diagnostic string
+        except NameError:
+            meta_fn = _compact_meta              # graceful fallback
+
+    # ---- slot label resolver (kept from original) ----------------------
+    if slot_to_q is None:
+        slot_name = lambda s: f"q{s + 1}"
+    elif callable(slot_to_q):
+        slot_name = slot_to_q
+    else:
+        slot_name = lambda s: slot_to_q.get(s, f"q{s + 1}")
+
+    def debug_show_batch(batch, out_dir):
+        frames, seq_ids, slot_ids, lengths, labels, \
+            resizing_factors, subject_ids, modalities = batch
+        seq_ids, slot_ids = seq_ids.cpu(), slot_ids.cpu()
+        B = lengths.size(0)
+
+        os.makedirs(out_dir, exist_ok=True)
+        paths = []
+        n_show = B if max_subjects is None else min(B, max_subjects)
+
+        for b in range(n_show):
+            sel = (seq_ids == b).nonzero(as_tuple=True)[0]   # frames of subject b
+            if sel.numel() == 0:
+                continue
+            sel = sel[torch.argsort(slot_ids[sel])]          # slot order
+            slots = slot_ids[sel].tolist()
+            modes = [modalities[i] for i in sel.tolist()]
+            sub = frames[sel]                                # (T_b, k, C, H, W)
+            T_b, k, C = sub.shape[:3]
+
+            # 2 physical rows per view: [image row, metadata row]
+            nrows = 2 * k
+            fig, axes = plt.subplots(
+                nrows, T_b,
+                figsize=(2.6 * T_b, (img_h + meta_h) * k),
+                squeeze=False,
+                gridspec_kw={"height_ratios": [img_h, meta_h] * k},
+            )
+
+            for j in range(T_b):                             # column = timepoint
+                axes[0, j].set_title(slot_name(slots[j]), fontsize=10)
+                for i in range(k):                           # view index
+                    r_img = 2 * i
+                    r_txt = 2 * i + 1
+
+                    # --- image ---
+                    ax = axes[r_img, j]
+                    ax.imshow(_denorm_to_hwc(sub[j, i], mean, std),
+                              cmap="gray" if C == 1 else None)
+                    ax.set_xticks([]); ax.set_yticks([])
+                    if j == 0:
+                        ax.set_ylabel(f"{modes[j][i]}", fontsize=9)
+
+                    # --- metadata panel directly under that image ---
+                    tax = axes[r_txt, j]
+                    tax.axis("off")
+                    name = f"{slot_name(slots[j])} | {modes[j][i]}"
+                    txt = meta_fn(sub[j, i], name=name,
+                                  norm_mean=mean, norm_std=std)
+                    tax.text(0.0, 1.0, txt, transform=tax.transAxes,
+                             va="top", ha="left", family="monospace",
+                             fontsize=meta_fontsize, linespacing=1.05)
+
+            sid = subject_ids[b] if subject_ids is not None else f"subject_{b}"
+            lab = labels[b].item() if torch.is_tensor(labels) else labels[b]
+            fig.suptitle(f"{sid}   label={lab}   T={T_b}  k={k}", fontsize=11)
+            fig.tight_layout()
+            path = os.path.join(out_dir, f"subject_{b}.png")
+            fig.savefig(path, dpi=dpi, bbox_inches="tight")
+            plt.close(fig)
+            paths.append(path)
+        return paths
+
+    os.makedirs(out_dir, exist_ok=True)
+    return debug_show_batch(batch, out_dir=out_dir)
 
 def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects=None):
     """
@@ -315,3 +453,135 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
               f"slots={slots}  questionnaires={qs}"
               + ("   ** DUPLICATE SLOT **" if dup else ""))
     print("=" * 60)
+
+# Show images with info
+def save_img_with_info(image_data,properties_text,path):
+    # Create a 1-row, 2-column figure layout
+    fig, axs = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={'width_ratios': [1.5, 1]})
+
+    # Column 1: Display the actual image
+    axs[0].imshow(image_data, cmap='viridis')
+    axs[0].set_title("Processed Sample", fontsize=14, fontweight='bold')
+    axs[0].axis('off')  # Hide image axis ticks
+
+    # Column 2: Turn off the plot lines and render the long text block
+    axs[1].axis('off')
+    axs[1].text(
+        x=0.0, y=1.0,               # Coordinate starting point (top-left of this subplot)
+        s=properties_text, 
+        fontsize=11, 
+        fontfamily='monospace',     # Monospace keeps alignment neat
+        verticalalignment='top', 
+        horizontalalignment='left',
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='#f5f5f5', edgecolor='gray', alpha=0.5)
+    )
+
+    plt.tight_layout()
+    plt.savefig(path, dpi=300, bbox_inches='tight')
+def save_img_with_info_views(image_list, text_properties_list, path):
+    n = len(image_list)
+    # n rows, 2 columns. squeeze=False keeps axs 2D even when n == 1
+    fig, axs = plt.subplots(
+        n, 2,
+        figsize=(12, 6 * n),
+        gridspec_kw={'width_ratios': [1.5, 1]},
+        squeeze=False
+    )
+
+    for i, (image_data, properties_text) in enumerate(zip(image_list, text_properties_list)):
+        # Column 1: Display the actual image
+        axs[i][0].imshow(image_data)
+        axs[i][0].set_title("Processed Sample", fontsize=14, fontweight='bold')
+        axs[i][0].axis('off')  # Hide image axis ticks
+
+        # Column 2: Turn off the plot lines and render the long text block
+        axs[i][1].axis('off')
+        axs[i][1].text(
+            x=0.0, y=1.0,               # Coordinate starting point (top-left of this subplot)
+            s=properties_text,
+            fontsize=11,
+            fontfamily='monospace',     # Monospace keeps alignment neat
+            verticalalignment='top',
+            horizontalalignment='left',
+            bbox=dict(boxstyle='round,pad=0.5', facecolor='#f5f5f5', edgecolor='gray', alpha=0.5)
+        )
+
+    plt.tight_layout()
+    plt.savefig(path, dpi=300, bbox_inches='tight')
+    plt.close(fig)  # avoid keeping figures open in memory across calls
+
+
+
+#Debug info on images
+def tensor_debug_info(t, name="tensor", norm_mean=None, norm_std=None):
+    """Build a human-readable diagnostic string from a raw image tensor (C×H×W or H×W).
+
+    If norm_mean/norm_std are provided, also reports whether denormalizing
+    recovers a valid [0,1] display range — turning the 'guess' into a check.
+    """
+    t_cpu = t.detach().cpu().float()
+    lines = []
+
+    # --- shape & dtype ---
+    lines.append(f"{name}")
+    lines.append(f"{'shape':<14}: {tuple(t.shape)}")
+    lines.append(f"{'dtype':<14}: {t.dtype}")
+    lines.append(f"{'device':<14}: {t.device}")
+
+    # --- value range (the key normalization clue) ---
+    vmin, vmax = t_cpu.min().item(), t_cpu.max().item()
+    lines.append(f"{'min':<14}: {vmin:+.4f}")
+    lines.append(f"{'max':<14}: {vmax:+.4f}")
+    lines.append(f"{'mean':<14}: {t_cpu.mean().item():+.4f}")
+    lines.append(f"{'std':<14}: {t_cpu.std().item():+.4f}")
+
+    # --- per-channel stats (catches uneven normalization) ---
+    if t_cpu.ndim == 3 and t_cpu.shape[0] in (1, 3, 4):
+        for c in range(t_cpu.shape[0]):
+            ch = t_cpu[c]
+            lines.append(
+                f"  ch{c} mean/std : {ch.mean().item():+.3f} / {ch.std().item():+.3f}"
+                f"  [{ch.min().item():+.3f}, {ch.max().item():+.3f}]"
+            )
+
+    # --- interpretation heuristics ---
+    if vmin < -0.01 and vmax > 1.01:
+        guess = "likely NORMALIZED (mean/std) — denorm before display"
+    elif 0.0 <= vmin and vmax <= 1.01:
+        guess = "looks like [0,1] float — ToPILImage OK"
+    elif vmax > 1.5 and vmax <= 255.5:
+        guess = "looks like [0,255] range"
+    else:
+        guess = "unusual range — inspect manually"
+    lines.append(f"{'guess':<14}: {guess}")
+
+    # --- denorm check (confirmation when mean/std are known) ---
+    if norm_mean is not None and norm_std is not None and t_cpu.ndim == 3:
+        mean = torch.as_tensor(norm_mean, dtype=torch.float32).view(-1, 1, 1)
+        std  = torch.as_tensor(norm_std,  dtype=torch.float32).view(-1, 1, 1)
+        if mean.shape[0] == t_cpu.shape[0]:        # channel count must match
+            denorm = t_cpu * std + mean
+            dmin, dmax = denorm.min().item(), denorm.max().item()
+            lines.append(f"{'denorm range':<14}: [{dmin:+.4f}, {dmax:+.4f}]")
+            # small tolerance for float drift / mild clipping at edges
+            if -0.02 <= dmin and dmax <= 1.02:
+                verdict = "OK — denorm recovers [0,1]"
+            else:
+                spill_lo = max(0.0, -dmin)
+                spill_hi = max(0.0, dmax - 1.0)
+                verdict = (f"OUT OF RANGE by ({spill_lo:.3f} low, {spill_hi:.3f} high) "
+                           f"— wrong mean/std, or tensor isn't normalized")
+            lines.append(f"{'denorm check':<14}: {verdict}")
+        else:
+            lines.append(f"{'denorm check':<14}: SKIPPED — mean/std has "
+                         f"{mean.shape[0]} ch, tensor has {t_cpu.shape[0]}")
+
+    # --- health flags ---
+    flags = []
+    if torch.isnan(t_cpu).any(): flags.append("NaN present!")
+    if torch.isinf(t_cpu).any(): flags.append("Inf present!")
+    if vmin == vmax:             flags.append("constant tensor (all same value)")
+    if flags:
+        lines.append(f"{'flags':<14}: " + ", ".join(flags))
+
+    return "\n".join(lines)

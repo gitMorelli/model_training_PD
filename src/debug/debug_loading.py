@@ -29,53 +29,91 @@ from collections import defaultdict
 import torch.nn.functional as F
 import pickle
 
-from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, melt_df
+from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
-from src.utils.image_processing import ResizeLongestSide
-from src.utils.visualization import debug_images_dataset
+from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms
+from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD_with_meta
 
-SELECTED_PROBLEM = "PD" #"handedness"
+params = {
+    'selected_problem': "PD", # "handedness"
 
-if SELECTED_PROBLEM == "handedness":
+    "data_modality": ['digit_full','digit_crop']+['digit' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+    "num_tiles": 3,
+
+    'model': 'resnet18', 
+    "input_size": 224,
+    'mean_and_std': 'handedness',
+    'custom_transform': 'pad_resize_normalize', #None
+    "apply_augmentation": False,
+    "invert_color": True,
+    "use_grid": True,
+
+    "seed": 42,
+    "balanced_data": True,
+    'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
+    "balancing_factor": 1,
+    "majority_class_id": 0,
+    "threshold_num": 1,
+    "invert_color": True,
+    'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
+    #if 'last_q' with the first last_q equal to 0
+    'censor_time': -1, #0, -1 (if keep all) or a positive value
+    'filter_modality': 'digit', #None, 'X', 'text', 'digit' (if None keep all modalities)
+
+    #dataloader params
+    "batch_size": 4,
+    "prefetch_factor": 2,
+    "decode_approach": "pil",
+    "load_in_memory": False,
+    "split_workers": True,
+}
+if isinstance(params['data_modality'],list):
+    params['num_tiles'] = len(params['data_modality'])
+huggingface_transform=True if params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
+params['huggingface_transform'] = huggingface_transform
+
+if params['selected_problem'] == "handedness":
     SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
     CSV_LOAD_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/merged_statistics_w_predictions_w_original.csv"
 
     #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-    LIST_OF_IDS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
+    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
 
     #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
     data_folder = "all_no_grids_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
     SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/dataset_info"
-else:
-    pass
+
+    params["h5_data_path"] = "/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl"
+elif params['selected_problem'] == "PD":
+    SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
+    CSV_LOAD_PATH = ""
+
+    #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
+    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/final_data_for_training.parquet"
+
+    #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
+    data_folder = "final_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
+    SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/dataset_info_PD"
+
+    params["h5_data_path"] = "/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl"
 
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
-
-input_size = 224
-SEED=42
-DATA_MODALITY = 'digit' #'all' # 'X', 'text', 'digit', 'all'
-BALANCED_DATA = True
-BALANCING_FACTOR = 1
-MAJORITY_CLASS_ID = 0
-THRESHOLD_NUM = 1
-NUM_tiles = 3
-
-dataloader_params={
-    'mean_and_std': 'handedness'
-}
+VERBOSE = True
 
 
-
-def main(run_random_samples_from_loader=False, run_study_loader = False, show_grids=True, run_compute_time=True, run_debug_from_shards=False,
+def main(run_random_samples_from_loader=True, run_study_loader = False, show_grids=False, run_compute_time=False, run_debug_from_shards=False,
          run_explore_files=False):
     args = get_args()
-    random.seed(SEED)
-    mean,std = get_mean_std(dataloader_params['mean_and_std'])
+    random.seed(params['seed'])
+    mean,std = get_mean_std(params['mean_and_std'])
+
+    params['norm_mu'] = mean
+    params['norm_std'] = std
 
     if run_random_samples_from_loader:
-        random_samples_from_dataloader(args, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, mean=mean, std=std)
+        random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, mean=mean, std=std)
     
     if show_grids:
         grids_of_random_samples(args, out_folder=os.path.join(SAVE_PATH, "grids"), batches_to_show=3, mean=mean, std=std)
@@ -98,13 +136,13 @@ def main(run_random_samples_from_loader=False, run_study_loader = False, show_gr
             )
         ])
         transform = T.Compose([
-            T.Resize((224, 224)),
+            T.Resize((params['input_size'], params['input_size'],)),
             T.ToTensor(),          # Scales pixels to [0, 1]
             T.Normalize(mean=mean, 
                             std=std),
         ])
         debug_from_shards(args, out_folder=os.path.join(SAVE_PATH, "debug_from_shards"), 
-                          augmentation_transform=augmentation_transform, transform=transform, invert_color=True)
+                          augmentation_transform=augmentation_transform, transform=transform, invert_color=params['invert_color'])
         #add some other grids (eg larger than higher, bad predictions, ...)
     if run_explore_files:
         explore_files(filename='worker94_shard-000000/D3I3J0N6.q1.hand.png')
@@ -118,137 +156,8 @@ def get_mean_std(mean_and_std):
         std = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
     else:
         raise ValueError(f"Unknown mean/std setting: {mean_and_std}")
+    
     return mean, std
-
-
-def save_img_with_info(image_data,properties_text,path):
-    # Create a 1-row, 2-column figure layout
-    fig, axs = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={'width_ratios': [1.5, 1]})
-
-    # Column 1: Display the actual image
-    axs[0].imshow(image_data, cmap='viridis')
-    axs[0].set_title("Processed Sample", fontsize=14, fontweight='bold')
-    axs[0].axis('off')  # Hide image axis ticks
-
-    # Column 2: Turn off the plot lines and render the long text block
-    axs[1].axis('off')
-    axs[1].text(
-        x=0.0, y=1.0,               # Coordinate starting point (top-left of this subplot)
-        s=properties_text, 
-        fontsize=11, 
-        fontfamily='monospace',     # Monospace keeps alignment neat
-        verticalalignment='top', 
-        horizontalalignment='left',
-        bbox=dict(boxstyle='round,pad=0.5', facecolor='#f5f5f5', edgecolor='gray', alpha=0.5)
-    )
-
-    plt.tight_layout()
-    plt.savefig(path, dpi=300, bbox_inches='tight')
-
-def save_img_with_info_views(image_list, text_properties_list, path):
-    n = len(image_list)
-    # n rows, 2 columns. squeeze=False keeps axs 2D even when n == 1
-    fig, axs = plt.subplots(
-        n, 2,
-        figsize=(12, 6 * n),
-        gridspec_kw={'width_ratios': [1.5, 1]},
-        squeeze=False
-    )
-
-    for i, (image_data, properties_text) in enumerate(zip(image_list, text_properties_list)):
-        # Column 1: Display the actual image
-        axs[i][0].imshow(image_data)
-        axs[i][0].set_title("Processed Sample", fontsize=14, fontweight='bold')
-        axs[i][0].axis('off')  # Hide image axis ticks
-
-        # Column 2: Turn off the plot lines and render the long text block
-        axs[i][1].axis('off')
-        axs[i][1].text(
-            x=0.0, y=1.0,               # Coordinate starting point (top-left of this subplot)
-            s=properties_text,
-            fontsize=11,
-            fontfamily='monospace',     # Monospace keeps alignment neat
-            verticalalignment='top',
-            horizontalalignment='left',
-            bbox=dict(boxstyle='round,pad=0.5', facecolor='#f5f5f5', edgecolor='gray', alpha=0.5)
-        )
-
-    plt.tight_layout()
-    plt.savefig(path, dpi=300, bbox_inches='tight')
-    plt.close(fig)  # avoid keeping figures open in memory across calls
-
-def tensor_debug_info(t, name="tensor", norm_mean=None, norm_std=None):
-    """Build a human-readable diagnostic string from a raw image tensor (C×H×W or H×W).
-
-    If norm_mean/norm_std are provided, also reports whether denormalizing
-    recovers a valid [0,1] display range — turning the 'guess' into a check.
-    """
-    t_cpu = t.detach().cpu().float()
-    lines = []
-
-    # --- shape & dtype ---
-    lines.append(f"{name}")
-    lines.append(f"{'shape':<14}: {tuple(t.shape)}")
-    lines.append(f"{'dtype':<14}: {t.dtype}")
-    lines.append(f"{'device':<14}: {t.device}")
-
-    # --- value range (the key normalization clue) ---
-    vmin, vmax = t_cpu.min().item(), t_cpu.max().item()
-    lines.append(f"{'min':<14}: {vmin:+.4f}")
-    lines.append(f"{'max':<14}: {vmax:+.4f}")
-    lines.append(f"{'mean':<14}: {t_cpu.mean().item():+.4f}")
-    lines.append(f"{'std':<14}: {t_cpu.std().item():+.4f}")
-
-    # --- per-channel stats (catches uneven normalization) ---
-    if t_cpu.ndim == 3 and t_cpu.shape[0] in (1, 3, 4):
-        for c in range(t_cpu.shape[0]):
-            ch = t_cpu[c]
-            lines.append(
-                f"  ch{c} mean/std : {ch.mean().item():+.3f} / {ch.std().item():+.3f}"
-                f"  [{ch.min().item():+.3f}, {ch.max().item():+.3f}]"
-            )
-
-    # --- interpretation heuristics ---
-    if vmin < -0.01 and vmax > 1.01:
-        guess = "likely NORMALIZED (mean/std) — denorm before display"
-    elif 0.0 <= vmin and vmax <= 1.01:
-        guess = "looks like [0,1] float — ToPILImage OK"
-    elif vmax > 1.5 and vmax <= 255.5:
-        guess = "looks like [0,255] range"
-    else:
-        guess = "unusual range — inspect manually"
-    lines.append(f"{'guess':<14}: {guess}")
-
-    # --- denorm check (confirmation when mean/std are known) ---
-    if norm_mean is not None and norm_std is not None and t_cpu.ndim == 3:
-        mean = torch.as_tensor(norm_mean, dtype=torch.float32).view(-1, 1, 1)
-        std  = torch.as_tensor(norm_std,  dtype=torch.float32).view(-1, 1, 1)
-        if mean.shape[0] == t_cpu.shape[0]:        # channel count must match
-            denorm = t_cpu * std + mean
-            dmin, dmax = denorm.min().item(), denorm.max().item()
-            lines.append(f"{'denorm range':<14}: [{dmin:+.4f}, {dmax:+.4f}]")
-            # small tolerance for float drift / mild clipping at edges
-            if -0.02 <= dmin and dmax <= 1.02:
-                verdict = "OK — denorm recovers [0,1]"
-            else:
-                spill_lo = max(0.0, -dmin)
-                spill_hi = max(0.0, dmax - 1.0)
-                verdict = (f"OUT OF RANGE by ({spill_lo:.3f} low, {spill_hi:.3f} high) "
-                           f"— wrong mean/std, or tensor isn't normalized")
-            lines.append(f"{'denorm check':<14}: {verdict}")
-        else:
-            lines.append(f"{'denorm check':<14}: SKIPPED — mean/std has "
-                         f"{mean.shape[0]} ch, tensor has {t_cpu.shape[0]}")
-
-    # --- health flags ---
-    flags = []
-    if torch.isnan(t_cpu).any(): flags.append("NaN present!")
-    if torch.isinf(t_cpu).any(): flags.append("Inf present!")
-    if vmin == vmax:             flags.append("constant tensor (all same value)")
-    if flags:
-        lines.append(f"{'flags':<14}: " + ", ".join(flags))
-
-    return "\n".join(lines)
 
 def denorm(t, mean, std):
     mean = torch.tensor(mean).view(-1, 1, 1)
@@ -462,73 +371,51 @@ def dataset_overview(loader, num_modalities=None, num_classes=None, max_batches=
     }
 #########################################################################
 
-def get_dataloader(args,dataloader_params,normalized=True):
+####### LOADING DATASET AND DATALOADER #############
+def get_dataloader(args,params):
     worker = args.num_workers
-    batch_size = 32
-    prefetch_factor = 2
-    decode_approach = 'pil'
-    load_in_memory = False
-    split_workers = True
-    transform = None
-    apply_augmentation = False
-    invert_color=True
-    use_grid = True
-
-    mean,std = get_mean_std(dataloader_params['mean_and_std'])
 
     grid_dict = None
-    if use_grid:
-        with open("/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl", "rb") as f:
+    if params['use_grid']:
+        with open(params['h5_data_path'], "rb") as f:
             grid_dict = pickle.load(f)
         print("Grid dictionary loaded successfully. Number of entries:", len(grid_dict))
 
-    if apply_augmentation:
-        #add a random crop transform without resizing
-        augmentation_transform = T.Compose([
-            #resize to 448x448
-            #ResizeLongestSide(448),
-            T.RandomCrop(
-                112, 
-                pad_if_needed=True, 
-                padding_mode='constant', 
-                fill=(255, 255, 255) # <-- White fill for RGB PIL images
-            )
-        ])
-    else:
-        augmentation_transform = None
-    if normalized:
-        transform = T.Compose([
-            T.Resize((224, 224)),
-            T.ToTensor(),          # Scales pixels to [0, 1]
-            T.Normalize(mean=mean, 
-                            std=std),
-        ])
-    else:
-        transform = T.Compose([
-            T.Resize((224, 224)),
-            T.ToTensor(),          # Scales pixels to [0, 1]
-        ])
+    augmentation_transform = get_augmentation_transform(params) 
 
+    transform = get_transforms(params, None)
 
+    if params['selected_problem'] == "handedness":
+        train_loader,expected_shape = handedness_dataloading(worker,params, transform, augmentation_transform, grid_dict, 
+                                                             params['list_of_ids_paths'], SHARD_PATTERN_train)
+    elif params['selected_problem'] == "PD":
+        #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
+        exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest')
+        train_loader,_,_,_= prepare_loaders_PD(worker,params['prefetch_factor'],params, exclusion_set, val_exclusion_set,
+                                                         grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val)
+        expected_shape = torch.randn(params['num_tiles'], 3, 224, 224)
+
+    return train_loader, expected_shape
+def handedness_dataloading(worker,params, transform, augmentation_transform, grid_dict, list_of_ids_path, shard_pattern_train):
     exclusion_set = set() # you can add here the ids you want to exclude from the dataset (for example because they are corrupted or for debugging purposes)
     #### EXPECTED class properties #############
     ############################################
-    if DATA_MODALITY == 'all':
+    if params['data_modality'] == 'all':
         selection_modality = 'text' 
     else:
-        selection_modality = DATA_MODALITY 
-    csv_data = pd.read_csv(LIST_OF_IDS_PATH)
+        selection_modality = params['data_modality'] 
+    csv_data = pd.read_csv(list_of_ids_path)
     print("Columns in the CSV:", csv_data.columns.tolist())
-    csv_data, num_less_than_1_rows = melt_df(csv_data, modality=selection_modality, threshold=THRESHOLD_NUM)
+    csv_data, num_less_than_1_rows = melt_df(csv_data, modality=selection_modality, threshold=params['threshold_num'])
     exclusion_set.update(num_less_than_1_rows)
     print("CSV after melting:", csv_data.head())
     #cols: 'ident_projet', 'lateralite', 'q_5_num_X', 'q_5_num_text', 'q_5_num_digit', 'split']
     train_data = csv_data[csv_data['split'] == 'train']
-    print(f"Training samples with at least 1 chunck for modality {DATA_MODALITY}: {len(train_data)}")
+    print(f"Training samples with at least 1 chunck for modality {params['data_modality']}: {len(train_data)}")
 
     #get the number of samples for each class
     class_counts = train_data['lateralite'].value_counts()
-    print(f"Class distribution in training set (after filtering for modality {DATA_MODALITY}):\n{class_counts}")
+    print(f"Class distribution in training set (after filtering for modality {params['data_modality']}):\n{class_counts}")
 
     num_0 = class_counts.get(0.0, 0)  # Count of class 0 (e.g., right-handed)
     num_1 = class_counts.get(1.0, 0)  # Count of class 1 (e.g., left-handed)
@@ -537,42 +424,43 @@ def get_dataloader(args,dataloader_params,normalized=True):
     ################################################
     ###############################################
     
-    if BALANCED_DATA:
-        exclusion_set.update(generate_exclusion_set_val(csv_data, data_modality=DATA_MODALITY,
-                                                    majority_class_id=MAJORITY_CLASS_ID, balancing_factor=BALANCING_FACTOR, 
+    if params['balanced_data']:
+        exclusion_set.update(generate_exclusion_set_val(csv_data, data_modality=params['data_modality'],
+                                                    majority_class_id=params['majority_class_id'], balancing_factor=params['balancing_factor'], 
                                                     label_col='lateralite', id_col='ident_projet', split='train') )
     print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
 
     #Load your dataset here
     '''train_dataset = test_handedness_dataset_all(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
                                             split_workers=split_workers, batch_size=batch_size, 
-                                            transform=transform, modality=DATA_MODALITY, exclusion_set=exclusion_set, 
+                                            transform=transform, modality=params['data_modality'], exclusion_set=exclusion_set, 
                                             huggingface_transform=False, augmentation_transform=augmentation_transform,
                                             invert_color=invert_color)'''
-    train_dataset = prepare_handedness_dataset_all(SHARD_PATTERN_train, decode_approach=decode_approach, load_in_memory=load_in_memory, 
-                                            split_workers=split_workers, batch_size=batch_size, 
-                                            transform=transform, modality=DATA_MODALITY, exclusion_set=exclusion_set, 
+    train_dataset = prepare_handedness_dataset_all(shard_pattern_train, decode_approach=params['decode_approach'], load_in_memory=params['load_in_memory'], 
+                                            split_workers=params['split_workers'], batch_size=params['batch_size'], 
+                                            transform=transform, modality=params['data_modality'], exclusion_set=exclusion_set, 
                                             huggingface_transform=False, augmentation_transform=augmentation_transform,
-                                            invert_color=invert_color, grid_dict=grid_dict)
+                                            invert_color=params['invert_color'], grid_dict=grid_dict)
 
     train_loader = DataLoader(
         train_dataset, 
         num_workers=worker, 
         batch_size=None, 
-        prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
+        prefetch_factor=params['prefetch_factor'], # Tells workers to queue up batches in advance (set to none if 0 workers)
         pin_memory=True
     )
 
-    if DATA_MODALITY == 'all':
+    if params['data_modality'] == 'all':
         example_input_array = torch.randn(3,3, 224, 224)  # For visualizing the graph in TensorBoard
-    elif NUM_tiles > 1 or use_grid:
-        example_input_array = torch.randn(NUM_tiles, 3, 224, 224)
-    else:
+    elif params['num_tiles'] > 1 or params['use_grid']:
+        example_input_array = torch.randn(params['num_tiles'], 3, 224, 224)
+    else: 
         example_input_array = torch.randn(3, 224, 224)
     expected_shape = example_input_array.shape
 
     return train_loader, expected_shape
-###########
+
+######## MAIN FUNCTIONS ###################
 def study_dataloader(args):
     train_loader, expected_shape = get_dataloader(args)
     train_loader_un_normalized, _ = get_dataloader(args,normalized=False)
@@ -588,47 +476,62 @@ def compute_time_to_iterate_on_dataloader(args):
     end = time.time()
     elapsed_time = end - start
     print(f"Time taken to iterate over the dataloader: {elapsed_time:.2f} seconds")
-def random_samples_from_dataloader(args,out_folder,batches_to_show=3, mean=None,std=None):
+
+#show batches
+def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, mean=None,std=None):
     os.makedirs(out_folder, exist_ok=True)
     #this functions shows images and properties of a random sample of images from the dataloader
-    train_loader, expected_shape = get_dataloader(args)
-    n_batches=0
-    for batch_idx, batch in enumerate(train_loader):
-        n_batches += 1
-        out_folder_this_batch=os.path.join(out_folder,f"batch_{n_batches}")
-        os.makedirs(out_folder_this_batch, exist_ok=True)
+    train_loader, expected_shape = get_dataloader(args, params)
 
-        img_tensor, label, subject_id_batch, questionnaire_batch, *_ = batch
-        for i,subject_id in enumerate(subject_id_batch): 
-            full_id = f"{subject_id}_{questionnaire_batch[i][1:]}"
+    if params['selected_problem'] == "handedness":
+        n_batches=0
+        for batch_idx, batch in enumerate(train_loader):
+            n_batches += 1
+            out_folder_this_batch=os.path.join(out_folder,f"batch_{n_batches}")
+            os.makedirs(out_folder_this_batch, exist_ok=True)
 
-            if len(expected_shape) == 3:
-                num_views=1
-            else:
-                num_views=expected_shape[0]
+            img_tensor, label, subject_id_batch, questionnaire_batch, *_ = batch
+            for i,subject_id in enumerate(subject_id_batch): 
+                full_id = f"{subject_id}_{questionnaire_batch[i][1:]}"
 
-            list_of_views=[]
-            list_of_properties=[]
-            for j in range(num_views):
-                if num_views > 1:
-                    single_img = img_tensor[i][j]
+                if len(expected_shape) == 3:
+                    num_views=1
                 else:
-                    single_img = img_tensor[i]
-                
-                properties_text = tensor_debug_info(single_img, name=f"view {len(list_of_views)}", norm_mean=mean, norm_std=std)
+                    num_views=expected_shape[0]
 
-                tensor_debug_info(single_img, name=f"view {len(list_of_views)}")
+                list_of_views=[]
+                list_of_properties=[]
+                for j in range(num_views):
+                    if num_views > 1:
+                        single_img = img_tensor[i][j]
+                    else:
+                        single_img = img_tensor[i]
+                    
+                    properties_text = tensor_debug_info(single_img, name=f"view {len(list_of_views)}", norm_mean=mean, norm_std=std)
 
-                # Convert the single 3D tensor to PIL
-                img_pil = T.ToPILImage()(denorm(single_img, mean, std))
-                image_data = np.array(img_pil)
-                list_of_views.append(image_data)
-                
-                properties_text += f" \n Subject ID: {subject_id}\n Label: {label[i]}\n Questionnaire: {questionnaire_batch[i]}\n View: {j+1}/{num_views}"
-                list_of_properties.append(properties_text)
-            save_img_with_info_views(list_of_views, list_of_properties, os.path.join(out_folder_this_batch, f"sample_{i}.png"))
-        if n_batches >= batches_to_show:
-            break
+                    #tensor_debug_info(single_img, name=f"view {len(list_of_views)}")
+
+                    # Convert the single 3D tensor to PIL
+                    img_pil = T.ToPILImage()(denorm(single_img, mean, std))
+                    image_data = np.array(img_pil)
+                    list_of_views.append(image_data)
+                    
+                    properties_text += f" \n Subject ID: {subject_id}\n Label: {label[i]}\n Questionnaire: {questionnaire_batch[i]}\n View: {j+1}/{num_views}"
+                    list_of_properties.append(properties_text)
+                save_img_with_info_views(list_of_views, list_of_properties, os.path.join(out_folder_this_batch, f"sample_{i}.png"))
+            if n_batches >= batches_to_show:
+                break
+    elif params['selected_problem'] == "PD":
+        n_batches=0
+        for batch_idx, batch in enumerate(train_loader):
+            n_batches += 1
+            out_folder_this_batch=os.path.join(out_folder,f"batch_{n_batches}")
+            os.makedirs(out_folder_this_batch, exist_ok=True)
+
+            debug_images_PD_with_meta(mean,std, batch, out_folder_this_batch, compact = True, meta_fontsize=10)
+
+            if n_batches >= batches_to_show:
+                break
 def grids_of_random_samples(args,out_folder,batches_to_show=3,mean=None,std=None):
     if os.path.exists(out_folder):
         #delete all files in the folder
@@ -666,6 +569,7 @@ def grids_of_random_samples(args,out_folder,batches_to_show=3,mean=None,std=None
             path=os.path.join(out_folder,f"batch_{b_idx}.png"),     # one file per batch; each has a row per view
             stacked=True,
         )
+#Reading from shards
 def debug_from_shards(args,out_folder, augmentation_transform, transform, invert_color=True):
     #clear the files in the folder if it already exists
     if os.path.exists(out_folder):
@@ -862,8 +766,7 @@ def explore_files(filename='worker94_shard-000000/D3I3J0N6.q1.hand.png'):
         for member in tar.getmembers():
             if subject in member.name:
                 print(f"- {member.name}")
-
-
+################################################################################
 
 if __name__ == "__main__":
     main()
