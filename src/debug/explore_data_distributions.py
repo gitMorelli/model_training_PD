@@ -36,23 +36,93 @@ from pandas.api.types import is_numeric_dtype
 import seaborn as sns
 from scipy import stats
 import numpy as np
+import html
+from functools import cached_property
 
+import src.debug.debug_utils.pd_training_data_analysis as pd_train_analysis
 #PATHS
-LIST_OF_IDS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
-STATISTICS_PATH = "/home/a_morelli/datasets/handedness/sharded_data_statistics/statistics_all_no_grids_png_whitebg_20260612-182050.csv"
-PREDICTIONS_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet18_model_results/checkpoints/v_30/predictions.csv"
-OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics"
-MODEL_SPECIFIC_OUT_PATH = os.path.dirname(PREDICTIONS_PATH)
 
 metadata = {
-    "list_of_ids_path": LIST_OF_IDS_PATH,
-    "statistics_path": STATISTICS_PATH,
-    "predictions_path": PREDICTIONS_PATH,
+    "experiment": "PD", #'handedness', 'pd'
+    "show_preview": False,
+    "analyze_training_data": True,
+
+    "run_validity_checks": True,
+    "generate_num_statistics": False,
+    "generate_correlations": False,
+    "run_metadata_analysis": False,
+    "run_confidence_prediction_analysis": False,
+    "save_file": False,
+
 }
 
+if metadata["experiment"] == "handedness":
+    metadata['training_set'] = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv"
+    metadata['statistics_path'] = "/home/a_morelli/datasets/handedness/sharded_data_statistics/statistics_all_no_grids_png_whitebg_20260612-182050.csv"
+    metadata['predictions_path'] = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/resnet18_model_results/checkpoints/v_30/predictions.csv"
+    OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/handedness"
+    #MODEL_SPECIFIC_OUT_PATH = os.path.dirname(metadata['predictions_path'])
+elif metadata["experiment"] == "PD":
+    metadata['training_set'] = "/home/a_morelli/datasets/id_lists/PD_training_set_8_7_26.parquet"
+    OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/pd"
+    #MODEL_SPECIFIC_OUT_PATH = os.path.dirname(metadata['predictions_path'])
 
 QUESTIONNAIRES = [str(q) for q in range(1,14)]
 
+
+
+
+def main(metadata):
+    args = get_args()
+
+    #load files
+    training_data, statistics_df, predictions_df = None, None, None
+    if 'training_set' in metadata:
+        if metadata['training_set'].endswith('.csv'):
+            training_data = pd.read_csv(metadata['training_set'])
+        elif metadata['training_set'].endswith('.parquet'):
+            training_data = pd.read_parquet(metadata['training_set'])
+        print(training_data.head())
+    if 'statistics_path' in metadata:
+        statistics_df = pd.read_csv(metadata['statistics_path'])
+    if 'predictions_path' in metadata:
+        predictions_df = pd.read_csv(metadata['predictions_path'])
+
+    if metadata["show_preview"]:
+        print("Generating preview of dataframes... ")
+        preview_dataframes([training_data, training_data[training_data['split']=='train'],training_data[training_data['split']=='val'],
+                            statistics_df, predictions_df],
+                            ["training_data","training_data_train","training_data_val",
+                               "statistics_df", "predictions_df"], 
+                            output_dir=os.path.join(OUT_PATH,'dfs_preview'),
+                            max_unique_to_list=20, top_n_categories=15,sample_rows=5,force_categorical=['case_control','last_avail_q','at_least_warning','diag_park_final1_quest'],)
+    
+    if metadata['analyze_training_data']:
+        print("Analyzing training data... ")
+        if metadata['experiment'] == "PD":
+            run_pd_training_data_analysis(training_data,out_path=OUT_PATH)
+        elif metadata['experiment'] == "handedness":
+            print("Handedness training data analysis has tobe re-implemented")
+
+    #merge data from other tables
+    #statistics_df = merge_dfs(matching_ids_df, statistics_df, predictions_df) 
+    
+    
+    '''
+    if save_file:
+        out_path = os.path.join(OUT_PATH, "merged_statistics_w_predictions_w_original.csv")
+        statistics_df.to_csv(out_path, index=False)
+        print(f"Saved merged statistics with predictions to {out_path}")
+        out_path = os.path.join(MODEL_SPECIFIC_OUT_PATH, "merged_statistics_w_predictions_w_original.csv")
+        statistics_df.to_csv(out_path, index=False)
+        print(f"Saved copy of merged statistics in the model folder")
+        #save metadata to json
+        with open(os.path.join(MODEL_SPECIFIC_OUT_PATH, "merged_statistics_metadata.json"), 'w') as f:
+            import json
+            json.dump(metadata, f, indent=4)
+        print("Saved metadata to json in the model folder")
+    '''
+    
 
 def get_args():
     import argparse
@@ -210,57 +280,6 @@ def plot_distributions(
 
     return paths
 
-def preview_of_dataframes(matching_ids_df, statistics_df, predictions_df):
-
-    print(len(matching_ids_df), "rows in matching_ids_df")
-    print(len(statistics_df), "rows in statistics_df")
-    print(len(predictions_df), "rows in predictions_df")
-    #print(matching_ids_df["split"].describe())
-
-
-    print("Preliminary analysis of the predictions_df:")
-    val_pred=predictions_df[predictions_df['split']=='val']
-    train_pred=predictions_df[predictions_df['split']=='train']
-    print(f"predictions_df: {len(val_pred)} rows in val split, {len(train_pred)} rows in train split")
-    #count how many rows in train_pred have label==0 and how much have label==1
-    train_1_count = len(train_pred[train_pred['true_label']==1])
-    train_0_count = len(train_pred[train_pred['true_label']==0])
-    print(f"predictions_df: {train_0_count} rows in train split with true_label==0, {train_1_count} rows in train split with true_label==1")
-    #count na values
-    na_count = train_pred['true_label'].isna().sum()
-    print(f"predictions_df: {na_count} rows with true_label==NaN")
-    #count how many times each ident_projet appears. Print the unique values of these counts
-    value_counts = predictions_df['ident_projet'].value_counts()
-    unique_counts = value_counts.unique()
-    print("Unique counts of ident_projet in matching_ids_df:", unique_counts)
-    print('|'*50)
-    #assert 1==0 , "stop here to check the unique counts of ident_projet in matching_ids_df"
-     
-
-    #print id value counts for each dataframe
-    print("matching_ids_df subject_id value counts:")
-    row_counts = matching_ids_df['ident_projet'].value_counts()
-    print(row_counts)
-    print("statistics_df subject_id value counts:")
-    row_counts = statistics_df['subject_id'].value_counts()
-    print(row_counts)
-    print(len(statistics_df[statistics_df['subject_id']=='D3B2E9R1'])) #expected 39-6=33 because it has two missing questionnaires 
-    #instead i have 29; But i see that 4 are 0 -> 39-6-4=29 -> it is
-    #print the row for subject_id D3B2E9R1
-    row = matching_ids_df[matching_ids_df['ident_projet']=='D3B2E9R1']
-    with pd.option_context('display.max_columns', None, 'display.width', None):
-        print(row)
-    '''for col in row.columns:
-        print(col, row[col].values)'''
-    '''print("predictions_df ident_projet value counts:")
-    row_counts = predictions_df['ident_projet'].value_counts()
-    print(row_counts)'''
-
-    #print(predictions_df.describe() ) # quick check that it loaded correctly and has expected columns
-    
-    for df, name in [(matching_ids_df, "matching_ids_df"), (statistics_df, "statistics_df"), (predictions_df, "predictions_df")]:
-        print(describe_df(df, name))
-        print()  # spacer between tables
 
 def merge_dfs(matching_ids_df, statistics_df, predictions_df):
     #Merge statistics_df with matching_ids_df 
@@ -321,7 +340,308 @@ def merge_dfs(matching_ids_df, statistics_df, predictions_df):
 
     return statistics_df
 
-def validity_checks(statistics_df):
+
+######## Train analysis #########
+def run_pd_training_data_analysis(training_data,out_path):
+    # Analyze the training data for PD experiment
+    r = pd_train_analysis.Report("training_data analysis")
+    p=pd_train_analysis.Profiler(training_data)
+    r.add("Subject count", pd_train_analysis.n_subjects(p))
+    r.add("Filled periods per subject", pd_train_analysis.filled_periods_per_subject(p))
+
+    r.add("Split fraction", pd_train_analysis.split_fraction(p))
+    r.add("Check splitting of ids",pd_train_analysis.ids_in_multiple_splits(p, "unique_id"))
+    r.add("Check splitting of groups",pd_train_analysis.group_split_leakage(p))
+    r.add("Test contamination via matched groups", pd_train_analysis.test_group_contamination(p))
+
+    r.add("Check if matching was correct", pd_train_analysis.check_matching(p, tol_vars={"relative_age": 1.1},  # add age-band tolerance
+                 return_offenders=False) )
+    r.add("Group size distribution", pd_train_analysis.group_sizes(p)) 
+    res = pd_train_analysis.analyze(p, by=["split"], properties=["id_appearances"])
+    r.add("Id appearances within each split", res)
+    r.add("Check case-control balance",pd_train_analysis.analyze(p, by=['split'], properties=['case_control_balance']))
+
+    r.add("Statistics on rempli_pattern vs grid_pattern", pd_train_analysis.rempli_vs_grid_mismatch(p, strict=True))
+    res = pd_train_analysis.analyze(p, by=["case_control"], properties=["pattern_flags"])
+    r.add("Pattern-position counts per case_control", res)
+
+    pd_train_analysis.save_q_num_figures(p, outdir=os.path.join(out_path,'q_num_figures'))
+    r.add("q_num missing", pd_train_analysis.q_num_missing(p))   # into a report
+
+    pd_train_analysis.save_case_dt_figures(p, outdir=os.path.join(out_path,'case_dt_figures'))   # {'paths': [...], 'missing': {...}}
+    r.add("case_dt missing", pd_train_analysis.case_dt_missing(p))        # registered property -> report
+
+    r.write(os.path.join(out_path,'training_data_analysis.txt'))
+
+######## Preview ################
+def preview_dataframes(
+    dfs,
+    names,
+    output_dir=".",
+    max_unique_to_list=20,
+    top_n_categories=15,
+    sample_rows=5,
+    force_categorical=None,
+):
+    """
+    Write an exploratory HTML overview of each DataFrame to its own file.
+
+    Parameters
+    ----------
+    dfs : list of (pd.DataFrame or None)
+        DataFrames to preview. None entries are skipped.
+    names : list of str
+        Output file base-name for each df (same length as `dfs`).
+    output_dir : str
+        Directory where the reports are written (created if missing).
+    max_unique_to_list : int
+        For categorical columns, list every unique value only if there are
+        at most this many; otherwise show the top-N value counts instead.
+    top_n_categories : int
+        How many of the most frequent values to show for high-cardinality
+        categorical columns.
+    sample_rows : int
+        Number of rows to include as a head() sample.
+    force_categorical : list of str or None
+        Column names to treat as categorical even if numeric (e.g. IDs,
+        zip codes, encoded labels).
+
+    Returns
+    -------
+    list of str
+        Paths of the HTML files that were written.
+    """
+    if len(dfs) != len(names):
+        raise ValueError(
+            f"dfs and names must have equal length "
+            f"({len(dfs)} vs {len(names)})."
+        )
+
+    os.makedirs(output_dir, exist_ok=True)
+    force_categorical = set(force_categorical or [])
+    esc = html.escape
+    written = []
+
+    template = """<!DOCTYPE html>
+    <html lang="en"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{title} — overview</title>
+    <style>
+    :root {{
+        --bg:#ffffff; --fg:#1a1a1a; --muted:#6b7280; --line:#e5e7eb;
+        --accent:#4f46e5; --ok:#059669; --warn:#d97706; --bad:#dc2626;
+    }}
+    * {{ box-sizing:border-box; }}
+    body {{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,
+        Helvetica,Arial,sans-serif; margin:0; padding:2rem; max-width:1100px;
+        margin-inline:auto; color:var(--fg); background:var(--bg); }}
+    h1 {{ font-size:1.8rem; margin:0 0 1.2rem; }}
+    h2 {{ font-size:1.25rem; margin:2rem 0 .75rem;
+        border-bottom:2px solid var(--line); padding-bottom:.35rem; }}
+    h3 {{ font-size:1rem; margin:1.4rem 0 .4rem; }}
+    code {{ background:#f3f4f6; padding:.1rem .35rem; border-radius:4px;
+        font-size:.85em; }}
+    .cards {{ display:flex; gap:1rem; flex-wrap:wrap; }}
+    .card {{ flex:1; min-width:130px; border:1px solid var(--line);
+        border-radius:10px; padding:1rem; text-align:center; }}
+    .card-val {{ font-size:1.5rem; font-weight:700; color:var(--accent); }}
+    .card-lbl {{ font-size:.8rem; color:var(--muted);
+        text-transform:uppercase; letter-spacing:.03em; margin-top:.25rem; }}
+    table {{ border-collapse:collapse; width:100%; font-size:.88rem;
+        margin:.5rem 0; }}
+    th, td {{ text-align:left; padding:.4rem .6rem;
+        border-bottom:1px solid var(--line); }}
+    th {{ background:#f9fafb; font-weight:600; position:sticky; top:0; }}
+    td.num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+    .ok {{ color:var(--ok); }} .warn {{ color:var(--warn); }}
+    .bad {{ color:var(--bad); font-weight:600; }}
+    .badge {{ background:var(--accent); color:#fff; font-size:.7rem;
+        padding:.15rem .5rem; border-radius:999px; font-weight:600;
+        vertical-align:middle; }}
+    .muted {{ color:var(--muted); font-size:.85rem; margin:.2rem 0; }}
+    table.vc {{ max-width:640px; }}
+    td.bar {{ width:35%; padding-left:0; }}
+    td.bar div {{ background:var(--accent); height:12px; border-radius:3px;
+        min-width:2px; opacity:.75; }}
+    .scroll {{ overflow-x:auto; }}
+    .data {{ font-size:.82rem; }}
+    .data td, .data th {{ white-space:nowrap; }}
+    </style></head>
+    <body>{body}</body></html>
+    """
+
+    for df, name in zip(dfs, names):
+        if df is None:
+            continue
+        if not isinstance(df, pd.DataFrame):
+            raise TypeError(f"'{name}' is not a DataFrame or None.")
+
+        n = len(df)
+        parts = []
+
+        # ---- header / shape --------------------------------------------
+        mem = df.memory_usage(deep=True).sum() / 1e6
+        parts.append(f"<h1>{esc(str(name))}</h1>")
+        parts.append('<div class="cards">')
+        for label, value in [
+            ("Rows", f"{df.shape[0]:,}"),
+            ("Columns", f"{df.shape[1]}"),
+            ("Duplicated rows", f"{df.duplicated().sum():,}"),
+            ("Memory", f"{mem:.2f} MB"),
+        ]:
+            parts.append(
+                f"<div class='card'><div class='card-val'>{value}</div>"
+                f"<div class='card-lbl'>{esc(label)}</div></div>"
+            )
+        parts.append("</div>")
+
+        # ---- per-column dtype + missingness ----------------------------
+        parts.append("<h2>Columns</h2>")
+        rows = []
+        for col in df.columns:
+            missing = int(df[col].isna().sum())
+            miss_pct = (missing / n * 100) if n else 0
+            cls = "ok" if miss_pct == 0 else "warn" if miss_pct < 20 else "bad"
+            rows.append(
+                f"<tr><td>{esc(str(col))}</td>"
+                f"<td><code>{esc(str(df[col].dtype))}</code></td>"
+                f"<td class='num'>{n - missing:,}</td>"
+                f"<td class='num'>{missing:,}</td>"
+                f"<td class='num {cls}'>{miss_pct:.1f}%</td></tr>"
+            )
+        parts.append(
+            "<table><thead><tr><th>Column</th><th>Dtype</th>"
+            "<th>Non-null</th><th>Missing</th><th>Missing %</th>"
+            "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+        )
+
+        # ---- split numeric vs categorical ------------------------------
+        numeric_cols, categorical_cols = [], []
+        for col in df.columns:
+            is_num = pd.api.types.is_numeric_dtype(df[col])
+            if is_num and col not in force_categorical:
+                numeric_cols.append(col)
+            else:
+                categorical_cols.append(col)
+
+        # ---- numerical description -------------------------------------
+        if numeric_cols:
+            parts.append("<h2>Numerical variables</h2>")
+            desc = df[numeric_cols].describe().T
+            desc.insert(0, "missing", df[numeric_cols].isna().sum())
+            desc["skew"] = df[numeric_cols].skew(numeric_only=True)
+            parts.append(
+                desc.to_html(
+                    classes="data",
+                    float_format=lambda x: f"{x:,.4g}",
+                    border=0,
+                )
+            )
+
+        # ---- categorical variables -------------------------------------
+        if categorical_cols:
+            parts.append("<h2>Categorical variables</h2>")
+            for col in categorical_cols:
+                nunique = int(df[col].nunique(dropna=True))
+                parts.append(
+                    f"<h3>{esc(str(col))} "
+                    f"<span class='badge'>{nunique:,} unique</span></h3>"
+                )
+                vc = df[col].value_counts(dropna=False)
+                capped = nunique > max_unique_to_list
+                shown = vc.head(top_n_categories) if capped else vc
+                if capped:
+                    parts.append(
+                        f"<p class='muted'>Showing top {top_n_categories} "
+                        f"of {nunique:,} values.</p>"
+                    )
+                vrows = []
+                for val, cnt in shown.items():
+                    label = "NaN" if pd.isna(val) else str(val)
+                    pct = cnt / n * 100 if n else 0
+                    vrows.append(
+                        f"<tr><td>{esc(label)}</td>"
+                        f"<td class='num'>{cnt:,}</td>"
+                        f"<td class='num'>{pct:.1f}%</td>"
+                        f"<td class='bar'><div style='width:{pct:.1f}%'></div></td>"
+                        f"</tr>"
+                    )
+                parts.append(
+                    "<table class='vc'><thead><tr><th>Value</th><th>Count</th>"
+                    "<th>%</th><th></th></tr></thead><tbody>"
+                    + "".join(vrows) + "</tbody></table>"
+                )
+
+        # ---- sample rows -----------------------------------------------
+        if sample_rows > 0:
+            parts.append(f"<h2>Sample (first {sample_rows} rows)</h2>")
+            parts.append('<div class="scroll">')
+            parts.append(df.head(sample_rows).to_html(classes="data", border=0))
+            parts.append("</div>")
+
+        # ---- write file -------------------------------------------------
+        report = template.format(title=esc(str(name)), body="\n".join(parts))
+        path = os.path.join(output_dir, f"{name}.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(report)
+        written.append(path)
+
+    return written
+
+#### OUTDATED handedness ####
+def preview_of_dataframes_outdated(matching_ids_df, statistics_df, predictions_df):
+
+    print(len(matching_ids_df), "rows in matching_ids_df")
+    print(len(statistics_df), "rows in statistics_df")
+    print(len(predictions_df), "rows in predictions_df")
+    #print(matching_ids_df["split"].describe())
+
+    #Predictions
+    print("Preliminary analysis of the predictions_df:")
+    val_pred=predictions_df[predictions_df['split']=='val']
+    train_pred=predictions_df[predictions_df['split']=='train']
+    print(f"predictions_df: {len(val_pred)} rows in val split, {len(train_pred)} rows in train split")
+    #count how many rows in train_pred have label==0 and how much have label==1
+    train_1_count = len(train_pred[train_pred['true_label']==1])
+    train_0_count = len(train_pred[train_pred['true_label']==0])
+    print(f"predictions_df: {train_0_count} rows in train split with true_label==0, {train_1_count} rows in train split with true_label==1")
+    #count na values
+    na_count = train_pred['true_label'].isna().sum()
+    print(f"predictions_df: {na_count} rows with true_label==NaN")
+    #count how many times each ident_projet appears. Print the unique values of these counts
+    value_counts = predictions_df['ident_projet'].value_counts()
+    unique_counts = value_counts.unique()
+    print("Unique counts of ident_projet in matching_ids_df:", unique_counts)
+    print('|'*50)
+    #assert 1==0 , "stop here to check the unique counts of ident_projet in matching_ids_df"
+     
+
+    #Matching_ids
+    print("matching_ids_df subject_id value counts:")
+    row_counts = matching_ids_df['ident_projet'].value_counts()
+    print(row_counts)
+    print("statistics_df subject_id value counts:")
+    row_counts = statistics_df['subject_id'].value_counts()
+    print(row_counts)
+    print(len(statistics_df[statistics_df['subject_id']=='D3B2E9R1'])) #expected 39-6=33 because it has two missing questionnaires 
+    #instead i have 29; But i see that 4 are 0 -> 39-6-4=29 -> it is
+    #print the row for subject_id D3B2E9R1
+    row = matching_ids_df[matching_ids_df['ident_projet']=='D3B2E9R1']
+    with pd.option_context('display.max_columns', None, 'display.width', None):
+        print(row)
+    '''for col in row.columns:
+        print(col, row[col].values)'''
+    '''print("predictions_df ident_projet value counts:")
+    row_counts = predictions_df['ident_projet'].value_counts()
+    print(row_counts)'''
+
+    #print(predictions_df.describe() ) # quick check that it loaded correctly and has expected columns
+    
+    for df, name in [(matching_ids_df, "matching_ids_df"), (statistics_df, "statistics_df"), (predictions_df, "predictions_df")]:
+        print(describe_df(df, name))
+        print()  # spacer between tables
+
+def validity_checks_outdated(statistics_df):
     row_counts = statistics_df['subject_id'].value_counts()
     print(row_counts)
 
@@ -359,11 +679,41 @@ def validity_checks(statistics_df):
     ratio = len(val_subject_ids) / len(train_subject_ids)
     print(f"Ratio of val_subject_ids to train_subject_ids: {ratio:.4f}")
 
-    left_handed_subject_ids = statistics_df[statistics_df['lateralite'] == 1]['subject_id'].unique()
-    rigth_handed_subject_ids = statistics_df[statistics_df['lateralite'] == 0]['subject_id'].unique()
+    #left handed vs right handed 
+    print("#"*50)
+    print("#"*50)
+    print("Gettng statistics on left-handed vs right-handed in training split")
+    temporary_df = statistics_df[statistics_df['split'] == 'train']
+    left_handed_subject_ids = temporary_df[temporary_df['lateralite'] == 1]['subject_id'].unique()
+    rigth_handed_subject_ids = temporary_df[temporary_df['lateralite'] == 0]['subject_id'].unique()
     #get the ratio of left_handed_subject_ids to rigth_handed_subject_ids
     ratio = len(left_handed_subject_ids) / len(rigth_handed_subject_ids)
+    print(f"Number of left_handed_subject_ids: {len(left_handed_subject_ids)}")
+    print(f"Number of rigth_handed_subject_ids: {len(rigth_handed_subject_ids)}")
     print(f"Ratio of left_handed_subject_ids to rigth_handed_subject_ids: {ratio:.4f}")
+    #Select the digit modality and check how many rows have num <= 0 (should be 0 because statistics is created from datloader
+    #and loader cannot load samples with num <= 0)
+    less_than_0_df = temporary_df[(temporary_df['modality_type'] == 'number_random') & (temporary_df['num'] <= 0)]
+    print(f"Number of rows with num <= 0 for digit modality: {len(less_than_0_df)}")
+    #check if there are nan values in the num column for the digit modality
+    nan_num_df = temporary_df[(temporary_df['modality_type'] == 'number_random') & (temporary_df['num'].isna())]
+    print(f"Number of rows with num == NaN for digit modality: {len(nan_num_df)}")
+    #Count the number of rows with lateratlite == 1 and lateralite == 0 and print the number and the ratio
+    left_handed_rows = temporary_df[(temporary_df['modality_type'] == 'number_random') & (temporary_df['lateralite'] == 1)]
+    right_handed_rows = temporary_df[(temporary_df['modality_type'] == 'number_random') & (temporary_df['lateralite'] == 0)]
+    print(f"Number of rows with lateralite == 1: {len(left_handed_rows)}")
+    print(f"Number of rows with lateralite == 0: {len(right_handed_rows)}")
+    print(f"Ratio of rows with lateralite == 1 to lateralite == 0: {len(left_handed_rows) / len(right_handed_rows):.4f}")
+    #repeat for hand column
+    less_than_0_df = temporary_df[(temporary_df['modality_type'] == 'hand') & (temporary_df['num'] <= 0)]
+    print(f"Number of rows with num <= 0 for hand modality: {len(less_than_0_df)}")
+    left_handed_rows = temporary_df[(temporary_df['modality_type'] == 'hand') & (temporary_df['lateralite'] == 1)]
+    right_handed_rows = temporary_df[(temporary_df['modality_type'] == 'hand') & (temporary_df['lateralite'] == 0)]
+    print(f"Number of rows with lateralite == 1: {len(left_handed_rows)}")
+    print(f"Number of rows with lateralite == 0: {len(right_handed_rows)}")
+    print(f"Ratio of rows with lateralite == 1 to lateralite == 0: {len(left_handed_rows) / len(right_handed_rows):.4f}")
+    print("#"*50)
+    print("#"*50)
     
     category_1_df = statistics_df[statistics_df['grid_file_category'] == 1]
     category_2_df = statistics_df[statistics_df['grid_file_category'] == 2]
@@ -581,7 +931,6 @@ def metadata_analysis(df, out_dir):
         dist_by(df, col, 'modality_type',           fname=f'{slug(col)}_by_modality.png')
         dist_by(df, col, 'questionnaire',           fname=f'{slug(col)}_by_questionnaire.png')
 
-
 def confidence_prediction_analysis(df, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     CONF_THRESHOLD = 0.70   # winning prob must exceed this to count as "confident"
@@ -625,57 +974,5 @@ def confidence_prediction_analysis(df, out_dir):
     plt.savefig(os.path.join(out_dir, 'confidence_by_correctness.png'), dpi=150, bbox_inches='tight')
 
 
-def main(show_preview=True,run_validity_checks=True,generate_num_statistics=False, generate_correlations=False, 
-         run_metadata_analysis=False, run_confidence_prediction_analysis = False, save_file=True):
-    args = get_args()
-
-    matching_ids_df = pd.read_csv(LIST_OF_IDS_PATH)
-    statistics_df = pd.read_csv(STATISTICS_PATH)
-    predictions_df = pd.read_csv(PREDICTIONS_PATH)
-
-    if show_preview:
-        preview_of_dataframes(matching_ids_df, statistics_df, predictions_df)
-        print("="*50)
-
-    statistics_df = merge_dfs(matching_ids_df, statistics_df, predictions_df) 
-    
-    with pd.option_context('display.max_columns', None, 'display.width', None):
-        print(statistics_df.head())
-        print("="*50)
-
-    if run_validity_checks:    
-        validity_checks(statistics_df)
-        print("="*50)
-    
-    if generate_num_statistics:
-        inspect_num_statistics(statistics_df)
-        numerosity_analysis(statistics_df, out_dir=os.path.join(OUT_PATH,'numerosity'))
-        #add the numerosity distribution as is per-modality and the numerosity as is per-questionnaire
-
-    if generate_correlations:
-        correlation_analysis(statistics_df, out_dir=os.path.join(OUT_PATH,'correlation'))
-
-    statistics_df['area'] = statistics_df['width'] * statistics_df['height']
-    #the area values seem off (order of 1e7)
-    if run_metadata_analysis:
-        metadata_analysis(statistics_df, out_dir=os.path.join(OUT_PATH,'metadata'))
-
-    if run_confidence_prediction_analysis:
-        confidence_prediction_analysis(statistics_df, out_dir=os.path.join(OUT_PATH,'confidence_analysis'))
-
-    if save_file:
-        out_path = os.path.join(OUT_PATH, "merged_statistics_w_predictions_w_original.csv")
-        statistics_df.to_csv(out_path, index=False)
-        print(f"Saved merged statistics with predictions to {out_path}")
-        out_path = os.path.join(MODEL_SPECIFIC_OUT_PATH, "merged_statistics_w_predictions_w_original.csv")
-        statistics_df.to_csv(out_path, index=False)
-        print(f"Saved copy of merged statistics in the model folder")
-        #save metadata to json
-        with open(os.path.join(MODEL_SPECIFIC_OUT_PATH, "merged_statistics_metadata.json"), 'w') as f:
-            import json
-            json.dump(metadata, f, indent=4)
-        print("Saved metadata to json in the model folder")
-    
-
 if __name__ == "__main__":
-    main()
+    main(metadata)

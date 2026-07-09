@@ -412,7 +412,7 @@ class ModelPD(L.LightningModule):
         self.opt_groups = opt_groups
 
         self.num_1 = num_1
-        self.num_0 = num_1 * balancing_factor if balanced_data else num_0
+        self.num_0 = num_0
         self.total = self.num_0 + self.num_1
 
         #cross entropy
@@ -468,6 +468,11 @@ class ModelPD(L.LightningModule):
         self.warmup_fraction = warmup_fraction
         self.eta_min_cosine = eta_min_cosine
         self.batch_size= batch_size
+
+        self.train_class_0_count = 0
+        self.train_class_1_count = 0
+        self.val_class_0_count = 0
+        self.val_class_1_count = 0
 
     def forward(self, frames, seq_ids, slot_ids, lengths):
         return self.model(frames, seq_ids, slot_ids, lengths)
@@ -533,6 +538,11 @@ class ModelPD(L.LightningModule):
         else:
             self.log("lr_backbone",        opt.param_groups[0]['lr'], on_step=False, on_epoch=True)
             self.log("lr_classifier_head", opt.param_groups[1]['lr'], on_step=False, on_epoch=True)
+        
+        # Accumulate class counts
+        targets_int = labels.long().view(-1)
+        self.train_class_0_count += (targets_int == 0).sum().item()
+        self.train_class_1_count += (targets_int == 1).sum().item()
 
         return loss
 
@@ -554,6 +564,11 @@ class ModelPD(L.LightningModule):
         preds_int   = preds.long().view(-1)
         targets_int = labels.long().view(-1)
         self.val_balanced_acc.update(preds_int, targets_int)
+
+        # Accumulate class counts
+        targets_int = labels.long().view(-1)
+        self.val_class_0_count += (targets_int == 0).sum().item()
+        self.val_class_1_count += (targets_int == 1).sum().item()
 
         self.log("val_loss", loss, on_epoch=True, prog_bar=True, batch_size=bsz)
         self.log("val_acc",  acc,  on_epoch=True, prog_bar=True, batch_size=bsz)
@@ -616,6 +631,28 @@ class ModelPD(L.LightningModule):
             self.write_log("Model Layers Structure (white = trainable, red = frozen):\n")
             for layer_info in all_layers_info:
                 self.write_log(f"{layer_info}\n")
+        
+        #class counts
+        n0 = self.train_class_0_count
+        n1 = self.train_class_1_count
+        ratio = n0 / n1 if n1 > 0 else float("inf")
+        self.log("train_class_ratio", ratio, prog_bar=False)
+
+        # Reset for next epoch
+        self.train_class_0_count = 0
+        self.train_class_1_count = 0
+
+    def on_validation_epoch_end(self):
+        n0 = self.val_class_0_count
+        n1 = self.val_class_1_count
+        ratio = n0 / n1 if n1 > 0 else float("inf")
+
+        #print(f"\n[Epoch {self.current_epoch}] Val class ratio  →  class0: {n0}  |  class1: {n1}  |  0/1 ratio: {ratio:.3f}")
+        self.log("val_class_ratio", ratio, prog_bar=False)
+
+        # Reset for next epoch
+        self.val_class_0_count = 0
+        self.val_class_1_count = 0
 
     def configure_optimizers(self):
 

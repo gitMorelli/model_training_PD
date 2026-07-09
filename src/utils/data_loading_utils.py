@@ -962,15 +962,8 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
 
                     if isinstance(raw_image_data, bytes):
                         img = Image.open(io.BytesIO(raw_image_data)).convert('RGB')
-                    elif num == 0: #if the modality is not present i create a blank image 
+                    elif num <= 0 or raw_image_data is None: #if the modality is not present i create a blank image 
                         img = Image.new('RGB', (224,224), color=(255,255,255))
-                    elif raw_image_data is None: #if missing i create a blank image taking the size from grid
-                        grid[0,:] = grid[0,:]*rescale_factor[0]
-                        grid[1,:] = grid[1,:]*rescale_factor[1]
-                        max_x = int(np.max(grid[0,:]))
-                        max_y = int(np.max(grid[1,:]))
-                        img = Image.new('RGB', (max_x+20, max_y+20), color=(255,255,255))
-                        print(f"Warning: Missing modality {current_mode} for questionnaire q{X} in sample {subject_id}. Using blank image of size {(max_x+5, max_y+5)}.")
                     else:
                         img = raw_image_data
 
@@ -979,6 +972,8 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                         if isinstance(augmentation_transform,str) and augmentation_transform == 'grid':
                             #select random crop
                             if num > 0:
+                                grid[0,:] = grid[0,:]*rescale_factor[0]
+                                grid[1,:] = grid[1,:]*rescale_factor[1]
                                 x_coords = [0] + sorted(list(grid[0, :])) + [img.width]
                                 n_x = len(x_coords) - 1
                                 y_coords = [0] + sorted(list(grid[1, :])) + [img.height]
@@ -1350,6 +1345,7 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train'):
     return ids_to_exclude
 
 def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col=''):
+    '''returns the num_0 and num_1 in the training set after considering the exclusion -> the true class numerosity'''
     exclusion_set = set()
     val_exclusion_set = set()
      
@@ -1364,11 +1360,8 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col=''):
         print("Unique subjects in validation set:", csv_data[csv_data['split'] == 'val']['unique_id'].nunique())
         print('#' * 50)
         print("Class distribution in the entire dataset:\n", csv_data[class_col].value_counts())
+        print("Class distribution in the training set:\n", csv_data[csv_data['split'] == 'train'][class_col].value_counts())
         print('#' * 50)
-    
-    #compute the number of samples for each class in the training set
-    num_0 = len(csv_data[(csv_data[class_col] == 0) & (csv_data['split'] == 'train')])
-    num_1 = len(csv_data[(csv_data[class_col] == 1) & (csv_data['split'] == 'train')])
 
     if exp_params['balanced_data']:
         exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train') 
@@ -1377,6 +1370,17 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col=''):
     if verbose:
         print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
         print('#' * 50)
+    
+    filtered_csv_data_train = csv_data[~csv_data['unique_id'].isin(exclusion_set)]
+    #compute the number of samples for each class in the training set
+    num_0 = len(filtered_csv_data_train[(filtered_csv_data_train[class_col] == 0) & (filtered_csv_data_train['split'] == 'train')])
+    num_1 = len(filtered_csv_data_train[(filtered_csv_data_train[class_col] == 1) & (filtered_csv_data_train['split'] == 'train')])
+    if verbose:
+        print("After applying the exclusion set, the training set has:")
+        print(f"Class 0: {num_0} samples")
+        print(f"Class 1: {num_1} samples")
+        print(f"Ratio of Class 1 to Class 0: {num_1 / num_0 if num_0 > 0 else 'undefined'}")
+
     return exclusion_set, val_exclusion_set, num_0,num_1
 
 #Loading the grid_file data

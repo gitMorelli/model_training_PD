@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=eval_handedness
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics.err
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics_handedness.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics_handedness.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=32              # Number of CPU cores per task
@@ -33,5 +33,5 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 
 cd $HOME_DIR
 # --- Execution ---
-$ENV_PYTHON -m src.debug.create_statistics_on_images \
+$ENV_PYTHON -m src.debug.create_statistics_on_images_handedness \
     --num_workers 30

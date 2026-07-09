@@ -32,19 +32,20 @@ import pickle
 from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms
-from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD_with_meta
+from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD_with_meta, debug_images_PD
 
 params = {
-    'selected_problem': "PD", # "handedness"
+    'selected_problem': "PD",#"PD", # "handedness"
 
-    "data_modality": ['digit_full','digit_crop']+['digit' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+    "data_modality": ['digit_full','digit_crop']+['digit' for _ in range(2)]+
+    ['text_full']+['text' for _ in range(2)]+['X_crop'], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     "num_tiles": 3,
 
     'model': 'resnet18', 
     "input_size": 224,
     'mean_and_std': 'handedness',
     'custom_transform': 'pad_resize_normalize', #None
-    "apply_augmentation": False,
+    "apply_augmentation": 'random_crop_half',#'random_crop_half', #None, 
     "invert_color": True,
     "use_grid": True,
 
@@ -113,7 +114,8 @@ def main(run_random_samples_from_loader=True, run_study_loader = False, show_gri
     params['norm_std'] = std
 
     if run_random_samples_from_loader:
-        random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, mean=mean, std=std)
+        random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, 
+                                       mean=mean, std=std, no_text=True)
     
     if show_grids:
         grids_of_random_samples(args, out_folder=os.path.join(SAVE_PATH, "grids"), batches_to_show=3, mean=mean, std=std)
@@ -141,7 +143,7 @@ def main(run_random_samples_from_loader=True, run_study_loader = False, show_gri
             T.Normalize(mean=mean, 
                             std=std),
         ])
-        debug_from_shards(args, out_folder=os.path.join(SAVE_PATH, "debug_from_shards"), 
+        debug_from_shards(params,args, out_folder=os.path.join(SAVE_PATH, "debug_from_shards"), 
                           augmentation_transform=augmentation_transform, transform=transform, invert_color=params['invert_color'])
         #add some other grids (eg larger than higher, bad predictions, ...)
     if run_explore_files:
@@ -440,7 +442,7 @@ def handedness_dataloading(worker,params, transform, augmentation_transform, gri
                                             split_workers=params['split_workers'], batch_size=params['batch_size'], 
                                             transform=transform, modality=params['data_modality'], exclusion_set=exclusion_set, 
                                             huggingface_transform=False, augmentation_transform=augmentation_transform,
-                                            invert_color=params['invert_color'], grid_dict=grid_dict)
+                                            invert_color=params['invert_color'], grid_dict=grid_dict, n_views=params['num_tiles'])
 
     train_loader = DataLoader(
         train_dataset, 
@@ -478,7 +480,7 @@ def compute_time_to_iterate_on_dataloader(args):
     print(f"Time taken to iterate over the dataloader: {elapsed_time:.2f} seconds")
 
 #show batches
-def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, mean=None,std=None):
+def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, mean=None,std=None, no_text=False):
     os.makedirs(out_folder, exist_ok=True)
     #this functions shows images and properties of a random sample of images from the dataloader
     train_loader, expected_shape = get_dataloader(args, params)
@@ -501,6 +503,7 @@ def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, m
 
                 list_of_views=[]
                 list_of_properties=[]
+                #print('shape tensor: ', img_tensor.shape)
                 for j in range(num_views):
                     if num_views > 1:
                         single_img = img_tensor[i][j]
@@ -508,7 +511,8 @@ def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, m
                         single_img = img_tensor[i]
                     
                     properties_text = tensor_debug_info(single_img, name=f"view {len(list_of_views)}", norm_mean=mean, norm_std=std)
-
+                    if no_text:
+                        properties_text = ""
                     #tensor_debug_info(single_img, name=f"view {len(list_of_views)}")
 
                     # Convert the single 3D tensor to PIL
@@ -527,8 +531,10 @@ def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, m
             n_batches += 1
             out_folder_this_batch=os.path.join(out_folder,f"batch_{n_batches}")
             os.makedirs(out_folder_this_batch, exist_ok=True)
-
-            debug_images_PD_with_meta(mean,std, batch, out_folder_this_batch, compact = True, meta_fontsize=10)
+            if no_text:
+                debug_images_PD(mean,std, batch, out_folder_this_batch, input_is_batch=True)
+            else:
+                debug_images_PD_with_meta(mean,std, batch, out_folder_this_batch, compact = True, meta_fontsize=10)
 
             if n_batches >= batches_to_show:
                 break
@@ -570,7 +576,7 @@ def grids_of_random_samples(args,out_folder,batches_to_show=3,mean=None,std=None
             stacked=True,
         )
 #Reading from shards
-def debug_from_shards(args,out_folder, augmentation_transform, transform, invert_color=True):
+def debug_from_shards(params,args,out_folder, augmentation_transform, transform, invert_color=True):
     #clear the files in the folder if it already exists
     if os.path.exists(out_folder):
         for entry in os.listdir(out_folder):
@@ -601,8 +607,8 @@ def debug_from_shards(args,out_folder, augmentation_transform, transform, invert
         num_threshold_low = filtered_data['num'].quantile(0.25)
         low_num_data = filtered_data[filtered_data['num'] <= num_threshold_low]
         #randomly sample n_images from each of the two dataframes
-        high_num_sample = high_num_data.sample(n=n_images, random_state=SEED)
-        low_num_sample = low_num_data.sample(n=n_images, random_state=SEED)
+        high_num_sample = high_num_data.sample(n=n_images, random_state=params['seed'])
+        low_num_sample = low_num_data.sample(n=n_images, random_state=params['seed'])
         #for each return the list of names assembled in this way: shard_name/subject_id.questionnaire.modality_type.png
         high_num_names = [f"{row['shard_name'].split('.')[0]}/{row['subject_id']}.{row['questionnaire']}.{row['modality_type']}.png" for index, row in high_num_sample.iterrows()]
         print("High num names:", high_num_names)
@@ -640,7 +646,7 @@ def debug_from_shards(args,out_folder, augmentation_transform, transform, invert
             #if questionnaire is not none filter for the specified questionnaire
             filtered_data = filtered_data[filtered_data['questionnaire'].isin(questionnaire)]
         #sample n_samples from the filtered data
-        sampled = filtered_data.sample(n=n_samples, random_state=SEED)
+        sampled = filtered_data.sample(n=n_samples, random_state=params['seed'])
         names = [f"{row['shard_name'].split('.')[0]}/{row['subject_id']}.{row['questionnaire']}.{row['modality_type']}.png" for index, row in sampled.iterrows()]
         return names
     

@@ -4,17 +4,19 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=20              # Number of CPU cores per task
+#SBATCH --cpus-per-task=10             # Number of CPU cores per task
 #SBATCH --mem=32G                      # Job memory request
-#SBATCH --time=04:00:00                # Time limit hrs:min:sec
+#SBATCH --time=03:00:00                # Time limit hrs:min:sec
 #--partition=shortq
-#SBATCH --partition=visuq,gpgpuq
+#--partition=gpgpuq
+#SBATCH --partition=gpgpuq,visuq
 #--gres=gpu:1
-#--gres=gpu:a100:1
-#SBATCH --gres=gpu:v100:1
+#SBATCH --gres=gpu:h100:1
+#--gres=gpu:v100:1
 #--gres=gpu:p40:1
-#--nodelist=gpu04
+#--nodelist=gpu05
 #--gres=gpu:t4:1
+#--exclude=gpu05,gpu06
 
 # --- Environment Setup ---
 #source ~/anaconda3/etc/profile.d/conda.sh
@@ -34,4 +36,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.train_PD_model \
-    --num_workers 18
+    --num_workers 8

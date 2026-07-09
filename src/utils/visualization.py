@@ -170,7 +170,7 @@ def debug_images_dataset_stacked(
         print(f"Anteprima [{name}] salvata con successo in: {modality_output_path}")
 
 # Visualization for PD time series data
-def debug_images_PD(mean,std,loader,out_dir): #(N, k, C, H, W), N = sum(T_i) - Format
+def debug_images_PD(mean,std,loader,out_dir,input_is_batch=False): #(N, k, C, H, W), N = sum(T_i) - Format
     def _denorm_to_hwc(img, mean, std):
         """(C,H,W) tensor -> (H,W[,C]) numpy in [0,1] for imshow."""
         img = img.detach().cpu().float()
@@ -245,7 +245,10 @@ def debug_images_PD(mean,std,loader,out_dir): #(N, k, C, H, W), N = sum(T_i) - F
             paths.append(path)
 
         return paths
-    batch = next(iter(loader))                  # WebLoader(batch_size=None)
+    if input_is_batch:
+        batch = loader
+    else:
+        batch = next(iter(loader))                  # WebLoader(batch_size=None)
     os.makedirs(out_dir, exist_ok=True)
     debug_show_batch(batch, out_dir=out_dir)
 def debug_images_PD_with_meta(mean, std, batch, out_dir,

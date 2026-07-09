@@ -46,14 +46,14 @@ exp_params = {
     'predict_on_train': False, #if True the model will be evaluated on the training set as well
 
     #experiment parameters
-    'data_modality': ['digit_full','digit_crop']+['digit' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+    'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)],# 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
     'use_balanced_weights': True,
     'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
     'balanced_data': True, #note that this and balace_validation are independent
-    'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
+    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
@@ -105,7 +105,7 @@ SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 #Checkpoint paths
 RESULTS_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
 CHECKPOINT_PATH = os.path.join(RESULTS_PATH, "checkpoints")
-checkpoint_to_load='v_2/latest-epoch=249.ckpt'#best-epoch=55-val_loss=0.91.ckpt'#best.ckpt , None last.ckpt
+checkpoint_to_load='v_6/best-epoch=20-val_loss=0.64.ckpt'#best-epoch=55-val_loss=0.91.ckpt'#best.ckpt , None last.ckpt
 
 VERBOSE = False
 CLASS_COL = 'diag_park_final1_quest'
@@ -151,6 +151,7 @@ def main():
     outputs = trainer.predict(lit_model, dataloaders=val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
     results_df, all_probs, all_preds, all_labels = get_result_df(outputs)
     
+    print(f"Evaluating model on validation set using checkpoint: {ckpt_path}")
     analyze_results(all_preds, all_labels, results_df)
     
 

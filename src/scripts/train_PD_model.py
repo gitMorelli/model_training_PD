@@ -43,8 +43,8 @@ exp_params = {
     'grid_dict_path': "/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl",
 
     #experiment parameters
-    'data_modality': ['X_crop','X']+['digit_full','digit_crop']+['digit' for _ in range(3)]+
-    ['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+    'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)],
+    #['X_crop','X']+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
@@ -61,17 +61,17 @@ exp_params = {
     'filter_modality' : 'digit',
 
     #model definition
-    'model':"resnet18", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':"resnet50", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': os.path.join(
     '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
-    'resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt'
+    'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
 ), #None, see options below
     'model_structure': 'SequenceQuestionnaireModel',
     'model_parameters': {
-        'd_model': 128, 
+        'd_model': 256, 
         'n_heads': 4,
-        'n_layers':2,
+        'n_layers':1,
         'ff_mult':2,
         'dropout': 0.4,
     },
@@ -86,17 +86,19 @@ exp_params = {
     
     #Training params definition
     'lr_backbone': 1e-4,
-    'lr_classifier_head': 1e-3,
+    'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
     'num_epochs': 100,
-    'patience': 50,
-    'eta_min_cosine': 1e-6,
-    'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
+    'patience': 20,
+    'eta_min_cosine': 1e-8,
+    'weight_decay': 0.05, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier'],#['all','classifier'], #Update it for every model
+    'layers_to_unfreeze': ['classifier','layer4'],#['all','classifier'], #Update it for every model
     'seed': 42,
+
+    'prefetch_factor':2,
 }
 if isinstance(exp_params['data_modality'],list):
     exp_params['num_tiles'] = len(exp_params['data_modality'])
@@ -121,7 +123,7 @@ define_optimization_groups = [
         {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': 1e-5, 'lr_name': 'lr_1'},
         {'names': ['layer2'],'lr': 3e-5, 'lr_name': 'lr_2'},
         {'names': ['layer3'],'lr': 1e-4, 'lr_name': 'lr_3'},
-        {'names': ['layer4'],'lr': 3e-4, 'lr_name': 'lr_4'},
+        {'names': ['layer4'],'lr': 1e-7, 'lr_name': 'lr_4'},
         {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
     ] # or None or other configurations fo other models'''
 
@@ -140,7 +142,7 @@ CLASS_COL = 'diag_park_final1_quest'
 def main():
     args = get_args()
     worker = args.num_workers
-    prefetch_factor = 2 if worker > 0 else None
+    prefetch_factor = exp_params['prefetch_factor'] if worker > 0 else None
 
     #set seed with lightning for reproducibility
     L.seed_everything(exp_params['seed'], workers=True)
@@ -153,7 +155,7 @@ def main():
 
     write_log, current_version = logging_initialization() 
 
-    model, transform = model_initialization(write_log,exp_params, verbose=VERBOSE)
+    model, transform = model_initialization(write_log,exp_params,verbose=VERBOSE, **exp_params['model_parameters'])
     
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
                                                                        grid_dict, transform, 
@@ -265,7 +267,7 @@ def debug(train_dataloader,val_dataloader,exp_params):
     debug_images_PD(mean=exp_params['norm_mu'], std=exp_params['norm_std'], loader=train_dataloader, out_dir=os.path.join(SAVE_DEBUG_PATH,'train'))
     debug_images_PD(mean=exp_params['norm_mu'], std=exp_params['norm_std'], loader=val_dataloader, out_dir=os.path.join(SAVE_DEBUG_PATH,'val'))
 
-def model_initialization(write_log,exp_params, verbose=True):
+def model_initialization(write_log,exp_params, verbose=True, **kwargs):
     backbone,transform = get_model(name=exp_params['model'], pretrained=True, 
                                    custom_pre_trained_weights=exp_params['custom_pre_trained_weights'])
     print("############# Model backbone loaded! #############")
@@ -274,8 +276,14 @@ def model_initialization(write_log,exp_params, verbose=True):
     in_features = out.shape[1]  
     
     if exp_params['model_structure'] == 'SequenceQuestionnaireModel':
-        model = SequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=13, 
-                                           d_model=512, n_heads=8, n_layers=4, ff_mult=4, view_agg='attention', dropout=0.1)
+        n_slots = 13  # This is a fixed value based on your description
+        d_model = kwargs.get('d_model', 128)
+        n_heads  = kwargs.get('n_heads', 4)
+        n_layers = kwargs.get('n_layers', 2)
+        ff_mult = kwargs.get('ff_mult', 2)
+        dropout = kwargs.get('dropout', 0.4)
+        model = SequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, 
+                                           d_model=d_model, n_heads=n_heads, n_layers=n_layers, ff_mult=ff_mult, view_agg='attention', dropout=dropout)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
     
