@@ -1365,11 +1365,26 @@ def generate_exclusion_set_val(csv_data, data_modality, majority_class_id, balan
     exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
     return exclusion_set
 
-def generate_exclusion_set_PD(csv_source,exp_params,split='train'):
+def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data=None):
+    '''
+    this funciton computes, for a specific split, all the ids that should be ignored during loading, accounting for all exclusion/inclusion
+    conditions.
+
+    If original_data=None we assume csv_source contains all the train/val ids and we 
+    remove the ids for which we don't have data and optionally some controls to reduce the case/control ratio
+
+    If original_data=None -> the dataset was pre-filtered externally -> we perform the same exclusion but also exclude
+    all ids that were present in the full dataset but not in the pre-filtered one
+    '''
+
+    if original_data is None: #for compatibility with old code
+        original_data = csv_source.copy()
+    
     csv_data = csv_source.copy()
     csv_data = csv_data[csv_data['split'] == split]
-    csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1].astype(int)
+    all_original_ids = set(original_data[original_data['split']==split]['unique_id'].unique())
 
+    csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1].astype(int)
     #exclude the subjects for which grid_pattern or case_grid_pattern is all 0 before last_avail_q
     if exp_params['filter_missing'] == 'all':
         csv_data['last_avail_q'] = 13 #set last avail q to 13 for all subjects to reuse the same code
@@ -1382,17 +1397,17 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train'):
                 and prefix_has_one(r['case_grid_pattern'], r['last_avail_q']),
         axis=1
     )
-    subjects_with_no_pre_avail_q_data = csv_data[~mask]['unique_id'].unique()
+    #subjects_with_no_pre_avail_q_data = csv_data[~mask]['unique_id'].unique()
     csv_data = csv_data[mask]
     print(f"Number of samples in {split} set after filtering for 000.. string: {len(csv_data)}")
     print(f"Number of unique subjects with case_control==1 in {split} set after filtering for 000.. string: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
 
-    controls_to_exclude = set()
     if (split=='train' and exp_params['balanced_data']) or (split=='val' and exp_params['balance_validation']):
         print(f"Balancing the dataset for {split} set with balancing factor {exp_params['balancing_factor']}")
         #keep only the controls
-        csv_data = csv_data[csv_data['case_control'] == 0]
-        train_data = csv_data[csv_data['split'] == split]
+        csv_data_controls = csv_data[csv_data['case_control'] == 0]
+        csv_data_cases = csv_data[csv_data['case_control'] == 1]
+
         #keep balancing factor ids in each group for each case, sampling with priority from the at_least_warning==0 controls
         n_target = int(exp_params['balancing_factor'])
         seed = exp_params['seed']
@@ -1410,21 +1425,29 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train'):
                 ])
             return chosen
         selected_ids = set(
-            train_data.groupby('group_id', group_keys=False).apply(pick)
+            csv_data_controls.groupby('group_id', group_keys=False).apply(pick)
         )
 
-        controls_to_exclude = set(train_data['unique_id']) - selected_ids
+        #keep only the selected controls
+        csv_data_controls = csv_data_controls[csv_data_controls['unique_id'].isin(selected_ids)]
+        #re-join cases and controls
+        csv_data = pd.concat([csv_data_cases, csv_data_controls])
     
-    ids_to_exclude = set(subjects_with_no_pre_avail_q_data) | controls_to_exclude
+    ids_to_exclude = all_original_ids - set(csv_data['unique_id'].unique()) #i exclude all the ids that are not still in the df
     
     return ids_to_exclude
 
-def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col=''):
+def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed_csv=None):
     '''returns the num_0 and num_1 in the training set after considering the exclusion -> the true class numerosity'''
     exclusion_set = set()
     val_exclusion_set = set()
-     
-    csv_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+    
+    if pre_computed_csv:
+        original_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+        csv_data = pre_computed_csv.copy()
+    else:
+        original_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+        csv_data = original_data.copy()
     if verbose:
         print("Initial CSV data loaded. First row example:")
         for col in csv_data.columns:
@@ -1439,8 +1462,8 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col=''):
         print('#' * 50)
 
     
-    exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train') 
-    val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val')
+    exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train',original_data=original_data) 
+    val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val', original_data=original_data)
     
     if verbose:
         print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")

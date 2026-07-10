@@ -36,6 +36,7 @@ from src.utils.visualization import debug_images_dataset, save_img_with_info_vie
 
 params = {
     'selected_problem': "PD",#"PD", # "handedness"
+    'pre_filter_csv': True,
 
     "data_modality": ['digit_full','digit_crop']+['digit' for _ in range(2)]+
     ['text_full']+['text' for _ in range(2)]+['X_crop'], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
@@ -67,6 +68,7 @@ params = {
     "decode_approach": "pil",
     "load_in_memory": False,
     "split_workers": True,
+
 }
 if isinstance(params['data_modality'],list):
     params['num_tiles'] = len(params['data_modality'])
@@ -90,7 +92,7 @@ elif params['selected_problem'] == "PD":
     CSV_LOAD_PATH = ""
 
     #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/final_data_for_training.parquet"
+    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_8_7_26.parquet"
 
     #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
     data_folder = "final_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
@@ -113,10 +115,16 @@ def main(run_random_samples_from_loader=True, run_study_loader = False, show_gri
     params['norm_mu'] = mean
     params['norm_std'] = std
 
+    if params['pre_filter_csv']:
+        pre_filtered_csv = run_pre_filtering()
+    else:
+        pre_filtered_csv = None
     if run_random_samples_from_loader:
         random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, 
-                                       mean=mean, std=std, no_text=True)
+                                       mean=mean, std=std, no_text=True, pre_filtered_csv=pre_filtered_csv)
     
+
+    ### From here they work only for the handedness case #####
     if show_grids:
         grids_of_random_samples(args, out_folder=os.path.join(SAVE_PATH, "grids"), batches_to_show=3, mean=mean, std=std)
     
@@ -148,7 +156,6 @@ def main(run_random_samples_from_loader=True, run_study_loader = False, show_gri
         #add some other grids (eg larger than higher, bad predictions, ...)
     if run_explore_files:
         explore_files(filename='worker94_shard-000000/D3I3J0N6.q1.hand.png')
-
 
 
 ########### Tensor visualization utils ############
@@ -373,8 +380,19 @@ def dataset_overview(loader, num_modalities=None, num_classes=None, max_batches=
     }
 #########################################################################
 
+####### Filtering functions ###############
+def run_pre_filtering(params, subgroup='all'):
+    if params['selected_problem'] == "PD":
+        pre_filtered_csv = pd.load_parquet(params['list_of_ids_paths']) 
+        if subgroup == 'cases':
+            pre_filtered_csv = pre_filtered_csv[pre_filtered_csv['diag_park_final1_quest'] == 1]
+    else:
+        raise ValueError(f"Filtering not available for selected_problem: {params['selected_problem']}")
+    
+    return pre_filtered_csv
+
 ####### LOADING DATASET AND DATALOADER #############
-def get_dataloader(args,params):
+def get_dataloader(args,params,pre_filtered_csv):
     worker = args.num_workers
 
     grid_dict = None
@@ -392,7 +410,8 @@ def get_dataloader(args,params):
                                                              params['list_of_ids_paths'], SHARD_PATTERN_train)
     elif params['selected_problem'] == "PD":
         #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
-        exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest')
+        exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest',
+                                                                                   pre_computed_csv=pre_filtered_csv)
         train_loader,_,_,_= prepare_loaders_PD(worker,params['prefetch_factor'],params, exclusion_set, val_exclusion_set,
                                                          grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val)
         expected_shape = torch.randn(params['num_tiles'], 3, 224, 224)
@@ -480,10 +499,10 @@ def compute_time_to_iterate_on_dataloader(args):
     print(f"Time taken to iterate over the dataloader: {elapsed_time:.2f} seconds")
 
 #show batches
-def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, mean=None,std=None, no_text=False):
+def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, mean=None,std=None, no_text=False, pre_filtered_csv=None):
     os.makedirs(out_folder, exist_ok=True)
     #this functions shows images and properties of a random sample of images from the dataloader
-    train_loader, expected_shape = get_dataloader(args, params)
+    train_loader, expected_shape = get_dataloader(args, params, pre_filtered_csv)
 
     if params['selected_problem'] == "handedness":
         n_batches=0
