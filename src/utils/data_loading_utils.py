@@ -1481,6 +1481,42 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
 
     return exclusion_set, val_exclusion_set, num_0,num_1
 
+#Merging data from the full dataset 
+def merge_properties_from_full_dataset_PD(exp_params, csv_data, properties_to_add, verbose=True):
+    if 'full_dataset' not in exp_params:
+        raise ValueError("The 'full_dataset' key is missing in exp_params. Specify it to load properties from that dataset.")
+    full_dataset_path = exp_params['full_dataset']
+    full_df = pd.read_csv(full_dataset_path)
+
+    if csv_data is None:
+        csv_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+    
+    if verbose:
+        print("Lenght before merging:", len(csv_data))  
+    # Extract ident_projet from "{ident_projet}_XXXX" by stripping the trailing suffix
+    csv_data['_ident_projet'] = csv_data['unique_id'].str.rsplit('_', n=1).str[0]
+
+    # Merge in the desired columns
+    csv_data = csv_data.merge(
+        full_df[['ident_projet'] + properties_to_add],
+        left_on='_ident_projet',
+        right_on='ident_projet',
+        how='left'
+    )
+
+    # Clean up helper columns
+    csv_data = csv_data.drop(columns=['_ident_projet'])
+    if 'ident_projet' not in csv_data.columns:  # only drop if merge created a duplicate
+        pass
+    else:
+        csv_data = csv_data.drop(columns=['ident_projet'])
+    
+    if verbose:
+        print("Lenght after merging:", len(csv_data))  
+        print("#" * 50)
+    
+    return csv_data
+
 #Loading the grid_file data
 def pre_load_grid_data(h5_filepath,csv_data):
     '''

@@ -29,7 +29,7 @@ from collections import defaultdict
 import torch.nn.functional as F
 import pickle
 
-from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD
+from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD, merge_properties_from_full_dataset_PD
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms
 from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD_with_meta, debug_images_PD
@@ -37,6 +37,8 @@ from src.utils.visualization import debug_images_dataset, save_img_with_info_vie
 params = {
     'selected_problem': "PD",#"PD", # "handedness"
     'pre_filter_csv': True,
+    'integrate_csv': True,
+    'columns_to_add': ['rempli_seulq12'],
 
     "data_modality": ['digit_full','digit_crop']+['digit' for _ in range(2)]+
     ['text_full']+['text' for _ in range(2)]+['X_crop'], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
@@ -93,6 +95,7 @@ elif params['selected_problem'] == "PD":
 
     #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
     params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_8_7_26.parquet"
+    params['full_dataset'] = "/home/a_morelli/datasets/id_lists/final_table_with_all_info_8_7_26.csv"
 
     #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
     data_folder = "final_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
@@ -119,6 +122,11 @@ def main(run_random_samples_from_loader=True, run_study_loader = False, show_gri
         pre_filtered_csv = run_pre_filtering()
     else:
         pre_filtered_csv = None
+    
+    if params['integrate_csv']:
+        #integrate the csv with the original csv with all the information
+        pre_filtered_csv = merge_properties_from_full_dataset_PD(params,pre_filtered_csv, params['columns_to_add'], verbose=VERBOSE)
+    
     if run_random_samples_from_loader:
         random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, 
                                        mean=mean, std=std, no_text=True, pre_filtered_csv=pre_filtered_csv)
@@ -381,11 +389,16 @@ def dataset_overview(loader, num_modalities=None, num_classes=None, max_batches=
 #########################################################################
 
 ####### Filtering functions ###############
-def run_pre_filtering(params, subgroup='all'):
+def run_pre_filtering(params, subgroup='all',verbose = True):
     if params['selected_problem'] == "PD":
         pre_filtered_csv = pd.load_parquet(params['list_of_ids_paths']) 
+        if verbose:
+            print(f"Initial number of samples in the dataset: {len(pre_filtered_csv)}")
         if subgroup == 'cases':
             pre_filtered_csv = pre_filtered_csv[pre_filtered_csv['diag_park_final1_quest'] == 1]
+        if verbose:
+            print(f"Number of samples after filtering for subgroup '{subgroup}': {len(pre_filtered_csv)}")
+            print("#"*50)
     else:
         raise ValueError(f"Filtering not available for selected_problem: {params['selected_problem']}")
     
