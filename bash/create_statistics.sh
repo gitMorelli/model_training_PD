@@ -4,9 +4,9 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=16              # Number of CPU cores per task
-#SBATCH --mem=48G                      # Job memory request
-#SBATCH --time=03:00:00                # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=8              # Number of CPU cores per task
+#SBATCH --mem=24G                      # Job memory request
+#SBATCH --time=00:30:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
 #--partition=visuq,gpgpuq
 #--gres=gpu:1
@@ -34,4 +34,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.debug.create_statistics_on_images \
-    --num_workers 14
+    --num_workers 6

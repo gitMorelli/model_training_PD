@@ -44,7 +44,7 @@ import src.debug.debug_utils.pd_training_data_analysis as pd_train_analysis
 
 metadata = {
     "experiment": "PD", #'handedness', 'pd'
-    "show_preview": True,
+    "show_preview": False,
     "analyze_training_data": True,
     'analyze_statistics_data': True,
 
@@ -106,7 +106,10 @@ def main(metadata):
     #merge data from other tables
     #statistics_df = merge_dfs(matching_ids_df, statistics_df, predictions_df) 
     if metadata['analyze_statistics_data']:
-        merge_statistics_with_training_data(training_data, statistics_df)
+        merged_df=merge_statistics_with_training_data(training_data, statistics_df)
+        merged_df=merged_df[merged_df['split'].isin(['train','val'])]  # keep only train and val splits
+        if metadata['experiment'] == "PD":
+            run_pd_statistics_data_analysis(merged_df,out_path=OUT_PATH)
     
     '''
     if save_file:
@@ -403,6 +406,14 @@ def run_pd_training_data_analysis(training_data,out_path):
     r.add("case_dt missing", pd_train_analysis.case_dt_missing(p))        # registered property -> report
 
     r.write(os.path.join(out_path,'training_data_analysis.txt'))
+
+def run_pd_statistics_data_analysis(merged_df,out_path):
+    r = pd_train_analysis.Report("statistics analysis")
+
+    p = pd_train_analysis.Profiler(merged_df)                       # df with the merged columns
+    pd_train_analysis.discover_period_metrics(p)             
+    pd_train_analysis.register_discovered_metrics(p)         # auto-creates a MetricSpec for each new family
+    pd_train_analysis.save_metric_figures(p, "ink_density", outdir=os.path.join(out_path,'ink_density_figures'))   # grid + ridgeline + summary + missing
 
 ######## Preview ################
 def preview_dataframes(

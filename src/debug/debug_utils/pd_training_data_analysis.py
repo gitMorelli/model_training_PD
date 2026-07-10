@@ -1,6 +1,7 @@
 from functools import cached_property
 import pandas as pd
 import numpy as np
+import os
 
 ####### Analyze PD data #########
 N_PERIODS = 13
@@ -416,81 +417,133 @@ class Report:
 
 # ----------- Figures --------------------------
 
-# ---- q_num distribution figures -------------------------------------------
+# ---- generic per-period / per-modality metric figures ---------------------
+# Columns shaped  q_{i}_{infix}_{modality}  (e.g. q_3_num_X, q_3_ink_density_original).
+# Register a MetricSpec (or auto-discover) for any such family; one engine plots them all.
 # Plotting deps are imported lazily so the core toolkit stays importable without them.
+from dataclasses import dataclass
+ 
 MODE_COLORS = {"X": "#4C72B0", "text": "#DD8452", "digit": "#55A868"}
+_PALETTE = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3",
+            "#937860", "#DA8BC3", "#8C8C8C", "#CCB974", "#64B5CD"]
  
-def _qvals(df, i, mode):
-    v = pd.to_numeric(df[f"q_{i}_num_{mode}"], errors="coerce").to_numpy()
+@dataclass
+class MetricSpec:
+    name: str                    # short id used for titles + output filenames
+    infix: str                   # column infix, e.g. "num", "ink_density", "sharpness"
+    modalities: tuple            # suffixes present, e.g. ("X","text","digit") or ("original",)
+    neg_is_missing: bool = False  # per-column convention: treat negatives as sentinel-missing
+    unit: str = "value"          # x-axis label used on the ridgeline
+    def col(self, i, modality):
+        return f"q_{i}_{self.infix}_{modality}"
+ 
+METRIC_SPECS = {}
+def register_metric(spec):
+    """Add/replace a MetricSpec in the registry; returns it."""
+    METRIC_SPECS[spec.name] = spec
+    return spec
+ 
+# the original q_num family is now just one spec
+register_metric(MetricSpec("num", "num", tuple(MODES), neg_is_missing=True, unit="count"))
+ 
+def _spec(spec):
+    return spec if isinstance(spec, MetricSpec) else METRIC_SPECS[spec]
+ 
+def discover_period_metrics(p):
+    """Scan columns shaped q_{i}_{infix}_{modality} -> {infix: [modalities]}.
+    Splits on the LAST underscore, so it assumes modality names have no underscore
+    (the infix may, e.g. 'ink_density'). Use it to see what's present, or to auto-register."""
+    import re, collections
+    rx = re.compile(r"^q_\d+_(.+)$")
+    found = collections.defaultdict(set)
+    for c in p.df.columns:
+        m = rx.match(c)
+        if not m:
+            continue
+        infix, _, modality = m.group(1).rpartition("_")
+        if infix:
+            found[infix].add(modality)
+    return {k: sorted(v) for k, v in sorted(found.items())}
+ 
+def register_discovered_metrics(p, neg_is_missing=True, only=None, exclude=("num",)):
+    """Auto-register a MetricSpec for every discovered q_{i}_{infix}_{modality} family.
+    `only`: restrict to these infixes; `exclude`: skip these. Returns the names registered.
+    Tune spec.neg_is_missing afterwards for any column whose convention differs."""
+    names = []
+    for infix, mods in discover_period_metrics(p).items():
+        if infix in (exclude or ()) or (only and infix not in only):
+            continue
+        register_metric(MetricSpec(infix, infix, tuple(mods), neg_is_missing=neg_is_missing))
+        names.append(infix)
+    return names
+ 
+def _mvals(df, spec, i, modality):
+    col = spec.col(i, modality)
+    if col not in df.columns:
+        return np.array([])
+    v = pd.to_numeric(df[col], errors="coerce").to_numpy()
     v = v[~np.isnan(v)]
-    return v[v >= 0]  # negatives are sentinel missing values -> exclude
+    return v[v >= 0] if spec.neg_is_missing else v
  
-def _qcounts(df, i, mode):
-    """Present / sentinel-negative / NaN breakdown for one (period, mode) cell."""
-    raw = pd.to_numeric(df[f"q_{i}_num_{mode}"], errors="coerce")
-    return {"n_rows": int(len(raw)),
-            "present": int((raw >= 0).sum()),
-            "negative": int((raw < 0).sum()),   # sentinel missing
-            "nan": int(raw.isna().sum())}       # not collected / non-numeric
+def _mcounts(df, spec, i, modality):
+    col = spec.col(i, modality)
+    if col not in df.columns:
+        return {"exists": False, "present": 0, "negative": 0, "nan": 0}
+    raw = pd.to_numeric(df[col], errors="coerce")
+    present = int((raw >= 0).sum()) if spec.neg_is_missing else int(raw.notna().sum())
+    return {"exists": True, "present": present,
+            "negative": int((raw < 0).sum()), "nan": int(raw.isna().sum())}
  
-def q_num_missing_summary(p, n_periods=N_PERIODS, modes=MODES):
-    """Summary of missing q_num values. Separates sentinel-negatives (collected but
-    missing) from NaN (not collected). Returns per-mode totals and, for negatives,
-    a per-period breakdown so you can see where sentinels concentrate."""
-    df = p.df
-    by_mode, neg_by_period = {}, {}
-    tot_neg = tot_nan = tot_present = 0
-    for m in modes:
-        pres = neg = nan = 0
-        per_period = {}
+def metric_missing_summary(p, spec, n_periods=N_PERIODS):
+    """Missing summary for a metric family: sentinel-negatives vs NaN, per modality."""
+    spec = _spec(spec); df = p.df
+    by_mod, neg_by_period = {}, {}
+    tot_present = tot_neg = tot_nan = 0
+    for m in spec.modalities:
+        pres = neg = nan = 0; per_period = {}
         for i in range(1, n_periods + 1):
-            c = _qcounts(df, i, m)
+            c = _mcounts(df, spec, i, m)
             pres += c["present"]; neg += c["negative"]; nan += c["nan"]
             if c["negative"]:
                 per_period[i] = c["negative"]
-        by_mode[m] = {"present": pres, "negative": neg, "nan": nan}
+        by_mod[m] = {"present": pres, "negative": neg, "nan": nan}
         neg_by_period[m] = per_period
         tot_present += pres; tot_neg += neg; tot_nan += nan
-    return {
-        "n_present_total": tot_present,
-        "n_negative_total": tot_neg,   # excluded as sentinel-missing
-        "n_nan_total": tot_nan,
-        "by_mode": by_mode,
-        "negative_by_period": neg_by_period,
-    }
+    return {"metric": spec.name, "neg_is_missing": spec.neg_is_missing,
+            "n_present_total": tot_present, "n_negative_total": tot_neg,
+            "n_nan_total": tot_nan, "by_modality": by_mod,
+            "negative_by_period": neg_by_period}
  
-@prop()
-def q_num_missing(p):
-    """Registry entry: missing (sentinel-negative / NaN) summary for q_num columns."""
-    return q_num_missing_summary(p)
- 
-def plot_q_num_grid(p, path, n_periods=N_PERIODS, modes=MODES, bins=15,
-                    density=True, stat="median", dpi=300):
-    """Requested grid: rows = period i, columns = mode. Each subplot is on its OWN
-    x/y scale (auto-fit to that cell's data) so individual panels are easy to inspect.
-    Annotates n (present), miss (sentinel-negatives excluded), and the median."""
+def plot_metric_grid(p, spec, path, n_periods=N_PERIODS, bins=15, density=True,
+                     stat="median", dpi=300):
+    """Grid of histograms: rows = period i, columns = modality, each on its OWN x/y scale.
+    Annotates n (present), miss (sentinel-negatives, if neg_is_missing), and the stat."""
+    spec = _spec(spec)
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    df = p.df
-    fig, axes = plt.subplots(n_periods, len(modes),
-                             figsize=(3.6 * len(modes), 1.55 * n_periods),
-                             squeeze=False)  # independent scales -> no sharex/sharey
+    df = p.df; mods = spec.modalities
+    fig, axes = plt.subplots(n_periods, len(mods),
+                             figsize=(3.6 * len(mods), 1.55 * n_periods), squeeze=False)
     for r, i in enumerate(range(1, n_periods + 1)):
-        for c, m in enumerate(modes):
+        for c, m in enumerate(mods):
             ax = axes[r][c]
-            v = _qvals(df, i, m)
-            miss = _qcounts(df, i, m)["negative"]
+            v = _mvals(df, spec, i, m); cnt = _mcounts(df, spec, i, m)
+            color = MODE_COLORS.get(m, _PALETTE[c % len(_PALETTE)])
             if v.size:
-                nb = min(bins, max(3, np.unique(v).size))  # own range, sane bin count
-                ax.hist(v, bins=nb, density=density, color=MODE_COLORS.get(m, "#888"),
+                nb = min(bins, max(3, np.unique(v).size))
+                ax.hist(v, bins=nb, density=density, color=color,
                         alpha=0.85, edgecolor="white", linewidth=0.3)
                 s = np.median(v) if stat == "median" else np.mean(v)
                 ax.axvline(s, color="crimson", lw=1.2)
-                ax.text(0.96, 0.92, f"n={v.size}  miss={miss}\n{stat[:3]}={s:.1f}",
-                        transform=ax.transAxes, ha="right", va="top", fontsize=7, color="#333")
+                lab = f"n={v.size}" + (f"  miss={cnt['negative']}" if spec.neg_is_missing else "")
+                ax.text(0.96, 0.92, lab + f"\n{stat[:3]}={s:.1f}", transform=ax.transAxes,
+                        ha="right", va="top", fontsize=7, color="#333")
             else:
-                ax.text(0.5, 0.5, f"no data\nmiss={miss}", transform=ax.transAxes,
-                        ha="center", va="center", fontsize=7, color="grey")
+                msg = ("no data" if cnt["exists"] else "col absent")
+                if spec.neg_is_missing and cnt["exists"]:
+                    msg += f"\nmiss={cnt['negative']}"
+                ax.text(0.5, 0.5, msg, transform=ax.transAxes, ha="center", va="center",
+                        fontsize=7, color="grey")
             if r == 0:
                 ax.set_title(m, fontsize=11, fontweight="bold")
             if c == 0:
@@ -499,94 +552,127 @@ def plot_q_num_grid(p, path, n_periods=N_PERIODS, modes=MODES, bins=15,
             ax.tick_params(labelsize=6, length=2)
             for sp in ("top", "right"):
                 ax.spines[sp].set_visible(False)
-    fig.suptitle("Distribution of q_{i}_num_{mode}   (independent scales; red line = " + stat + ")",
-                 fontsize=13, y=1.001)
+    fig.suptitle(f"Distribution of q_{{i}}_{spec.infix}_{{modality}}   "
+                 f"(independent scales; red line = {stat})", fontsize=13, y=1.001)
     fig.tight_layout(h_pad=0.5, w_pad=0.6)
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return path
  
-def plot_q_num_ridgeline(p, path, n_periods=N_PERIODS, modes=MODES):
-    """Comparison view: KDE ridgeline per mode, periods stacked top(q1)->bottom(q13),
-    colored by period. Best for seeing how a mode's distribution shifts over time."""
+def plot_metric_ridgeline(p, spec, path, n_periods=N_PERIODS, dpi=160):
+    """KDE ridgeline per modality, periods stacked top(q1)->bottom(q13), colored by period."""
+    spec = _spec(spec)
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib import cm
     from scipy.stats import gaussian_kde
-    df = p.df
-    fig, axes = plt.subplots(1, len(modes), figsize=(4.2 * len(modes), 6.5), squeeze=False)
+    df = p.df; mods = spec.modalities
+    fig, axes = plt.subplots(1, len(mods), figsize=(4.2 * len(mods), 6.5), squeeze=False)
     cmap = cm.viridis
-    for c, m in enumerate(modes):
+    for c, m in enumerate(mods):
         ax = axes[0][c]
-        allv = np.concatenate([_qvals(df, i, m) for i in range(1, n_periods + 1)]
+        allv = np.concatenate([_mvals(df, spec, i, m) for i in range(1, n_periods + 1)]
                               or [np.array([0.0])])
         if allv.size < 2:
-            ax.text(0.5, 0.5, "no data", ha="center"); continue
-        xs = np.linspace(allv.min(), allv.max(), 200)
-        offset = 0.9
+            ax.text(0.5, 0.5, "no data", ha="center"); ax.set_title(m); ax.set_yticks([]); continue
+        xs = np.linspace(allv.min(), allv.max(), 200); off = 0.9
         for r, i in enumerate(range(1, n_periods + 1)):
-            v = _qvals(df, i, m)
-            base = (n_periods - r) * offset
+            v = _mvals(df, spec, i, m); base = (n_periods - r) * off
             if v.size > 2 and np.ptp(v) > 0:
                 try:
-                    dens = gaussian_kde(v)(xs)
-                    dens = dens / dens.max() * (offset * 1.6)
-                    ax.fill_between(xs, base, base + dens, color=cmap(r / (n_periods - 1)),
+                    d = gaussian_kde(v)(xs); d = d / d.max() * (off * 1.6)
+                    ax.fill_between(xs, base, base + d, color=cmap(r / (n_periods - 1)),
                                     alpha=0.75, lw=0.8, edgecolor="white")
                 except Exception:
                     pass
             ax.text(allv.min(), base, f"q{i}", va="bottom", ha="right", fontsize=7)
-        ax.set_title(m, fontsize=11, fontweight="bold")
-        ax.set_yticks([]); ax.set_xlabel("count")
+        ax.set_title(m, fontsize=11, fontweight="bold"); ax.set_yticks([]); ax.set_xlabel(spec.unit)
         for sp in ("top", "right", "left"):
             ax.spines[sp].set_visible(False)
-    fig.suptitle("q_num distribution shift across periods (KDE ridgeline; top=q1 -> bottom=q13)",
+    fig.suptitle(f"{spec.name} distribution across periods (KDE ridgeline; top=q1 -> bottom=q13)",
                  fontsize=12)
-    fig.tight_layout()
-    fig.savefig(path, dpi=130, bbox_inches="tight")
-    plt.close(fig)
-    return path
- 
-def plot_q_num_summary(p, path, n_periods=N_PERIODS, modes=MODES, dpi=200):
-    """Comparison view: compact heatmaps of median / mean / %zero / n / n miss over
-    period x mode. The n panel exposes sample-size decay; n miss shows where
-    sentinel-negative values concentrate."""
-    import matplotlib; matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    df = p.df
-    labels = ["median", "mean", "% zero", "n", "n miss"]
-    fig, axes = plt.subplots(1, len(labels), figsize=(3.0 * len(labels), 5.2), squeeze=False)
-    for a, label in zip(axes[0], labels):
-        M = np.full((n_periods, len(modes)), np.nan)
-        for r, i in enumerate(range(1, n_periods + 1)):
-            for c, m in enumerate(modes):
-                v = _qvals(df, i, m)
-                if label == "n miss":
-                    M[r, c] = _qcounts(df, i, m)["negative"]
-                elif v.size:
-                    M[r, c] = {"median": np.median(v), "mean": np.mean(v),
-                               "% zero": 100 * np.mean(v == 0), "n": v.size}[label]
-        im = a.imshow(M, aspect="auto", cmap="magma")
-        a.set_xticks(range(len(modes))); a.set_xticklabels(modes, fontsize=9)
-        a.set_yticks(range(n_periods))
-        a.set_yticklabels([f"q{i}" for i in range(1, n_periods + 1)], fontsize=7)
-        a.set_title(label, fontsize=10, fontweight="bold")
-        for r in range(n_periods):
-            for c in range(len(modes)):
-                if not np.isnan(M[r, c]):
-                    a.text(c, r, f"{M[r, c]:.0f}" if label in ("n", "n miss") else f"{M[r, c]:.1f}",
-                           ha="center", va="center", fontsize=6,
-                           color="white" if im.norm(M[r, c]) < 0.6 else "black")
-        fig.colorbar(im, ax=a, fraction=0.046, pad=0.04)
-    fig.suptitle("q_num summary by period x mode", fontsize=12)
     fig.tight_layout()
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return path
  
+def plot_metric_summary(p, spec, path, n_periods=N_PERIODS, dpi=200):
+    """Compact heatmaps of median / mean / %zero / n (+ n miss if neg_is_missing)
+    over period x modality."""
+    spec = _spec(spec)
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    df = p.df; mods = spec.modalities
+    labels = ["median", "mean", "% zero", "n"] + (["n miss"] if spec.neg_is_missing else [])
+    fig, axes = plt.subplots(1, len(labels), figsize=(3.0 * len(labels), 5.2), squeeze=False)
+    for a, label in zip(axes[0], labels):
+        M = np.full((n_periods, len(mods)), np.nan)
+        for r, i in enumerate(range(1, n_periods + 1)):
+            for c, m in enumerate(mods):
+                v = _mvals(df, spec, i, m)
+                if label == "n miss":
+                    M[r, c] = _mcounts(df, spec, i, m)["negative"]
+                elif label == "n":
+                    M[r, c] = v.size
+                elif v.size:
+                    M[r, c] = {"median": np.median(v), "mean": np.mean(v),
+                               "% zero": 100 * np.mean(v == 0)}[label]
+        im = a.imshow(M, aspect="auto", cmap="magma")
+        a.set_xticks(range(len(mods)))
+        a.set_xticklabels(mods, fontsize=8, rotation=30, ha="right")
+        a.set_yticks(range(n_periods))
+        a.set_yticklabels([f"q{i}" for i in range(1, n_periods + 1)], fontsize=7)
+        a.set_title(label, fontsize=10, fontweight="bold")
+        for r in range(n_periods):
+            for c in range(len(mods)):
+                if not np.isnan(M[r, c]):
+                    a.text(c, r, f"{M[r, c]:.0f}" if label in ("n", "n miss") else f"{M[r, c]:.1f}",
+                           ha="center", va="center", fontsize=6,
+                           color="white" if im.norm(M[r, c]) < 0.6 else "black")
+        fig.colorbar(im, ax=a, fraction=0.046, pad=0.04)
+    fig.suptitle(f"{spec.name} summary by period x modality", fontsize=12)
+    fig.tight_layout()
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    return path
+ 
+def save_metric_figures(p, spec, outdir="."):
+    """Save all three figures for a metric spec; returns {'paths': [...], 'missing': {...}}."""
+    os.makedirs(outdir, exist_ok=True)
+    spec = _spec(spec)
+    paths = [
+        plot_metric_grid(p, spec, os.path.join(outdir, f"{spec.name}_hist_grid.png")),
+        plot_metric_ridgeline(p, spec, os.path.join(outdir, f"{spec.name}_ridgeline.png")),
+        plot_metric_summary(p, spec, os.path.join(outdir, f"{spec.name}_summary.png")),
+    ]
+    return {"paths": paths, "missing": metric_missing_summary(p, spec)}
+ 
+# ---- backward-compatible q_num wrappers (num is just a MetricSpec now) ------
+def _qvals(df, i, mode):
+    return _mvals(df, METRIC_SPECS["num"], i, mode)
+ 
+def _qcounts(df, i, mode):
+    return _mcounts(df, METRIC_SPECS["num"], i, mode)
+ 
+def q_num_missing_summary(p, n_periods=N_PERIODS, modes=MODES):
+    return metric_missing_summary(p, METRIC_SPECS["num"], n_periods)
+ 
+@prop()
+def q_num_missing(p):
+    """Registry entry: missing (sentinel-negative / NaN) summary for q_num columns."""
+    return q_num_missing_summary(p)
+ 
+def plot_q_num_grid(p, path, n_periods=N_PERIODS, bins=15, density=True, stat="median", dpi=300):
+    return plot_metric_grid(p, METRIC_SPECS["num"], path, n_periods, bins, density, stat, dpi)
+ 
+def plot_q_num_ridgeline(p, path, n_periods=N_PERIODS, dpi=160):
+    return plot_metric_ridgeline(p, METRIC_SPECS["num"], path, n_periods, dpi)
+ 
+def plot_q_num_summary(p, path, n_periods=N_PERIODS, dpi=200):
+    return plot_metric_summary(p, METRIC_SPECS["num"], path, n_periods, dpi)
+ 
 def save_q_num_figures(p, outdir="."):
-    """Save all three q_num figures and return {'paths': [...], 'missing': {...}}."""
-    import os
+    os.makedirs(outdir, exist_ok=True)
     paths = [
         plot_q_num_grid(p, os.path.join(outdir, "q_num_hist_grid.png")),
         plot_q_num_ridgeline(p, os.path.join(outdir, "q_num_ridgeline.png")),
@@ -745,7 +831,6 @@ def plot_case_dt_summary(p, path, n_periods=N_PERIODS, dpi=200):
  
 def save_case_dt_figures(p, outdir="."):
     """Save all three case_dt figures and return {'paths': [...], 'missing': {...}}."""
-    import os
     os.makedirs(outdir, exist_ok=True)
     paths = [
         plot_case_dt_grid(p, os.path.join(outdir, "case_dt_hist_grid.png")),

@@ -231,7 +231,7 @@ def create_row(qs,sid, smodalities, smeta):
             if 'original' in modality:
                 row[f'q_{q}_width_{modality}'] = meta['width']
                 row[f'q_{q}_height_{modality}'] = meta['height']
-            row[f'q_{q}_ink_density_{modality}'] = meta['ink_density']
+            row[f'q_{q}_InkDensity_{modality}'] = meta['ink_density'] #don't use underscores for the property name
             row[f'q_{q}_sharpness_{map_modality(modality)}'] = meta['sharpness']
             #row[f'q_{q}_imputed_{modality}'] = meta['imputed'] #never imputed for any questionnaire -> irrelevant
     return row
