@@ -22,7 +22,7 @@ import sys
 from functools import partial
 import pickle
 
-from src.utils.image_processing import get_augmentation_transform
+from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image
 
 #Datasets and dataloaders for speed tests
 class InMemoryWdsDataset(torch.utils.data.Dataset):
@@ -383,8 +383,10 @@ def create_flattener_handedness_multiview(transform_func,augmentation_transform,
                                         img_view = augmentation_transform(img)
                                     else:
                                         raise Exception("Augmentation transform must be provided for multiview flattener to create different views.")
+                                    
                                     if invert_color:
                                         img_view = ImageOps.invert(img_view)
+                                    
                                     # Apply transformations
                                     if transform_func is not None:
                                         if huggingface_transform:
@@ -882,7 +884,7 @@ def create_sequence_flattener_PD_grid(transform_func, augmentation_transform, n_
 
 def create_sequence_flattener_PD_multiview(transform_func, augmentation_transform_list, n_views, modality_string_list, original_modality_names,
                                               exclusion_set, huggingface_transform=False, invert_color=False,
-                                              grid_dict=None, censor_time=0, filter_modality='number_random'):
+                                              grid_dict=None, censor_time=0, filter_modality='number_random', debug=False):
     all_modalities = ['hand', 'number_random', 'X']
     def flatten_samples(src):
         for sample in src:
@@ -955,21 +957,32 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                     #select the corresponding augmentation_transform using the mask
                     #print(augmentation_transform_list)
                     selected_transforms = [augmentation_transform_list[i] for i in mask] 
-                    selected_modality_names = [original_modality_names[i] for i in mask]
+                    selected_modality_names = [original_modality_names[i] for i in mask]  #contains the modality names written in the metadata
+                    #eg X_full, X, X_grid ..
                     raw_image_data = image_pool[X].get(current_mode.lower()) #in the dictionary i have converted the keys to lower
                     #-> hence i have to convet curren_mode to lower or i get a None
                     rescale_factor = questionnaire_info[str(X)]['rescale_factor']#if the image was rescaled i have to rescale the grid coordinates too
 
+                    imputed=False
                     if isinstance(raw_image_data, bytes):
                         img = Image.open(io.BytesIO(raw_image_data)).convert('RGB')
                     elif num <= 0 or raw_image_data is None: #if the modality is not present i create a blank image 
                         img = Image.new('RGB', (224,224), color=(255,255,255))
+                        imputed=True
                     else:
                         img = raw_image_data
+                    
+                    if debug:
+                        selected_transforms = ['original'] + selected_transforms
+                        selected_modality_names = [selected_modality_names[0].split('_')[0]+'_original'] + selected_modality_names #the modality name is the same 
+                        #for all samples in the current model
+                        #check if transform_func contains 'pil' if not raise an error
 
                     for i,augmentation_transform in enumerate(selected_transforms):
                         
-                        if isinstance(augmentation_transform,str) and augmentation_transform == 'grid':
+                        if isinstance(augmentation_transform,str) and augmentation_transform == 'original':
+                            img_view = img.copy()
+                        elif isinstance(augmentation_transform,str) and augmentation_transform == 'grid':
                             #select random crop
                             if num > 0:
                                 grid[0,:] = grid[0,:]*rescale_factor[0]
@@ -989,7 +1002,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                             #It should be a transform -> apply selected transform
                             img_view = augmentation_transform(img)
 
-                        if invert_color:
+                        if invert_color and not(debug):
                             img_view = ImageOps.invert(img_view)
 
                         if transform_func is not None:
@@ -1000,12 +1013,25 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                         else:
                             img_tensor = T.ToTensor()(img_view)
 
-                        list_of_views.append(img_tensor)
+                        if debug:
+                            #the img_tensor is actually a pil image and I generate a descriptive dictionary to save in place of the image
+                            if isinstance(augmentation_transform,str) and augmentation_transform == 'original':
+                                metadata = debug_image_properties(img_view)
+                            else:
+                                metadata = debug_image_properties(img_tensor)
+                            metadata['selected_transform'] = selected_transforms[i]
+                            metadata['imputed'] = imputed
+                            list_of_views.append(metadata)
+                        else:
+                            list_of_views.append(img_tensor)
                         list_of_modality_names.append(selected_modality_names[i])
 
                 if len(list_of_views) == 0: #eg if i have only digit related modalities but num=0 i have to skip and i have no data
                     continue
-                frames.append(torch.stack(list_of_views, dim=0))   # (n_views, C, H, W)
+                if debug:
+                    frames.append(list_of_views)   
+                else:
+                    frames.append(torch.stack(list_of_views, dim=0))   # (n_views, C, H, W)
                 questionnaires.append(X)
                 resized_list.append(rescale_factor)  # or to_rescale if you want True/False
                 modalities.append(list_of_modality_names)
@@ -1014,37 +1040,59 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
             if not frames:
                 continue
 
-            sequence = torch.stack(frames, dim=0)   # (T_i, n_views, C, H, W)
-            yield sequence, label, subject_id, questionnaires, modalities, resized_list
+            #assert all_arrays(frames), "Not all elements are numpy arrays 0"
+            #assert debug , "Debug is false!"
+                
+            if debug:
+                yield frames,label, subject_id, questionnaires, modalities, resized_list
+            else:
+                sequence = torch.stack(frames, dim=0)   # (T_i, n_views, C, H, W)
+                yield sequence, label, subject_id, questionnaires, modalities, resized_list
 
     return flatten_samples
 
+def all_arrays(obj):
+    if isinstance(obj, list):
+        return all(all_arrays(x) for x in obj)
+    return isinstance(obj, np.ndarray)
 
-def collate_variable_sequences_PD(samples, questionnaire_to_slot=None):
+def collate_variable_sequences_PD(samples, questionnaire_to_slot=None, debug=False):
     sequences      = [s[0] for s in samples]               # each (T_i, k, C, H, W)
+    #if debug=True -> [[data subj 1], [data subj 2], [data subj 3]] 
+    # [data subj 1] = [[data q1], [data q2], [data q3], ...] 
+    # [data q1] = [{data modality 1}, {data modality 2}, ...]
     labels         = torch.stack([s[1] for s in samples])
     subject_ids    = [s[2] for s in samples]               # list of strings
     questionnaires = [s[3] for s in samples]               # list of lists of "3", "5", ...
     modalities_list    = [s[4] for s in samples]               # list of lists of modalities (for each timestp i have the list of modalities for each view)
     resized_list    = [s[5] for s in samples]               # list of lists of rescale factor
 
-    frames  = torch.cat(sequences, dim=0)                  # (sum T_i, k, C, H, W)
-    lengths = torch.tensor([seq.shape[0] for seq in sequences])
+    if debug:
+        lengths = torch.tensor([len(seq) for seq in sequences])
+        #assert all_arrays(sequences), "Not all elements are numpy arrays 1"
+    else:
+        lengths = torch.tensor([seq.shape[0] for seq in sequences])
 
     #if i have 2 ids the first with 7 questionnaires [1,3,4,6,7,8,10] and the second with 5 [..]
     #-> seq_ids will be 0 for the first 7 and 1 for the next 5
     #-> slot_ids will be [0,2,3,5,6,7,9] for the first ...
     seq_ids, slot_ids = [], []
     resized,modalities = [],[]
+    if debug:
+        frames = []
+    else:
+        frames  = torch.cat(sequences, dim=0)                  # (sum T_i, k, C, H, W)
     for b, qs in enumerate(questionnaires):
         for i,q in enumerate(qs):
             seq_ids.append(b)
-            slot = questionnaire_to_slot[q] if questionnaire_to_slot else int(q) - 1
+            slot = int(q) - 1 #hence slot_ids goes from 0 to 12
             slot_ids.append(slot)
             resized.append(resized_list[b][i]) #append the rescale factor for this questionnaire
             modalities.append(modalities_list[b][i]) #append the list of modalities for this questionnaire
+            if debug:
+                frames.append(sequences[b][i])
 
-    return (frames,
+    return (frames, #frames is a list of dict if debug==True
             torch.tensor(seq_ids),
             torch.tensor(slot_ids),
             lengths,
@@ -1055,7 +1103,7 @@ def collate_variable_sequences_PD(samples, questionnaire_to_slot=None):
 
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
                        huggingface_transform=False,augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None,
-                       censor_time=0, filter_modality='digit'):
+                       censor_time=0, filter_modality='digit', debug=False):
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
@@ -1101,9 +1149,9 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                 .compose(create_sequence_flattener_PD_multiview(transform,augmentation_transform, n_views=n_views ,modality_string_list=modality_string,
                                                     exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
                                                     grid_dict=grid_dict, censor_time=censor_time, 
-                                                    original_modality_names=modality, filter_modality=filter_modality)) # This replaces .map() and .select()
+                                                    original_modality_names=modality, filter_modality=filter_modality, debug=debug)) # This replaces .map() and .select()
                 .batched(batch_size,
-                        collation_fn=partial(collate_variable_sequences_PD, questionnaire_to_slot=None),
+                        collation_fn=partial(collate_variable_sequences_PD, questionnaire_to_slot=None, debug=debug),
                         partial=False)
             )
     else:
@@ -1122,11 +1170,11 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
     train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, split_workers=True, batch_size=exp_params['batch_size'], transform=transform, exclusion_set=exclusion_set, modality=exp_params['data_modality'],
                        huggingface_transform=exp_params['huggingface_transform'],augmentation_transform=augmentation_transform, 
                        invert_color=exp_params['invert_color'],n_views=exp_params['num_tiles'], grid_dict = grid_dict, 
-                       censor_time=exp_params['censor_time'], filter_modality=exp_params['filter_modality'])
+                       censor_time=exp_params['censor_time'], filter_modality=exp_params['filter_modality'], debug=exp_params.get('debug', False))
     val_dataset = prepare_PD_dataset(SHARD_PATTERN_val, split_workers=True, batch_size=exp_params['batch_size'], transform=transform, exclusion_set=val_exclusion_set, modality=exp_params['data_modality'],
                        huggingface_transform=exp_params['huggingface_transform'],augmentation_transform=augmentation_transform, 
                        invert_color=exp_params['invert_color'],n_views=exp_params['num_tiles'], grid_dict = grid_dict,
-                       censor_time=exp_params['censor_time'], filter_modality=exp_params['filter_modality'])
+                       censor_time=exp_params['censor_time'], filter_modality=exp_params['filter_modality'], debug=exp_params.get('debug', False))
     
     train_loader = DataLoader(
         train_dataset, 
@@ -1134,7 +1182,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         batch_size=None, 
         prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
         pin_memory=True
-    )
+    ) #add collate_fn=lambda x: x,  if you want to bypass thedefault converter (default converter converts numpy to tensors)
     val_loader = DataLoader(
         val_dataset, 
         num_workers=worker, 
@@ -1146,6 +1194,33 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
 ####################################################################################################################
 
 # Functions and datasets for extracting debug information
+
+def debug_image_properties(img_source):
+    #compute mean intensity
+    img = img_source.convert('L') #convert to grayscale
+    arr=np.array(img)
+    #i convert to float to avoid the values baing converted to torch tensors via the default_collate in the data loader
+    
+    #compute ink density
+    threshold = 128                                # pixels darker than this = ink
+    
+
+    img_properties = {
+        'format': img_source.format, #img format theimage was loaded from
+        'num_channels_original': len(img_source.getbands()), #number of channels in the original image before conversion
+        'mode': img_source.mode, #the color mode (e.g., RGB, RGBA, L)
+        'size': img.size, #width, height
+        'width': img.size[0],
+        'height': img.size[1],
+        #'area': img.size[0] * img.size[1],
+        #'ratio': img.size[0] / img.size[1] if img.size[1] != 0 else None, #aspect ratio
+        'ink_density': ink_density(arr,threshold), #fraction of pixels that are ink (binary threshold)
+        'sharpness': sharpness(arr), #sharpness of the image
+        'is_uniform': is_uniform_image(img_source, tol=3)
+    }
+    return img_properties
+
+
 def explore_data(shard_pattern, load_in_memory=False, 
                                split_workers=True, batch_size=4):
     def create_df():
@@ -1363,10 +1438,10 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col=''):
         print("Class distribution in the training set:\n", csv_data[csv_data['split'] == 'train'][class_col].value_counts())
         print('#' * 50)
 
-    if exp_params['balanced_data']:
-        exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train') 
-    if exp_params['balance_validation']:
-        val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val')
+    
+    exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train') 
+    val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val')
+    
     if verbose:
         print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
         print('#' * 50)

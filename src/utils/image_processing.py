@@ -4,6 +4,8 @@ import torchvision.transforms.functional as F
 from torchvision.transforms import InterpolationMode
 import torchvision.transforms as T
 import os
+from skimage.filters import threshold_otsu 
+from scipy import ndimage
 
 def convert_background_to_white(image):
     img = image.copy()
@@ -153,6 +155,14 @@ def get_transforms(exp_params, transform):
                     T.ToTensor(),
                 ]
             )
+    elif exp_params['custom_transform'] == 'pad_resize_pil':
+        #is the version of the above transform for debugging -> i don't convert to tensor
+        return T.Compose(
+                [
+                    PadToSquare(fill=0),
+                    T.Resize((exp_params['input_size'], exp_params['input_size'])),
+                ]
+            )
     elif exp_params['custom_transform'] == 'resize_normalize':
         return T.Compose(
                 [
@@ -223,4 +233,129 @@ def get_augmentation_transform(exp_params):
     else:
         print("Single data modality detected. Applying augmentation transform:", exp_params['apply_augmentation'])
         return get_single_augmentation_transform(exp_params['apply_augmentation'])
+
+
+# CHECK IMAGE PROPERTIES
+def is_uniform_image(img_source, tol=0):
+    """
+    Check whether an image is a single uniform color (e.g. a blank/white
+    imputed frame).
+
+    tol = 0  -> strictly uniform (all pixels identical)
+    tol > 0  -> uniform within tolerance (max - min <= tol per channel),
+                catches near-white scans, mild JPEG noise, etc.
+
+    Returns (is_uniform, is_white, fill_value).
+    """
+    arr = np.array(img_source)          # (H, W) for 'L', (H, W, C) for RGB/RGBA
+
+    if arr.size == 0:
+        return True, False, None
+
+    if arr.ndim == 2:                   # grayscale
+        lo, hi = int(arr.min()), int(arr.max())
+        uniform = (hi - lo) <= tol
+        value = int(round(arr.mean())) if uniform else None
+        is_white = uniform and value >= (255 - tol)
+    else:                               # multi-channel: check each channel
+        lo = arr.min(axis=(0, 1))
+        hi = arr.max(axis=(0, 1))
+        uniform = bool(np.all((hi - lo) <= tol))
+        value = tuple(int(round(v)) for v in arr.mean(axis=(0, 1))) if uniform else None
+        is_white = uniform and bool(np.all(lo >= (255 - tol)))
+
+    return bool(uniform), bool(is_white), value
+
+def ink_mask(arr, threshold=128):
+    """Boolean mask of ink pixels (darker than threshold)."""
+    return arr < threshold
+
+# --- blank / saturation ---
+def is_blank(arr, threshold=128):
+    """True if the image contains no ink pixels."""
+    return bool((arr < threshold).sum() == 0)
+def frac_pure_white(arr):
+    """Fraction of pixels at value 255."""
+    return float((arr == 255).mean())
+def frac_pure_black(arr):
+    """Fraction of pixels at value 0 (clipping/saturation)."""
+    return float((arr == 0).mean())
+
+# --- intensity ------
+def ink_density(arr, threshold=128):
+    ink_pixels = (arr < threshold).sum()
+    #get the type of ink_density_binary
+    #print(f"Type of ink_density_binary: {type(ink_density_binary)}")
+    ink_density_binary = float(ink_pixels / arr.size)   # fraction of inked pixels
+    return ink_density_binary
+# --- ink-only intensity (independent of coverage) ---
+def ink_intensity(arr, threshold=128):
+    """(mean, std) over ink pixels only; (nan, nan) if no ink."""
+    mask = arr < threshold
+    if not mask.any():
+        return float('nan'), float('nan')
+    vals = arr[mask]
+    return float(vals.mean()), float(vals.std())
+
+
+# --- contrast / faded-scan detection ---
+
+def dynamic_range(arr, low=1, high=99):
+    """Spread between the low and high percentiles."""
+    p_lo, p_hi = np.percentile(arr, [low, high])
+    return float(p_hi - p_lo)
+
+def otsu_threshold(arr):
+    """Otsu's natural split point; nan if skimage missing or flat image.
+    A fixed threshold of 128 silently breaks on faded or unevenly-lit scans. 
+    Add the dynamic range and Otsu's natural split point — if Otsu drifts far from 128, 
+    the image doesn't separate cleanly:"""
+    return float(threshold_otsu(arr))
+
+
+# --- digit geometry (bounding box of the ink) ---
+
+def ink_geometry(arr, threshold=128):
+    """
+    Bounding box + extent + normalized centroid of the ink.
+    Returns a dict; geometry fields are nan/0 when there is no ink.
+    """
+    H, W = arr.shape
+    mask = arr < threshold
+    ink_pixels = int(mask.sum())
+    if ink_pixels == 0:
+        return {'bbox_width': 0, 'bbox_height': 0, 'extent': float('nan'),
+                'centroid_x': float('nan'), 'centroid_y': float('nan')}
+    ys, xs = np.where(mask)
+    bbox_w = int(xs.max() - xs.min() + 1)
+    bbox_h = int(ys.max() - ys.min() + 1)
+    return {
+        'bbox_width':  bbox_w,
+        'bbox_height': bbox_h,
+        'extent':      float(ink_pixels / (bbox_w * bbox_h)),
+        'centroid_x':  float(xs.mean() / W),
+        'centroid_y':  float(ys.mean() / H),
+    }
+
+
+# --- blur / sharpness ---
+
+def sharpness(arr):
+    """Variance of the Laplacian; higher = sharper. 
+     Laplacian variance is the standard sharpness proxy — low values mean blurry:"""
+    return float(cv2.Laplacian(arr, cv2.CV_64F).var())
+
+
+# --- connected components (speckle / noise) ---
+
+def n_components(arr, threshold=128, min_size=0):
+    """
+    Count connected ink blobs. Optionally drop components smaller than
+    min_size pixels.
+    """
+    labels, n = ndimage.label(arr < threshold)
+    if min_size > 0 and n > 0:
+        sizes = ndimage.sum_labels(np.ones_like(labels), labels, range(1, n + 1))
+        n = int((sizes >= min_size).sum())
+    return int(n)
    

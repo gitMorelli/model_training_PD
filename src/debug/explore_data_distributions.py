@@ -44,8 +44,9 @@ import src.debug.debug_utils.pd_training_data_analysis as pd_train_analysis
 
 metadata = {
     "experiment": "PD", #'handedness', 'pd'
-    "show_preview": False,
+    "show_preview": True,
     "analyze_training_data": True,
+    'analyze_statistics_data': True,
 
     "run_validity_checks": True,
     "generate_num_statistics": False,
@@ -64,13 +65,11 @@ if metadata["experiment"] == "handedness":
     #MODEL_SPECIFIC_OUT_PATH = os.path.dirname(metadata['predictions_path'])
 elif metadata["experiment"] == "PD":
     metadata['training_set'] = "/home/a_morelli/datasets/id_lists/PD_training_set_8_7_26.parquet"
+    metadata['statistics_path'] = "/home/a_morelli/datasets/id_lists/statistics/statistics_PD_10072026.csv"
     OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/pd"
     #MODEL_SPECIFIC_OUT_PATH = os.path.dirname(metadata['predictions_path'])
 
 QUESTIONNAIRES = [str(q) for q in range(1,14)]
-
-
-
 
 def main(metadata):
     args = get_args()
@@ -102,11 +101,12 @@ def main(metadata):
         if metadata['experiment'] == "PD":
             run_pd_training_data_analysis(training_data,out_path=OUT_PATH)
         elif metadata['experiment'] == "handedness":
-            print("Handedness training data analysis has tobe re-implemented")
+            print("Handedness training data analysis has to be re-implemented")
 
     #merge data from other tables
     #statistics_df = merge_dfs(matching_ids_df, statistics_df, predictions_df) 
-    
+    if metadata['analyze_statistics_data']:
+        merge_statistics_with_training_data(training_data, statistics_df)
     
     '''
     if save_file:
@@ -340,6 +340,37 @@ def merge_dfs(matching_ids_df, statistics_df, predictions_df):
 
     return statistics_df
 
+######## Statistics analysis ######
+def merge_statistics_with_training_data(df1, df2):
+    # Merge training_data=df1 and statistics_df=df2 to get the split information
+    # 1. Check that the merge keys are unique in each table
+    assert df1["unique_id"].is_unique, "unique_id is NOT unique in df1"
+    assert df2["subject_id"].is_unique, "subject_id is NOT unique in df2"
+
+    # 2. Left merge to preserve ALL rows of df1
+    #    suffixes: keep df1's names clean, tag any overlapping df2 columns
+    merged = df1.merge(
+        df2,
+        left_on="unique_id",
+        right_on="subject_id",
+        how="left",
+        suffixes=("", "_df2"),
+    )
+
+    # 3. Check the shared 'split' column agrees where a match was found
+    #    (rows in df1 with no match in df2 will have NaN in the df2 columns)
+    matched = merged[merged["subject_id"].notna()]
+    mismatch = matched[matched["split"] != matched["split_df2"]]
+
+    if len(mismatch) > 0:
+        print(f"WARNING: 'split' disagrees on {len(mismatch)} rows:")
+        print(mismatch[["unique_id", "subject_id", "split", "split_df2"]])
+    else:
+        print("'split' agrees on all matched rows.")
+        # drop the redundant duplicate now that it's verified
+        merged = merged.drop(columns=["split_df2"])
+
+    return merged
 
 ######## Train analysis #########
 def run_pd_training_data_analysis(training_data,out_path):

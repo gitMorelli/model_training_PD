@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=eval_handedness
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics_handedness.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics_handedness.err
+#SBATCH --job-name=create_statistics
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/create_statistics.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=32              # Number of CPU cores per task
-#SBATCH --mem=64G                      # Job memory request
-#SBATCH --time=00:40:00                # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=16              # Number of CPU cores per task
+#SBATCH --mem=48G                      # Job memory request
+#SBATCH --time=03:00:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
 #--partition=visuq,gpgpuq
 #--gres=gpu:1
@@ -33,5 +33,5 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 
 cd $HOME_DIR
 # --- Execution ---
-$ENV_PYTHON -m src.debug.create_statistics_on_images_handedness \
-    --num_workers 30
+$ENV_PYTHON -m src.debug.create_statistics_on_images \
+    --num_workers 14
