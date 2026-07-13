@@ -767,6 +767,25 @@ class ModelPD(L.LightningModule):
                             self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
             self.write_log("-------------------------------------\n")
 
+#------ Loss functions ---------------
+def grouped_ce_loss(scores, labels, group_ids):
+    """scores (B,), labels (B,) with exactly one 1 per group, group_ids (B,) in 0..G-1.
+    Conditional logistic / within-group softmax NLL: mean over groups of
+    -score_case + logsumexp(scores in group)."""
+    G = int(group_ids.max().item()) + 1
+
+    # numerically stable logsumexp per group
+    m = torch.full((G,), float('-inf'), device=scores.device)
+    m = m.scatter_reduce(0, group_ids, scores, reduce='amax')
+    exp_sum = torch.zeros(G, device=scores.device).scatter_add(
+        0, group_ids, torch.exp(scores - m[group_ids]))
+    lse = m + exp_sum.log()                                   # (G,)
+
+    pos_score = torch.zeros(G, device=scores.device).scatter_add(
+        0, group_ids, scores * labels.float())                # (G,)
+
+    return (lse - pos_score).mean()
+
 #tracking experiments
 class BestMetricTracker(L.Callback):
     def __init__(self):

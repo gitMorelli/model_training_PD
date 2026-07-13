@@ -690,6 +690,7 @@ class SequenceClassifierHead(nn.Module):
         self.head = nn.Linear(d_model, n_classes)
 
     def forward(self, feats, N, k, seq_ids, slot_ids, lengths, return_view_attn=False):
+        # N total number of frames (can come from different subjects)
         # feats: (N*k, feat_dim) straight from the CNN
         x = self.proj(feats).view(N, k, -1)                 # (N, k, d_model)
 
@@ -702,6 +703,8 @@ class SequenceClassifierHead(nn.Module):
         D   = q_repr.size(-1)
         dev = q_repr.device
 
+        #these lines, for each subject, select the available timesteps and put them in a buffer of size (B, n_slots, D) with padding for missing slots
+        #-> they manage to transfmr a sum(T_i) x D tensor into a B x n_slots x D tensor, where T_i is the number of available slots for subject i
         buffer = q_repr.new_zeros(B, self.n_slots, D)
         buffer[seq_ids, slot_ids] = q_repr
         pad_mask = torch.ones(B, self.n_slots, dtype=torch.bool, device=dev)

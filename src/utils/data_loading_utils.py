@@ -756,9 +756,189 @@ def load_representations_handedness(output_path, as_dataframe=False, to_torch=Fa
     return metadata, reps_by_name
 ###################################################################################################################
 
-#Datasets and dataloaders for PD model
+############### Datasets and dataloaders for PD model ########################
+##############################################################################
 #change the exclusion criteria to use only the id, not id+questionnaire
 #modify to manage masked elements of the sequence (for control subjects they are masked i think, or maybe I have removed them, should check!)
+
+ALL_MODALITIES = ['hand', 'number_random', 'X']
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+def all_arrays(obj):
+    if isinstance(obj, list):
+        return all(all_arrays(x) for x in obj)
+    return isinstance(obj, np.ndarray)
+
+def _parse_sample_json(sample):
+    """Find and parse the JSON metadata blob in a webdataset sample."""
+    for key, value in sample.items():
+        if key.endswith("json"):
+            try:
+                json_str = value.decode('utf-8') if isinstance(value, bytes) else value
+                return json.loads(json_str)
+            except Exception as e:
+                print(f"Error parsing JSON for sample {key}: {e}")
+                return None
+    return None
+
+def _index_images(sample, grouped):
+    """Index images by q_number/modality (flat) or subject/q_number/modality (grouped).
+
+    Keys look like 'qX.modality.png' (flat) or 'subject.qX.modality.png' (grouped).
+    """
+    pool = {}
+    for key, value in sample.items():
+        if not key.endswith((".png", ".jpg", ".jpeg")):
+            continue
+        parts = key.split('.')
+        if grouped:
+            subj = parts[0]
+            q_num = int(parts[1][1:])
+            mod_name = parts[2].lower()
+            pool.setdefault(subj, {}).setdefault(q_num, {})[mod_name] = value
+        else:
+            q_num = int(parts[0][1:])
+            mod_name = parts[1].lower()
+            pool.setdefault(q_num, {})[mod_name] = value
+    return pool
+
+def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
+                                   modality_string_list, original_modality_names,
+                                   grid_dict, censor_time, filter_modality,
+                                   huggingface_transform, invert_color, debug):
+    """Return a function that builds the full sequence for one subject.
+
+    All the static configuration is captured in the closure, so the returned
+    builder only needs the per-subject data.
+    """
+
+    def build_questionnaire_views(X, images_for_q, original_id, questionnaire_info):
+        """Build the list of augmented views for one questionnaire."""
+        list_of_views = []
+        list_of_modality_names = []
+        # if the image was rescaled, the grid coordinates must be rescaled too
+        rescale_factor = questionnaire_info[str(X)]['rescale_factor']
+
+        for current_mode in ALL_MODALITIES:
+            num, grid = grid_dict[original_id]['q' + str(X)][current_mode]
+
+            # indexes of modality_string_list matching the current mode
+            mask = [j for j, m in enumerate(modality_string_list) if m == current_mode]
+            if len(mask) == 0:
+                continue
+            selected_transforms = [augmentation_transform_list[j] for j in mask]
+            selected_modality_names = [original_modality_names[j] for j in mask]
+
+            raw_image_data = images_for_q.get(current_mode.lower())
+
+            imputed = False
+            if isinstance(raw_image_data, bytes):
+                img = Image.open(io.BytesIO(raw_image_data)).convert('RGB')
+            elif num <= 0 or raw_image_data is None:
+                # modality not present -> impute a blank image
+                img = Image.new('RGB', (224, 224), color=(255, 255, 255))
+                imputed = True
+            else:
+                img = raw_image_data
+
+            if debug:
+                selected_transforms = ['original'] + selected_transforms
+                selected_modality_names = ([selected_modality_names[0].split('_')[0] + '_original']
+                                           + selected_modality_names)
+
+            for k, augmentation_transform in enumerate(selected_transforms):
+                if isinstance(augmentation_transform, str) and augmentation_transform == 'original':
+                    img_view = img.copy()
+                elif isinstance(augmentation_transform, str) and augmentation_transform == 'grid':
+                    # select a random grid crop
+                    if num > 0:
+                        x_coords = [0] + sorted(list(grid[0, :] * rescale_factor[0])) + [img.width]
+                        n_x = len(x_coords) - 1
+                        y_coords = [0] + sorted(list(grid[1, :] * rescale_factor[1])) + [img.height]
+                        rand_num = random.randint(1, num)
+                        coordinates = (x_coords[(rand_num - 1) % n_x],
+                                       y_coords[(rand_num - 1) // n_x],
+                                       x_coords[(rand_num - 1) % n_x + 1],
+                                       y_coords[(rand_num - 1) // n_x + 1])
+                        img_view = img.crop(coordinates)
+                    else:
+                        img_view = img.copy()
+                elif augmentation_transform is None:
+                    img_view = img.copy()
+                else:
+                    # a callable transform
+                    img_view = augmentation_transform(img)
+
+                if invert_color and not debug:
+                    img_view = ImageOps.invert(img_view)
+
+                if transform_func is not None:
+                    if huggingface_transform:
+                        img_tensor = transform_func(images=img_view, return_tensors="pt")['pixel_values'][0]
+                    else:
+                        img_tensor = transform_func(img_view)
+                else:
+                    img_tensor = T.ToTensor()(img_view)
+
+                if debug:
+                    if isinstance(augmentation_transform, str) and augmentation_transform == 'original':
+                        metadata = debug_image_properties(img_view)
+                    else:
+                        metadata = debug_image_properties(img_tensor)
+                    metadata['selected_transform'] = selected_transforms[k]
+                    metadata['imputed'] = imputed
+                    list_of_views.append(metadata)
+                else:
+                    list_of_views.append(img_tensor)
+                list_of_modality_names.append(selected_modality_names[k])
+
+        return list_of_views, list_of_modality_names, rescale_factor
+
+    def build_subject_sequence(subject_id, last_q, questionnaire_info, subject_images):
+        """Loop questionnaires 1..13 and build the sequence for one subject.
+
+        Returns (sequence, questionnaires, modalities, resized_list) or None
+        if no usable frames were found.
+        """
+        original_id = subject_id.split('_')[0]
+
+        frames = []          # each entry -> (n_views, C, H, W)
+        questionnaires = []  # per-frame metadata
+        resized_list = []
+        modalities = []
+
+        for X in range(1, 14):
+            if not keep_questionnaire(last_q, censor_time, questionnaire_info, X):
+                continue
+            if X not in subject_images:  # questionnaire not in the shard file
+                continue
+
+            num_filter_modality, _ = grid_dict[original_id]['q' + str(X)][filter_modality]
+            if num_filter_modality <= 0:
+                # filter modality missing -> skip questionnaire
+                # (other missing modalities are imputed instead)
+                continue
+
+            views, names, rescale_factor = build_questionnaire_views(
+                X, subject_images[X], original_id, questionnaire_info)
+
+            if len(views) == 0:
+                continue
+
+            frames.append(views if debug else torch.stack(views, dim=0))
+            questionnaires.append(X)
+            resized_list.append(rescale_factor)
+            modalities.append(names)
+
+        if not frames:
+            return None
+
+        sequence = frames if debug else torch.stack(frames, dim=0)  # (T_i, n_views, C, H, W)
+        return sequence, questionnaires, modalities, resized_list
+
+    return build_subject_sequence
+
 def keep_questionnaire(last_q,censor_time, questionnaire_info, questionnaire_number):
     '''return true if the quesitonnaire can be keeped, return false if i have to discard it'''
     if censor_time == -1: #keep all questionnaires
@@ -769,6 +949,85 @@ def keep_questionnaire(last_q,censor_time, questionnaire_info, questionnaire_num
         questionnaire_dt=questionnaire_info[questionnaire_number]['case_dt_dateq']
         return questionnaire_dt <= -censor_time #eg if censor time=1 -> i keep
         #all questionnaires that are at least 1 year before the case date, so dt_q<=-1
+
+#---------- yield smaples
+def create_sequence_flattener_PD_multiview(transform_func, augmentation_transform_list, n_views,
+                                           modality_string_list, original_modality_names,
+                                           exclusion_set, huggingface_transform=False,
+                                           invert_color=False, grid_dict=None, censor_time=0,
+                                           filter_modality='number_random', debug=False):
+    build_sequence = _make_subject_sequence_builder(
+        transform_func, augmentation_transform_list, modality_string_list,
+        original_modality_names, grid_dict, censor_time, filter_modality,
+        huggingface_transform, invert_color, debug)
+
+    def flatten_samples(src):
+        for sample in src:
+            json_data = _parse_sample_json(sample)
+            if json_data is None:
+                continue
+
+            label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
+            subject_id = json_data.get("subject", "unknown")  # XXX_YYY format
+            questionnaire_info = json_data.get("questionnaire_info", {})
+            last_q = json_data.get("last_q", None)
+
+            if label.item() == -1:
+                continue
+            if subject_id in exclusion_set:
+                continue
+
+            image_pool = _index_images(sample, grouped=False)
+
+            result = build_sequence(subject_id, last_q, questionnaire_info, image_pool)
+            if result is None:
+                continue
+
+            sequence, questionnaires, modalities, resized_list = result
+            yield sequence, label, subject_id, questionnaires, modalities, resized_list
+
+    return flatten_samples
+
+def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_transform_list,
+                                    modality_string_list, original_modality_names,
+                                    exclusion_set, grid_dict, censor_time,
+                                    filter_modality, huggingface_transform=False,
+                                    invert_color=False, debug=False, **kw):
+    build_sequence = _make_subject_sequence_builder(
+        transform_func, augmentation_transform_list, modality_string_list,
+        original_modality_names, grid_dict, censor_time, filter_modality,
+        huggingface_transform, invert_color, debug)
+
+    def flatten_groups(src):
+        for sample in src:
+            json_data = _parse_sample_json(sample)
+            if json_data is None:
+                continue
+
+            image_pool = _index_images(sample, grouped=True)  # subj -> q -> mod
+            group_id = json_data["group_id"]
+
+            group = []
+            for subject_id, meta in json_data["subjects"].items():
+                if subject_id in exclusion_set:
+                    continue
+                result = build_sequence(subject_id, meta["last_q"],
+                                        meta["questionnaire_info"],
+                                        image_pool.get(subject_id.split('_')[0], {}))
+                if result is None:
+                    continue
+                sequence, questionnaires, modalities, resized = result
+                label = torch.tensor(meta["label"], dtype=torch.long)
+                group.append((sequence, label, subject_id,
+                              questionnaires, modalities, resized))
+
+            # only yield valid groups: exactly one positive, ≥1 control
+            labels = [g[1].item() for g in group]
+            if sum(labels) == 1 and len(group) >= 2:
+                yield group_id, group
+
+    return flatten_groups
+
 def create_sequence_flattener_PD_grid(transform_func, augmentation_transform, n_views, modality_string,
                                               exclusion_set, huggingface_transform=False, invert_color=False,
                                               grid_dict=None, censor_time=0):
@@ -882,217 +1141,83 @@ def create_sequence_flattener_PD_grid(transform_func, augmentation_transform, n_
 
     return flatten_samples
 
-def create_sequence_flattener_PD_multiview(transform_func, augmentation_transform_list, n_views, modality_string_list, original_modality_names,
-                                              exclusion_set, huggingface_transform=False, invert_color=False,
-                                              grid_dict=None, censor_time=0, filter_modality='number_random', debug=False):
-    all_modalities = ['hand', 'number_random', 'X']
-    def flatten_samples(src):
-        for sample in src:
-            label = None
-            subject_id = "unknown"
 
-            # Step A: JSON → label + subject (unchanged)
-            for key, value in sample.items(): 
-                if key.endswith("json"):
-                    try:
-                        json_str = value.decode('utf-8') if isinstance(value, bytes) else value
-                        json_data = json.loads(json_str)
-                        label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
-                        subject_id = json_data.get("subject", "unknown") #is in the XXX_YYY format
-                        questionnaire_info = json_data.get("questionnaire_info", {})
-                        last_q = json_data.get("last_q", None)
-                    except Exception as e:
-                        print(f"Error parsing JSON for sample {key}: {e}")
-                    break
+#------ collate functions
+def collate_variable_sequences_PD_grouped(samples, questionnaire_to_slot=None, debug=False):
+    """Collate for the grouped loader.
+ 
+    Each sample is one GROUP:
+        (sequences, labels, subjects, questionnaires, modalities, resized, group_id)
+    where sequences is (G, T, k, C, H, W) if stacked, or a list of per-subject
+    sequences (debug mode, or if you switched to list-yield for variable T).
+ 
+    Groups are flattened into individual subjects, then collated with the same
+    core as the flat version. Two extra outputs are appended:
+        group_ids     : list of len N, the group_id string for each subject
+        group_seq_ids : tensor (N,), index of the group within this batch
+                        (lets you regroup subjects downstream)
+    """
+    sequences, labels_parts, subject_ids = [], [], []
+    questionnaires, modalities_list, resized_list = [], [], []
+    group_ids, group_seq_ids = [], []
+ 
+    for g, s in enumerate(samples):
+        (grp_seqs, grp_labels, grp_subjects,
+         grp_qs, grp_mods, grp_res, group_id) = s
+ 
+        # unstack (G, T, k, C, H, W) -> list of G tensors (T, k, C, H, W)
+        if isinstance(grp_seqs, torch.Tensor):
+            grp_seqs = list(torch.unbind(grp_seqs, dim=0))
+ 
+        sequences.extend(grp_seqs)
+        labels_parts.append(grp_labels)                    # tensor (G,)
+        subject_ids.extend(grp_subjects)
+        questionnaires.extend(grp_qs)
+        modalities_list.extend(grp_mods)
+        resized_list.extend(grp_res)
+        group_ids.extend([group_id] * len(grp_subjects))
+        group_seq_ids.extend([g] * len(grp_subjects))
+ 
+    labels = torch.cat(labels_parts)
+ 
+    base = _collate_subject_level(sequences, labels, subject_ids, questionnaires,
+                                  modalities_list, resized_list, debug=debug)
+ 
+    return (*base, group_ids, torch.tensor(group_seq_ids))
 
-            # Step B: sample-level filter (unchanged)
-            if label is None or label.item() == -1:
-                continue
-            if subject_id in exclusion_set: #for PD i exclude full subject data (subjects are in the format XX_YY for exclusion)
-                continue
-
-            # Pre-index all available images in this sample by (q_number, modality)
-            # This handles 'subject.qX.modality.png' transparently
-            image_pool = {}
-            
-            for key, value in sample.items():
-                if key.endswith((".png", ".jpg", ".jpeg")):
-                    parts = key.split('.')
-                    q_num = int(parts[0][1:])
-                    mod_name = parts[1].lower()
-                    if q_num not in image_pool:
-                        image_pool[q_num] = {}
-                    image_pool[q_num][mod_name] = value
-
-            # Loop explicitly through questionnaires 1 to 13
-            # build the SEQUENCE instead of yielding per image
-            frames = []            # each entry -> (n_views, C, H, W)
-            questionnaires = []    # per-frame metadata, kept as a list
-            resized_list = []
-            modalities = []
-            for X in range(1, 14):
-                if not keep_questionnaire(last_q,censor_time, questionnaire_info, X):
-                    continue
-                if X not in image_pool: #i skip questionnaires that were not put in the shard file
-                    continue
-                #i skip the subject if the modality is not present (0 chunks)
-                original_id = subject_id.split('_')[0] #the original subject id is the first part of the subject_id
-
-                list_of_views = []
-                list_of_modality_names = []
-
-                
-                num_filter_modality, _ = grid_dict[original_id]['q'+str(X)][filter_modality] 
-                if num_filter_modality <= 0: #if the filter modality is not present i skip the questionnaire
-                    #else i impute the other missing modalities
-                    continue
-
-                for current_mode in all_modalities:
-                    num, grid = grid_dict[original_id]['q'+str(X)][current_mode] #in grid dict X is uppercase
-                        
-                    #select the indexes of modality_string for which modality_string[i]==current_mode
-                    mask = [i for i, m in enumerate(modality_string_list) if m == current_mode]
-                    if len(mask) == 0: #if the current_mode is not in the modality_string_list i skip it
-                        continue
-                    #select the corresponding augmentation_transform using the mask
-                    #print(augmentation_transform_list)
-                    selected_transforms = [augmentation_transform_list[i] for i in mask] 
-                    selected_modality_names = [original_modality_names[i] for i in mask]  #contains the modality names written in the metadata
-                    #eg X_full, X, X_grid ..
-                    raw_image_data = image_pool[X].get(current_mode.lower()) #in the dictionary i have converted the keys to lower
-                    #-> hence i have to convet curren_mode to lower or i get a None
-                    rescale_factor = questionnaire_info[str(X)]['rescale_factor']#if the image was rescaled i have to rescale the grid coordinates too
-
-                    imputed=False
-                    if isinstance(raw_image_data, bytes):
-                        img = Image.open(io.BytesIO(raw_image_data)).convert('RGB')
-                    elif num <= 0 or raw_image_data is None: #if the modality is not present i create a blank image 
-                        img = Image.new('RGB', (224,224), color=(255,255,255))
-                        imputed=True
-                    else:
-                        img = raw_image_data
-                    
-                    if debug:
-                        selected_transforms = ['original'] + selected_transforms
-                        selected_modality_names = [selected_modality_names[0].split('_')[0]+'_original'] + selected_modality_names #the modality name is the same 
-                        #for all samples in the current model
-                        #check if transform_func contains 'pil' if not raise an error
-
-                    for i,augmentation_transform in enumerate(selected_transforms):
-                        
-                        if isinstance(augmentation_transform,str) and augmentation_transform == 'original':
-                            img_view = img.copy()
-                        elif isinstance(augmentation_transform,str) and augmentation_transform == 'grid':
-                            #select random crop
-                            if num > 0:
-                                grid[0,:] = grid[0,:]*rescale_factor[0]
-                                grid[1,:] = grid[1,:]*rescale_factor[1]
-                                x_coords = [0] + sorted(list(grid[0, :])) + [img.width]
-                                n_x = len(x_coords) - 1
-                                y_coords = [0] + sorted(list(grid[1, :])) + [img.height]
-                                rand_num = random.randint(1, num)
-                                coordinates = (x_coords[(rand_num - 1) % n_x],     y_coords[(rand_num - 1) // n_x],
-                                                x_coords[(rand_num - 1) % n_x + 1], y_coords[(rand_num - 1) // n_x + 1])
-                                img_view = img.crop(coordinates)
-                            else:
-                                img_view = img.copy()
-                        elif augmentation_transform is None:
-                            img_view = img.copy()
-                        else:
-                            #It should be a transform -> apply selected transform
-                            img_view = augmentation_transform(img)
-
-                        if invert_color and not(debug):
-                            img_view = ImageOps.invert(img_view)
-
-                        if transform_func is not None:
-                            if huggingface_transform:
-                                img_tensor = transform_func(images=img_view, return_tensors="pt")['pixel_values'][0]
-                            else:
-                                img_tensor = transform_func(img_view)
-                        else:
-                            img_tensor = T.ToTensor()(img_view)
-
-                        if debug:
-                            #the img_tensor is actually a pil image and I generate a descriptive dictionary to save in place of the image
-                            if isinstance(augmentation_transform,str) and augmentation_transform == 'original':
-                                metadata = debug_image_properties(img_view)
-                            else:
-                                metadata = debug_image_properties(img_tensor)
-                            metadata['selected_transform'] = selected_transforms[i]
-                            metadata['imputed'] = imputed
-                            list_of_views.append(metadata)
-                        else:
-                            list_of_views.append(img_tensor)
-                        list_of_modality_names.append(selected_modality_names[i])
-
-                if len(list_of_views) == 0: #eg if i have only digit related modalities but num=0 i have to skip and i have no data
-                    continue
-                if debug:
-                    frames.append(list_of_views)   
-                else:
-                    frames.append(torch.stack(list_of_views, dim=0))   # (n_views, C, H, W)
-                questionnaires.append(X)
-                resized_list.append(rescale_factor)  # or to_rescale if you want True/False
-                modalities.append(list_of_modality_names)
-
-            # Step D: yield the whole sequence ONCE
-            if not frames:
-                continue
-
-            #assert all_arrays(frames), "Not all elements are numpy arrays 0"
-            #assert debug , "Debug is false!"
-                
-            if debug:
-                yield frames,label, subject_id, questionnaires, modalities, resized_list
-            else:
-                sequence = torch.stack(frames, dim=0)   # (T_i, n_views, C, H, W)
-                yield sequence, label, subject_id, questionnaires, modalities, resized_list
-
-    return flatten_samples
-
-def all_arrays(obj):
-    if isinstance(obj, list):
-        return all(all_arrays(x) for x in obj)
-    return isinstance(obj, np.ndarray)
-
-def collate_variable_sequences_PD(samples, questionnaire_to_slot=None, debug=False):
-    sequences      = [s[0] for s in samples]               # each (T_i, k, C, H, W)
-    #if debug=True -> [[data subj 1], [data subj 2], [data subj 3]] 
-    # [data subj 1] = [[data q1], [data q2], [data q3], ...] 
-    # [data q1] = [{data modality 1}, {data modality 2}, ...]
-    labels         = torch.stack([s[1] for s in samples])
-    subject_ids    = [s[2] for s in samples]               # list of strings
-    questionnaires = [s[3] for s in samples]               # list of lists of "3", "5", ...
-    modalities_list    = [s[4] for s in samples]               # list of lists of modalities (for each timestp i have the list of modalities for each view)
-    resized_list    = [s[5] for s in samples]               # list of lists of rescale factor
-
+def _collate_subject_level(sequences, labels, subject_ids, questionnaires,
+                           modalities_list, resized_list, debug=False):
+    """Shared core: takes per-subject lists and builds the flat batch.
+ 
+    sequences      : list of (T_i, k, C, H, W) tensors (or nested lists if debug)
+    labels         : tensor (N,)
+    subject_ids    : list of N strings
+    questionnaires : list of N lists of questionnaire numbers
+    modalities_list: list of N lists (per timestep, list of modality names)
+    resized_list   : list of N lists of rescale factors
+    """
     if debug:
         lengths = torch.tensor([len(seq) for seq in sequences])
-        #assert all_arrays(sequences), "Not all elements are numpy arrays 1"
     else:
         lengths = torch.tensor([seq.shape[0] for seq in sequences])
-
-    #if i have 2 ids the first with 7 questionnaires [1,3,4,6,7,8,10] and the second with 5 [..]
-    #-> seq_ids will be 0 for the first 7 and 1 for the next 5
-    #-> slot_ids will be [0,2,3,5,6,7,9] for the first ...
+ 
     seq_ids, slot_ids = [], []
-    resized,modalities = [],[]
+    resized, modalities = [], []
     if debug:
         frames = []
     else:
-        frames  = torch.cat(sequences, dim=0)                  # (sum T_i, k, C, H, W)
+        frames = torch.cat(sequences, dim=0)               # (sum T_i, k, C, H, W)
+ 
     for b, qs in enumerate(questionnaires):
-        for i,q in enumerate(qs):
+        for i, q in enumerate(qs):
             seq_ids.append(b)
-            slot = int(q) - 1 #hence slot_ids goes from 0 to 12
-            slot_ids.append(slot)
-            resized.append(resized_list[b][i]) #append the rescale factor for this questionnaire
-            modalities.append(modalities_list[b][i]) #append the list of modalities for this questionnaire
+            slot_ids.append(int(q) - 1)                    # slots 0..12
+            resized.append(resized_list[b][i])
+            modalities.append(modalities_list[b][i])
             if debug:
                 frames.append(sequences[b][i])
-
-    return (frames, #frames is a list of dict if debug==True
+ 
+    return (frames,                                        # list of dicts if debug
             torch.tensor(seq_ids),
             torch.tensor(slot_ids),
             lengths,
@@ -1100,10 +1225,43 @@ def collate_variable_sequences_PD(samples, questionnaire_to_slot=None, debug=Fal
             resized,
             subject_ids,
             modalities)
+ 
+def collate_variable_sequences_PD(samples, questionnaire_to_slot=None, debug=False):
+    """Collate for the flat (per-subject) loader. Same output as before."""
+    sequences       = [s[0] for s in samples]              # each (T_i, k, C, H, W)
+    labels          = torch.stack([s[1] for s in samples])
+    subject_ids     = [s[2] for s in samples]
+    questionnaires  = [s[3] for s in samples]
+    modalities_list = [s[4] for s in samples]
+    resized_list    = [s[5] for s in samples]
+ 
+    return _collate_subject_level(sequences, labels, subject_ids, questionnaires,
+                                  modalities_list, resized_list, debug=debug)
 
+def collate_groups_PD(batch_of_groups, debug=False):
+    sequences, labels, subject_ids = [], [], []
+    questionnaires, modalities_list, resized_list = [], [], []
+    group_ids = []
+
+    for g_idx, (gid, group) in enumerate(batch_of_groups):
+        for seq, lab, sid, qs, mods, res in group:
+            sequences.append(seq)
+            labels.append(lab)
+            subject_ids.append(sid)
+            questionnaires.append(qs)
+            modalities_list.append(mods)
+            resized_list.append(res)
+            group_ids.append(g_idx)
+
+    labels = torch.stack(labels)
+    out = _collate_subject_level(sequences, labels, subject_ids, questionnaires,
+                                 modalities_list, resized_list, debug=debug)
+    return (*out, torch.tensor(group_ids))
+
+#------ Build dataset --------
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
                        huggingface_transform=False,augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None,
-                       censor_time=0, filter_modality='digit', debug=False):
+                       censor_time=0, filter_modality='digit', debug=False, grouped=False):
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
@@ -1144,18 +1302,21 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                         partial=False)
             )
         elif isinstance(modality, list):
+            compose_fn = create_sequence_group_flattener_PD_multiview if grouped else create_sequence_flattener_PD_multiview
+            collate_fn = collate_groups_PD if grouped else collate_variable_sequences_PD
+
             dataset = (dataset
                 #.decode(decode_approach)
-                .compose(create_sequence_flattener_PD_multiview(transform,augmentation_transform, n_views=n_views ,modality_string_list=modality_string,
-                                                    exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
-                                                    grid_dict=grid_dict, censor_time=censor_time, 
-                                                    original_modality_names=modality, filter_modality=filter_modality, debug=debug)) # This replaces .map() and .select()
+                .compose(compose_fn(transform, augmentation_transform, n_views=n_views, modality_string_list=modality_string,
+                                    exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
+                                    grid_dict=grid_dict, censor_time=censor_time,
+                                    original_modality_names=modality, filter_modality=filter_modality, debug=debug)) # This replaces .map() and .select()
                 .batched(batch_size,
-                        collation_fn=partial(collate_variable_sequences_PD, questionnaire_to_slot=None, debug=debug),
+                        collation_fn=partial(collate_fn, questionnaire_to_slot=None, debug=debug),
                         partial=False)
             )
-    else:
-        raise ValueError("grid_dict must be provided for PD dataset preparation.")
+        else:
+            raise ValueError("grid_dict must be provided for PD dataset preparation.")
         
     
     return dataset
@@ -1167,14 +1328,24 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
     print("Augmentation transform:", augmentation_transform)
     #assert 1==0 , "STOPPED HERE TO CHECK AUGMENTATION TRANSFORM"
 
-    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, split_workers=True, batch_size=exp_params['batch_size'], transform=transform, exclusion_set=exclusion_set, modality=exp_params['data_modality'],
-                       huggingface_transform=exp_params['huggingface_transform'],augmentation_transform=augmentation_transform, 
-                       invert_color=exp_params['invert_color'],n_views=exp_params['num_tiles'], grid_dict = grid_dict, 
-                       censor_time=exp_params['censor_time'], filter_modality=exp_params['filter_modality'], debug=exp_params.get('debug', False))
-    val_dataset = prepare_PD_dataset(SHARD_PATTERN_val, split_workers=True, batch_size=exp_params['batch_size'], transform=transform, exclusion_set=val_exclusion_set, modality=exp_params['data_modality'],
-                       huggingface_transform=exp_params['huggingface_transform'],augmentation_transform=augmentation_transform, 
-                       invert_color=exp_params['invert_color'],n_views=exp_params['num_tiles'], grid_dict = grid_dict,
-                       censor_time=exp_params['censor_time'], filter_modality=exp_params['filter_modality'], debug=exp_params.get('debug', False))
+    common_kwargs = dict(
+        split_workers=True,
+        batch_size=exp_params['batch_size'],
+        transform=transform,
+        modality=exp_params['data_modality'],
+        huggingface_transform=exp_params['huggingface_transform'],
+        augmentation_transform=augmentation_transform,
+        invert_color=exp_params['invert_color'],
+        n_views=exp_params['num_tiles'],
+        grid_dict=grid_dict,
+        censor_time=exp_params['censor_time'],
+        filter_modality=exp_params['filter_modality'],
+        debug=exp_params.get('debug', False),
+        grouped=exp_params.get('grouped', False),
+    )
+
+    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, exclusion_set=exclusion_set, **common_kwargs)
+    val_dataset   = prepare_PD_dataset(SHARD_PATTERN_val, exclusion_set=val_exclusion_set, **common_kwargs)
     
     train_loader = DataLoader(
         train_dataset, 
