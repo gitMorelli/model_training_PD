@@ -1,9 +1,14 @@
 import os
 import torch
 import torchvision.utils as vutils
-import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
+import gradio as gr
+from matplotlib.figure import Figure   # NOT pyplot — no display needed
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+import traceback
 
 def debug_images_dataset(dataset, output_path="anteprima_dataset.png", num_immagini=16, mean=None, std=None, n_stacked=1):
     """
@@ -514,7 +519,6 @@ def save_img_with_info_views(image_list, text_properties_list, path):
     plt.close(fig)  # avoid keeping figures open in memory across calls
 
 
-
 #Debug info on images
 def tensor_debug_info(t, name="tensor", norm_mean=None, norm_std=None):
     """Build a human-readable diagnostic string from a raw image tensor (C×H×W or H×W).
@@ -588,3 +592,246 @@ def tensor_debug_info(t, name="tensor", norm_mean=None, norm_std=None):
         lines.append(f"{'flags':<14}: " + ", ".join(flags))
 
     return "\n".join(lines)
+
+
+# Interactive visualization PD
+def _denorm_to_hwc(img, mean, std):
+    """(C,H,W) tensor -> (H,W[,C]) numpy in [0,1] for imshow."""
+    img = img.detach().cpu().float()
+    if mean is not None and std is not None:
+        m = torch.tensor(mean).view(-1, 1, 1)
+        s = torch.tensor(std).view(-1, 1, 1)
+        img = img * s + m
+    img = img.clamp(0, 1).permute(1, 2, 0).numpy()
+    return img[:, :, 0] if img.shape[-1] == 1 else img
+
+
+def iter_subjects(batch):
+    """Yield one dict per subject from a single collated batch."""
+    (frames, seq_ids, slot_ids, lengths, labels,
+     resizing_factors, subject_ids, modalities) = batch
+    seq_ids, slot_ids = seq_ids.cpu(), slot_ids.cpu()
+    B = lengths.size(0)
+    for b in range(B):
+        sel = (seq_ids == b).nonzero(as_tuple=True)[0]
+        if sel.numel() == 0:
+            continue
+        sel = sel[torch.argsort(slot_ids[sel])]          # slot order
+        yield dict(
+            subject_id=(subject_ids[b] if subject_ids is not None else f"subject_{b}"),
+            label=(labels[b].item() if torch.is_tensor(labels) else labels[b]),
+            slots=slot_ids[sel].tolist(),
+            modes=[modalities[i] for i in sel.tolist()],
+            frames=frames[sel],                          # (T_b, k, C, H, W)
+        )
+
+
+def subject_stream(loader, max_batches=None):
+    """Lazy generator over all subjects, pulling batches on demand."""
+    for bi, batch in enumerate(loader):
+        if max_batches is not None and bi >= max_batches:
+            break
+        yield from iter_subjects(batch)
+
+
+def _format_meta(meta):
+    if meta is None:
+        return "(no metadata)"
+    if isinstance(meta, dict):
+        return "\n".join(f"{k}: {v}" for k, v in meta.items())
+    return str(meta)
+
+
+class SubjectViewer:
+    """
+    Interactive per-subject viewer.
+      right / space / n : next     left / p : previous     q / esc : quit
+    get_meta(subject_id) -> dict|str is called each time a subject is shown.
+    """
+    def __init__(self, loader, mean, std, get_meta=None, max_batches=None,
+                 slot_to_q=None, figsize=(13, 7)):
+        self.gen = subject_stream(loader, max_batches)
+        self.cache, self.idx = [], -1
+        self.mean, self.std = mean, std
+        self.get_meta = get_meta or (lambda sid: None)
+
+        if slot_to_q is None:
+            self.slot_name = lambda s: f"q{s + 1}"
+        elif callable(slot_to_q):
+            self.slot_name = slot_to_q
+        else:
+            self.slot_name = lambda s: slot_to_q.get(s, f"q{s + 1}")
+
+        self.fig = plt.figure(figsize=figsize)
+        self.content_sf, ctrl_sf = self.fig.subfigures(2, 1, height_ratios=[12, 1])
+        self.fig.canvas.mpl_connect("key_press_event", self._on_key)
+
+        # persistent buttons (survive content redraws)
+        b_prev, b_next, b_quit = ctrl_sf.subplots(1, 3)
+        self._bp = Button(b_prev, "◀ Prev");  self._bp.on_clicked(lambda e: self.prev())
+        self._bn = Button(b_next, "Next ▶");  self._bn.on_clicked(lambda e: self.next())
+        self._bq = Button(b_quit, "Quit");    self._bq.on_clicked(lambda e: plt.close(self.fig))
+
+        self.next()  # show first subject
+
+    def _advance(self):
+        if self.idx + 1 < len(self.cache):
+            self.idx += 1
+            return True
+        try:
+            self.cache.append(next(self.gen))
+        except StopIteration:
+            return False
+        self.idx += 1
+        return True
+
+    def next(self):
+        if self._advance():
+            self._render()
+
+    def prev(self):
+        if self.idx > 0:
+            self.idx -= 1
+            self._render()
+
+    def _on_key(self, event):
+        if event.key in (" ", "right", "n"):
+            self.next()
+        elif event.key in ("left", "p"):
+            self.prev()
+        elif event.key in ("q", "escape"):
+            plt.close(self.fig)
+
+    def _render(self):
+        rec = self.cache[self.idx]
+        frames = rec["frames"]
+        T_b, k, C = frames.shape[:3]
+
+        sf = self.content_sf
+        sf.clear()
+        gs = sf.add_gridspec(k, T_b + 1, width_ratios=[1] * T_b + [1.3])
+
+        for j in range(T_b):
+            for i in range(k):
+                ax = sf.add_subplot(gs[i, j])
+                ax.imshow(_denorm_to_hwc(frames[j, i], self.mean, self.std),
+                          cmap="gray" if C == 1 else None)
+                ax.set_xticks([]); ax.set_yticks([])
+                if i == 0:
+                    ax.set_title(self.slot_name(rec["slots"][j]), fontsize=10)
+                if j == 0:
+                    ax.set_ylabel(str(rec["modes"][j][i]), fontsize=9)
+
+        axm = sf.add_subplot(gs[:, -1]); axm.axis("off")
+        axm.text(0, 1,
+                 f"[{self.idx + 1}] {rec['subject_id']}\n\n{_format_meta(self.get_meta(rec['subject_id']))}",
+                 va="top", ha="left", fontsize=9, family="monospace", wrap=True)
+
+        sf.suptitle(f"{rec['subject_id']}   label={rec['label']}   T={T_b}  k={k}",
+                    fontsize=11)
+        self.fig.canvas.draw_idle()
+
+# Gradio interactive visualization
+def _fig_to_array(fig):
+    canvas = FigureCanvasAgg(fig)
+    canvas.draw()
+    return np.asarray(canvas.buffer_rgba())[:, :, :3]   # RGB, drop alpha
+
+def _meta_markdown(meta):
+    if isinstance(meta, dict):
+        return "\n".join(f"| **{k}** | {v} |" for k, v in meta.items())
+    return str(meta)
+
+
+class SubjectApp:
+    def __init__(self, loader, mean, std, get_meta, max_batches=None, slot_to_q=None):
+        self.mean, self.std, self.get_meta = mean, std, get_meta
+        if slot_to_q is None:
+            self.slot_name = lambda s: f"q{s + 1}"
+        elif callable(slot_to_q):
+            self.slot_name = slot_to_q
+        else:
+            self.slot_name = lambda s: slot_to_q.get(s, f"q{s + 1}")
+
+        # --- materialize everything NOW, in the main thread ---
+        print("[init] extracting subjects...", flush=True)
+        self.cache = []
+        for rec in subject_stream(loader, max_batches):
+            rec["frames"] = rec["frames"].detach().cpu()   # off GPU, safe to hold
+            self.cache.append(rec)
+        print(f"[init] cached {len(self.cache)} subjects", flush=True)
+        self.idx = -1
+
+        self.debug_dir = "/home/a_morelli/vscode_projects/model_training/data/dataset_info_PD/random_samples/interactive"    # somewhere you can ls / scp from
+        os.makedirs(self.debug_dir, exist_ok=True)
+
+
+    def _render(self):
+        rec = self.cache[self.idx]
+        frames = rec["frames"]
+        T_b, k, C = frames.shape[:3]
+
+        # sanity print -> lands in viewer_<jobid>.log
+        raw = frames.detach().cpu().float()
+        print(f"[render] idx={self.idx} id={rec['subject_id']} "
+              f"shape={tuple(frames.shape)} raw_min={raw.min():.3f} raw_max={raw.max():.3f}",
+              flush=True)
+
+        fig = Figure(figsize=(2.2 * T_b, 2.2 * k))
+        axes = fig.subplots(k, T_b, squeeze=False)
+        for j in range(T_b):
+            axes[0, j].set_title(self.slot_name(rec["slots"][j]), fontsize=10)
+            for i in range(k):
+                ax = axes[i, j]
+                arr = _denorm_to_hwc(frames[j, i], self.mean, self.std)
+                if i == 0 and j == 0:
+                    print(f"[render] denormed min={arr.min():.3f} max={arr.max():.3f}", flush=True)
+                ax.imshow(arr, cmap="gray" if C == 1 else None)
+                ax.set_xticks([]); ax.set_yticks([])
+                if j == 0:
+                    ax.set_ylabel(str(rec["modes"][j][i]), fontsize=9)
+        fig.suptitle(f"{rec['subject_id']}  label={rec['label']}  T={T_b} k={k}")
+        fig.tight_layout()
+
+        path = os.path.join(self.debug_dir, f"current_{self.idx}.png")
+        fig.savefig(path, dpi=110)                     # ground truth on disk
+
+        header = f"### [{self.idx + 1}] `{rec['subject_id']}` — label {rec['label']}"
+        meta_md = "| field | value |\n|---|---|\n" + _meta_markdown(self.get_meta(rec["subject_id"]))
+        return path, header, meta_md                   # filepath -> gr.Image
+
+    def next(self):
+        try:
+            if self.idx + 1 < len(self.cache):
+                self.idx += 1
+            return self._render()
+        except Exception:
+            tb = traceback.format_exc()
+            print(tb, flush=True)
+            return None, "### ERROR in next()", f"```\n{tb}\n```"
+
+    def prev(self):
+        try:
+            if self.idx > 0:
+                self.idx -= 1
+            return self._render()
+        except Exception:
+            tb = traceback.format_exc()
+            print(tb, flush=True)
+            return None, "### ERROR in prev()", f"```\n{tb}\n```"
+
+
+def launch_interactive_PD(loader, mean, std, get_meta, max_batches=None, port=7860):
+    app = SubjectApp(loader, mean, std, get_meta, max_batches)
+    with gr.Blocks() as demo:
+        header = gr.Markdown()
+        with gr.Row():
+            plot = gr.Image(label="subject", type="filepath")
+            meta = gr.Markdown()
+        with gr.Row():
+            b_prev = gr.Button("◀ Prev")
+            b_next = gr.Button("Next ▶")
+        b_next.click(app.next, outputs=[plot, header, meta])
+        b_prev.click(app.prev, outputs=[plot, header, meta])
+        demo.load(app.next, outputs=[plot, header, meta])   # show first on open
+    demo.launch(server_name="0.0.0.0", server_port=port)     # bind all interfaces

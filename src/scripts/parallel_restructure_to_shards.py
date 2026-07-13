@@ -32,7 +32,7 @@ hd5_FILE_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggreg
 questionnaire_templates_PATH="/home/a_morelli/datasets/others/template_sizes.json"
 
 LIST_OF_IDS_PD_TEST_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/progress.csv"
-LIST_OF_IDS_PD_PATH = "/home/a_morelli/datasets/id_lists/final_data_for_training.parquet"
+LIST_OF_IDS_PD_PATH = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
 QUESTIONNAIRES = [str(i) for i in range(1,14)] # q1 to q12, inclusive. Adjust as needed.
 
 #LIST_OF_IDS_HANDEDNESS_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/handedness_model_ids.csv"
@@ -411,16 +411,17 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                         if len(img.shape) == 2:  # If it only has height and width (1 channel)
                             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
-                        if to_rescale:
-                            img = cv2.resize(img, (0,0), fx=rescale_factor[0], fy=rescale_factor[1], interpolation=cv2.INTER_LANCZOS4)
-
                         array_val = id_data['q'+questionnaire][clean_name][1] #get the array value for q6 number class
                         num_tiles = id_data['q'+questionnaire][clean_name][0]
                         coords = get_tiles(img,array_val,num_tiles) #returns a list of [(xtl, ytl, xbr, ybr),x] 
                         #with x=tile number if tile contains a mark, -1 otherwise 
 
-                        if CONVERT_TO_WHITE:
+                        if CONVERT_TO_WHITE: #recolor before rescaling or rescale both the image and the grid (or there will be a mismatch
+                            #between grid dimensions and image dimensions)
                             img = recolor_border_via_profiles(img, coords)
+                        
+                        if to_rescale:
+                            img = cv2.resize(img, (0,0), fx=rescale_factor[0], fy=rescale_factor[1], interpolation=cv2.INTER_LANCZOS4)
                         
                         img = preprocess_image(img,RESIZE,PADDED, CONVERT_TO_WHITE)
                         

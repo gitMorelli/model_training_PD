@@ -1215,7 +1215,7 @@ def debug_image_properties(img_source):
         #'area': img.size[0] * img.size[1],
         #'ratio': img.size[0] / img.size[1] if img.size[1] != 0 else None, #aspect ratio
         'ink_density': ink_density(arr,threshold), #fraction of pixels that are ink (binary threshold)
-        'sharpness': sharpness(arr), #sharpness of the image
+        #'sharpness': sharpness(arr), #sharpness of the image
         'is_uniform': is_uniform_image(img_source, tol=3)
     }
     return img_properties
@@ -1486,7 +1486,7 @@ def merge_properties_from_full_dataset_PD(exp_params, csv_data, properties_to_ad
     if 'full_dataset' not in exp_params:
         raise ValueError("The 'full_dataset' key is missing in exp_params. Specify it to load properties from that dataset.")
     full_dataset_path = exp_params['full_dataset']
-    full_df = pd.read_csv(full_dataset_path)
+    full_df = pd.read_csv(full_dataset_path, encoding='cp1252')
 
     if csv_data is None:
         csv_data = pd.read_parquet(exp_params['list_of_ids_paths'])

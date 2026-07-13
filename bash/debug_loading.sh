@@ -31,6 +31,8 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 # --- Hyperparameters ---
 
 cd $HOME_DIR
+
+echo "NODE: $(hostname)" 
 # --- Execution ---
 $ENV_PYTHON -m src.debug.debug_loading \
     --num_workers 2

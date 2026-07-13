@@ -28,17 +28,24 @@ import numpy as np
 from collections import defaultdict
 import torch.nn.functional as F
 import pickle
+import traceback
 
 from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD, merge_properties_from_full_dataset_PD
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms
 from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD_with_meta, debug_images_PD
+from src.utils.visualization import SubjectViewer, launch_interactive_PD
 
 params = {
     'selected_problem': "PD",#"PD", # "handedness"
-    'pre_filter_csv': True,
-    'integrate_csv': True,
+    'pre_filter_csv': False,
+    'integrate_csv': False,
     'columns_to_add': ['rempli_seulq12'],
+    'interactive_visualization': True,
+    'interactive_properties': ['unique_id', 'split',
+                               'case_control','last_avail_q',
+                               'rempli_pattern','grid_pattern',
+                               'case_grid_pattern','q_5_num_X'],
 
     "data_modality": ['digit_full','digit_crop']+['digit' for _ in range(2)]+
     ['text_full']+['text' for _ in range(2)]+['X_crop'], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
@@ -128,8 +135,11 @@ def main(run_random_samples_from_loader=True, run_study_loader = False, show_gri
         pre_filtered_csv = merge_properties_from_full_dataset_PD(params,pre_filtered_csv, params['columns_to_add'], verbose=VERBOSE)
     
     if run_random_samples_from_loader:
-        random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, 
-                                       mean=mean, std=std, no_text=True, pre_filtered_csv=pre_filtered_csv)
+        if params['interactive_visualization']:
+            interactive_random_samples(args, params, batches_to_show=3,mean=mean, std=std,pre_filtered_csv=pre_filtered_csv)
+        else:
+            random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, 
+                                        mean=mean, std=std, no_text=True, pre_filtered_csv=pre_filtered_csv)
     
 
     ### From here they work only for the handedness case #####
@@ -570,6 +580,26 @@ def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, m
 
             if n_batches >= batches_to_show:
                 break
+def interactive_random_samples(args, params, batches_to_show=3,mean=None,std=None,pre_filtered_csv=None):
+    #this functions shows images and properties of a random sample of images from the dataloader
+    train_loader, expected_shape = get_dataloader(args, params, pre_filtered_csv)
+
+    if pre_filtered_csv is None:
+        pre_filtered_csv = pd.read_parquet(params['list_of_ids_paths'])
+        print("Loaded pre_filtered_csv, for interactive visualization, from file:", params['list_of_ids_paths'])
+
+    def get_meta(subject_id, cols=params['interactive_properties']):
+        """Look up a single row by unique_id and return a subset of columns."""
+        match = pre_filtered_csv.loc[pre_filtered_csv["unique_id"] == subject_id]
+        if match.empty:
+            return f"(no row for unique_id={subject_id})"
+        row = match.iloc[0]
+        return {c: row[c] for c in cols if c in row.index}
+
+    # in a notebook, first:  %matplotlib widget   (needs ipympl)
+    launch_interactive_PD(train_loader, mean, std,
+                        get_meta=get_meta, max_batches=batches_to_show)
+
 def grids_of_random_samples(args,out_folder,batches_to_show=3,mean=None,std=None):
     if os.path.exists(out_folder):
         #delete all files in the folder

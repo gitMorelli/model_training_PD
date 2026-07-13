@@ -40,13 +40,17 @@ import html
 from functools import cached_property
 
 import src.debug.debug_utils.pd_training_data_analysis as pd_train_analysis
+from src.utils.data_loading_utils import merge_properties_from_full_dataset_PD
 #PATHS
 
 metadata = {
     "experiment": "PD", #'handedness', 'pd'
     "show_preview": False,
     "analyze_training_data": True,
-    'analyze_statistics_data': True,
+    'analyze_statistics_data': False,
+    'integrate_csv': True,
+    'columns_to_add': ['rempli_seulq12'],
+    'preprocess': True,
 
     "run_validity_checks": True,
     "generate_num_statistics": False,
@@ -64,12 +68,15 @@ if metadata["experiment"] == "handedness":
     OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/handedness"
     #MODEL_SPECIFIC_OUT_PATH = os.path.dirname(metadata['predictions_path'])
 elif metadata["experiment"] == "PD":
-    metadata['training_set'] = "/home/a_morelli/datasets/id_lists/PD_training_set_8_7_26.parquet"
-    metadata['statistics_path'] = "/home/a_morelli/datasets/id_lists/statistics/statistics_PD_10072026.csv"
+    metadata['training_set'] = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
+    metadata['full_dataset'] = "/home/a_morelli/datasets/id_lists/final_table_with_all_info_8_7_26.csv"
+    metadata['statistics_path'] = "/home/a_morelli/datasets/id_lists/statistics/statistics_PD_11072026.csv"
+    metadata['un_matched_path'] = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
     OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/pd"
     #MODEL_SPECIFIC_OUT_PATH = os.path.dirname(metadata['predictions_path'])
 
 QUESTIONNAIRES = [str(q) for q in range(1,14)]
+VERBOSE = True
 
 def main(metadata):
     args = get_args()
@@ -86,6 +93,19 @@ def main(metadata):
         statistics_df = pd.read_csv(metadata['statistics_path'])
     if 'predictions_path' in metadata:
         predictions_df = pd.read_csv(metadata['predictions_path'])
+    if metadata['un_matched_path']:
+        df_unmatched = pd.read_csv(metadata['un_matched_path'])
+    else:
+        df_unmatched = None
+    
+    if metadata['integrate_csv']:
+        #integrate the csv with the original csv with all the information
+        training_data = merge_properties_from_full_dataset_PD(metadata,training_data, metadata['columns_to_add'], verbose=VERBOSE)
+    
+    if metadata['preprocess']:
+        training_data = preprocess_training_data_PD(training_data, verbose=VERBOSE)
+        if df_unmatched is not None:
+            df_unmatched = preprocess_unmatched_data_PD(df_unmatched, verbose=VERBOSE)
 
     if metadata["show_preview"]:
         print("Generating preview of dataframes... ")
@@ -109,7 +129,7 @@ def main(metadata):
         merged_df=merge_statistics_with_training_data(training_data, statistics_df)
         merged_df=merged_df[merged_df['split'].isin(['train','val'])]  # keep only train and val splits
         if metadata['experiment'] == "PD":
-            run_pd_statistics_data_analysis(merged_df,out_path=OUT_PATH)
+            run_pd_statistics_data_analysis(merged_df,out_path=OUT_PATH, df_unmatched=df_unmatched)
     
     '''
     if save_file:
@@ -343,6 +363,13 @@ def merge_dfs(matching_ids_df, statistics_df, predictions_df):
 
     return statistics_df
 
+######## Preprocessing ############
+def preprocess_training_data_PD(df, verbose=False):
+    df['binary_remply_pattern'] = df['rempli_pattern'].apply(lambda x: int(x, 2) if pd.notna(x) else pd.NA)
+    return df
+def preprocess_unmatched_data_PD(df, verbose=False):
+    #df['binary_remply_pattern'] = df['rempli_pattern'].apply(lambda x: int(x, 2) if pd.notna(x) else pd.NA)
+    return df
 ######## Statistics analysis ######
 def merge_statistics_with_training_data(df1, df2):
     # Merge training_data=df1 and statistics_df=df2 to get the split information
@@ -405,16 +432,39 @@ def run_pd_training_data_analysis(training_data,out_path):
     pd_train_analysis.save_case_dt_figures(p, outdir=os.path.join(out_path,'case_dt_figures'))   # {'paths': [...], 'missing': {...}}
     r.add("case_dt missing", pd_train_analysis.case_dt_missing(p))        # registered property -> report
 
+    sv_path = os.path.join(out_path,'individual_distributions')
+    pd_train_analysis.plot_variable_distribution(p, "relative_age", sv_path, dedup_col="unique_id")
+    pd_train_analysis.plot_variable_distribution(p, "etudegp", sv_path)                      # categorical -> bars
+    pd_train_analysis.plot_variable_distribution(p, "relative_age", sv_path, by="case_control")  # overlay per group
+    pd_train_analysis.plot_variable_distribution(p,'binary_remply_pattern', sv_path)  # overlay per group
+    r.add("relative_age_summary", pd_train_analysis.variable_summary(p, "relative_age", dedup_col="unique_id"))
+    r.add("binary_remply_pattern_summary", pd_train_analysis.variable_summary(p, "binary_remply_pattern", dedup_col="unique_id"))
+
     r.write(os.path.join(out_path,'training_data_analysis.txt'))
 
-def run_pd_statistics_data_analysis(merged_df,out_path):
+def run_pd_statistics_data_analysis(merged_df,out_path, df_unmatched=None):
     r = pd_train_analysis.Report("statistics analysis")
+
+    #i add the area and retio column for each column with width
+    merged_df=pd_train_analysis.add_area_and_ratio_columns(merged_df)
 
     p = pd_train_analysis.Profiler(merged_df)                       # df with the merged columns
     pd_train_analysis.discover_period_metrics(p)             
     pd_train_analysis.register_discovered_metrics(p)         # auto-creates a MetricSpec for each new family
-    pd_train_analysis.save_metric_figures(p, "ink_density", outdir=os.path.join(out_path,'ink_density_figures'))   # grid + ridgeline + summary + missing
+    pd_train_analysis.save_metric_figures(p, "InkDensity", outdir=os.path.join(out_path,'ink_density_figures'))   # grid + ridgeline + summary + missing
+    pd_train_analysis.save_metric_figures(p, "width", outdir=os.path.join(out_path,'width_figures'))   # grid + ridgeline + summary + missing
+    pd_train_analysis.save_metric_figures(p, "height", outdir=os.path.join(out_path,'height_figures'))   # grid + ridgeline + summary + missing
+    pd_train_analysis.save_metric_figures(p, "area", outdir=os.path.join(out_path,'area_figures'))   # grid + ridgeline + summary + missing
+    pd_train_analysis.save_metric_figures(p, "ratio", outdir=os.path.join(out_path,'ratio_figures'))   # grid + ridgeline + summary + missing
 
+    if df_unmatched is not None:
+        #matched-controls comparison
+        out = pd_train_analysis.save_comparison_figures(
+        [merged_df, df_unmatched],                       # 2+ DataFrames or Profilers; first = reference
+        columns=["etudegp", "profq2", "lateralite"],
+        outdir=os.path.join(out_path,'comparison_figures'), labels=["matched", "unmatched"], dedup_col="unique_id")
+    else:
+        print("Skipping matched-controls comparison because df_unmatched is None")
 ######## Preview ################
 def preview_dataframes(
     dfs,

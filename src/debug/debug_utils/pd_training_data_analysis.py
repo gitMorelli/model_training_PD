@@ -144,6 +144,7 @@ def test_ids_with_group_in_trainval(p, return_ids=False):
     leaking = work.loc[mask, "unique_id"].unique()
     out = {"n_test": int(work.loc[work["split"] == "test", "unique_id"].nunique()),
            "n_leaking": int(len(leaking)),
+           "n_leaking_groups": int(work.loc[mask, "group_id"].nunique()),
            "any_leaking": bool(len(leaking) > 0)}
     if return_ids:
         out["leaking_ids"] = sorted(map(str, leaking))
@@ -418,7 +419,7 @@ class Report:
 # ----------- Figures --------------------------
 
 # ---- generic per-period / per-modality metric figures ---------------------
-# Columns shaped  q_{i}_{infix}_{modality}  (e.g. q_3_num_X, q_3_ink_density_original).
+# Columns shaped  q_{i}_{infix}_{modality}  (e.g. q_3_num_X, q_3_inkdensity_original).
 # Register a MetricSpec (or auto-discover) for any such family; one engine plots them all.
 # Plotting deps are imported lazily so the core toolkit stays importable without them.
 from dataclasses import dataclass
@@ -451,8 +452,8 @@ def _spec(spec):
  
 def discover_period_metrics(p):
     """Scan columns shaped q_{i}_{infix}_{modality} -> {infix: [modalities]}.
-    Splits on the LAST underscore, so it assumes modality names have no underscore
-    (the infix may, e.g. 'ink_density'). Use it to see what's present, or to auto-register."""
+    Splits on the FIRST underscore, so it assumes the infix has no underscore
+    (the modality may, e.g. 'ink_density'). Use it to see what's present, or to auto-register."""
     import re, collections
     rx = re.compile(r"^q_\d+_(.+)$")
     found = collections.defaultdict(set)
@@ -460,8 +461,8 @@ def discover_period_metrics(p):
         m = rx.match(c)
         if not m:
             continue
-        infix, _, modality = m.group(1).rpartition("_")
-        if infix:
+        infix, _, modality = m.group(1).partition("_")
+        if infix and modality:
             found[infix].add(modality)
     return {k: sorted(v) for k, v in sorted(found.items())}
  
@@ -838,3 +839,277 @@ def save_case_dt_figures(p, outdir="."):
         plot_case_dt_summary(p, os.path.join(outdir, "case_dt_summary.png")),
     ]
     return {"paths": paths, "missing": case_dt_missing_summary(p)}
+
+# ---- two-dataframe distribution comparison (subject-level covariate balance) --
+# Compare subject-level columns (independent of period/modality) between 2+ dataframes,
+# e.g. matched vs unmatched. Numeric -> SMD + KS; categorical -> TVD + largest gap.
+_CMP_COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#937860"]
+ 
+def _as_df(x):
+    return x.df if isinstance(x, Profiler) else x
+ 
+def _col_values(df, col, dedup_col=None):
+    d = df.drop_duplicates(dedup_col) if dedup_col and dedup_col in df.columns else df
+    return d[col].dropna()
+ 
+def _is_categorical(s, max_cat):
+    return (s.dtype == object) or str(s.dtype) == "category" or s.nunique(dropna=True) <= max_cat
+ 
+def _smd(a, b):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    pooled = np.sqrt((a.var(ddof=1) + b.var(ddof=1)) / 2)
+    return float((a.mean() - b.mean()) / pooled) if pooled > 0 else 0.0
+ 
+def _tvd(a, b):
+    pa = pd.Series(a).value_counts(normalize=True)
+    pb = pd.Series(b).value_counts(normalize=True)
+    cats = pa.index.union(pb.index)
+    pa, pb = pa.reindex(cats, fill_value=0), pb.reindex(cats, fill_value=0)
+    return 0.5 * float(np.abs(pa - pb).sum())
+ 
+def compare_distributions(dfs, columns, labels=None, dedup_col=None, max_cat=12, cat_cols=None):
+    """Per-column comparison stats between 2+ dataframes (dfs[0] is the reference).
+    Accepts DataFrames or Profilers. `dedup_col` (e.g. 'unique_id') counts each subject
+    once. Numeric -> SMD & KS vs reference; categorical -> TVD & largest category gap.
+    `cat_cols` forces columns to be treated as categorical; else auto by dtype / max_cat."""
+    from scipy.stats import ks_2samp
+    dfs = [_as_df(d) for d in dfs]
+    labels = labels or [f"df{i + 1}" for i in range(len(dfs))]
+    cat_cols = set(cat_cols or [])
+    out = {"labels": labels, "reference": labels[0], "columns": {}}
+    for col in columns:
+        series = [_col_values(d, col, dedup_col) for d in dfs]
+        is_cat = col in cat_cols or _is_categorical(series[0], max_cat)
+        ref = series[0]
+        entry = {"type": "categorical" if is_cat else "numeric",
+                 "n": [int(s.size) for s in series]}
+        if is_cat:
+            entry["tvd_vs_ref"] = [round(_tvd(ref, s), 4) for s in series]
+            if len(series) == 2:
+                pa = ref.value_counts(normalize=True)
+                pb = series[1].value_counts(normalize=True)
+                cats = pa.index.union(pb.index)
+                diff = (pa.reindex(cats, fill_value=0) - pb.reindex(cats, fill_value=0)).abs()
+                entry["top_gap_category"] = str(diff.idxmax()); entry["top_gap"] = round(float(diff.max()), 4)
+        else:
+            entry["mean"] = [round(float(s.mean()), 4) for s in series]
+            entry["smd_vs_ref"] = [round(_smd(ref, s), 4) for s in series]
+            entry["ks_vs_ref"] = [round(float(ks_2samp(ref, s).statistic), 4) for s in series]
+        out["columns"][col] = entry
+    return out
+ 
+def plot_distribution_comparison(dfs, columns, path, labels=None, ncols=3, bins=20,
+                                 dedup_col=None, max_cat=12, cat_cols=None, dpi=200):
+    """Grid of overlaid distributions (one panel per column) comparing 2+ dataframes.
+    Categorical -> grouped proportion bars; numeric -> overlaid densities + mean lines.
+    Each panel is annotated with the vs-reference gap (SMD/KS or TVD)."""
+    import math
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    dfs = [_as_df(d) for d in dfs]
+    labels = labels or [f"df{i + 1}" for i in range(len(dfs))]
+    cat_cols = set(cat_cols or [])
+    stats = compare_distributions(dfs, columns, labels, dedup_col, max_cat, cat_cols)
+    nrows = math.ceil(len(columns) / ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.6 * ncols, 3.2 * nrows), squeeze=False)
+    for idx in range(nrows * ncols):
+        r, c = divmod(idx, ncols); ax = axes[r][c]
+        if idx >= len(columns):
+            ax.axis("off"); continue
+        col = columns[idx]
+        series = [_col_values(d, col, dedup_col) for d in dfs]
+        info = stats["columns"][col]
+        if info["type"] == "categorical":
+            props = [s.value_counts(normalize=True) for s in series]
+            cats = sorted(set().union(*[set(pp.index) for pp in props]), key=str)
+            x = np.arange(len(cats)); w = 0.8 / len(dfs)
+            for k, pp in enumerate(props):
+                ax.bar(x + k * w, [pp.get(cat, 0) for cat in cats], width=w,
+                       color=_CMP_COLORS[k % len(_CMP_COLORS)], label=labels[k], alpha=0.9)
+            ax.set_xticks(x + w * (len(dfs) - 1) / 2)
+            ax.set_xticklabels([str(ct) for ct in cats], fontsize=8)
+            ax.set_ylabel("proportion", fontsize=8)
+            note = f"TVD={info['tvd_vs_ref'][1]:.3f}" if len(dfs) == 2 else ""
+        else:
+            allv = np.concatenate([s.values for s in series])
+            edges = np.linspace(np.nanmin(allv), np.nanmax(allv), bins + 1)
+            for k, s in enumerate(series):
+                ax.hist(s.values, bins=edges, density=True, alpha=0.5,
+                        color=_CMP_COLORS[k % len(_CMP_COLORS)], label=labels[k])
+                ax.axvline(s.mean(), color=_CMP_COLORS[k % len(_CMP_COLORS)], lw=1.4, ls="--")
+            ax.set_ylabel("density", fontsize=8)
+            note = f"SMD={info['smd_vs_ref'][1]:.2f}  KS={info['ks_vs_ref'][1]:.2f}" if len(dfs) == 2 else ""
+        ax.set_title(f"{col}   {note}", fontsize=10, fontweight="bold")
+        ax.tick_params(labelsize=7)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+        if idx == 0:
+            ax.legend(fontsize=8, frameon=False)
+    fig.suptitle("Distribution comparison: " + " vs ".join(labels)
+                 + (f"  (dedup by {dedup_col})" if dedup_col else ""), fontsize=13)
+    fig.tight_layout()
+    fig.savefig(path, dpi=dpi, bbox_inches="tight"); plt.close(fig); return path
+ 
+def plot_balance(stats, path, threshold=0.1, dpi=200):
+    """Love plot from compare_distributions() output: |SMD| (numeric) / TVD (categorical)
+    per variable vs the reference df, with a balance threshold line. For the 2-df case."""
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    cols = stats["columns"]
+    names, vals, kinds = [], [], []
+    for col, info in cols.items():
+        names.append(col)
+        if info["type"] == "numeric":
+            vals.append(abs(info["smd_vs_ref"][1])); kinds.append("numeric")
+        else:
+            vals.append(info["tvd_vs_ref"][1]); kinds.append("categorical")
+    order = np.argsort(vals)
+    names = [names[i] for i in order]; vals = [vals[i] for i in order]; kinds = [kinds[i] for i in order]
+    colors = {"numeric": "#4C72B0", "categorical": "#DD8452"}
+    fig, ax = plt.subplots(figsize=(6.5, 0.5 * len(names) + 1.5))
+    y = np.arange(len(names))
+    for yi, v, k in zip(y, vals, kinds):
+        ax.plot([0, v], [yi, yi], color="#ccc", lw=1, zorder=1)
+        ax.scatter(v, yi, color=colors[k], s=70, zorder=2)
+    ax.axvline(threshold, color="crimson", ls="--", lw=1)
+    ax.set_yticks(y); ax.set_yticklabels(names, fontsize=9)
+    ax.set_xlabel("|SMD| (numeric) / TVD (categorical)", fontsize=9)
+    ax.set_title(f"Balance: {stats['labels'][1]} vs {stats['reference']}", fontsize=12)
+    handles = [plt.Line2D([0], [0], marker="o", ls="", color=colors["numeric"], label="numeric (|SMD|)"),
+               plt.Line2D([0], [0], marker="o", ls="", color=colors["categorical"], label="categorical (TVD)"),
+               plt.Line2D([0], [0], color="crimson", ls="--", label=f"threshold {threshold}")]
+    ax.legend(handles=handles, fontsize=8, frameon=False, loc="lower right")
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    fig.tight_layout(); fig.savefig(path, dpi=dpi, bbox_inches="tight"); plt.close(fig); return path
+ 
+def save_comparison_figures(dfs, columns, outdir=".", labels=None, dedup_col=None,
+                            max_cat=12, cat_cols=None):
+    """Save the distribution grid + Love plot and return {'paths': [...], 'stats': {...}}."""
+    os.makedirs(outdir, exist_ok=True)
+    stats = compare_distributions(dfs, columns, labels, dedup_col, max_cat, cat_cols)
+    paths = [
+        plot_distribution_comparison(dfs, columns, os.path.join(outdir, "compare_distributions.png"),
+                                     labels, dedup_col=dedup_col, max_cat=max_cat, cat_cols=cat_cols),
+        plot_balance(stats, os.path.join(outdir, "compare_balance.png")),
+    ]
+    return {"paths": paths, "stats": stats}
+
+
+# ---- single-variable distribution -----------------------------------------
+def variable_summary(data, column, dedup_col=None, max_cat=12, cat=None):
+    """Summary stats for one column (numeric or categorical), NaN-aware.
+    Accepts a DataFrame or Profiler. `dedup_col` counts each subject once."""
+    df = _as_df(data)
+    d = df.drop_duplicates(dedup_col) if dedup_col and dedup_col in df.columns else df
+    s_all = d[column]
+    s = s_all.dropna()
+    is_cat = cat if cat is not None else _is_categorical(s_all, max_cat)
+    out = {"column": column, "type": "categorical" if is_cat else "numeric",
+           "n": int(s.size), "n_missing": int(s_all.isna().sum())}
+    if is_cat:
+        vc = s.value_counts()
+        out["n_categories"] = int(vc.size)
+        out["mode"] = str(vc.index[0]) if vc.size else None
+        out["counts"] = {str(k): int(v) for k, v in vc.items()}
+    else:
+        out.update({"mean": round(float(s.mean()), 4), "median": round(float(s.median()), 4),
+                    "std": round(float(s.std(ddof=1)), 4) if s.size > 1 else 0.0,
+                    "min": round(float(s.min()), 4), "max": round(float(s.max()), 4),
+                    "q25": round(float(s.quantile(.25)), 4), "q75": round(float(s.quantile(.75)), 4)})
+    return out
+ 
+def plot_variable_distribution(data, column, path, dedup_col=None, bins=20, max_cat=12,
+                               cat=None, by=None, dpi=200):
+    """Plot the distribution of ONE variable. Categorical -> bar chart; numeric -> histogram
+    with mean/median lines and a stats box. Optional `by`: overlay distributions per group
+    value (e.g. by='case_control'). `cat=True/False` forces the type. Accepts df or Profiler.
+    Returns {'path':..., 'summary':...}."""
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    df = _as_df(data)
+    d = df.drop_duplicates(dedup_col) if dedup_col and dedup_col in df.columns else df
+    summ = variable_summary(df, column, dedup_col, max_cat, cat)
+    is_cat = summ["type"] == "categorical"
+    fig, ax = plt.subplots(figsize=(7, 4.4))
+ 
+    if by and by in d.columns:
+        groups = [(str(g), sub[column].dropna()) for g, sub in d.groupby(by)]
+        if is_cat:
+            props = [(g, s.value_counts(normalize=True)) for g, s in groups]
+            cats = sorted(set().union(*[set(pp.index) for _, pp in props]), key=str)
+            x = np.arange(len(cats)); w = 0.8 / max(len(groups), 1)
+            for k, (g, pp) in enumerate(props):
+                ax.bar(x + k * w, [pp.get(c, 0) for c in cats], width=w,
+                       color=_CMP_COLORS[k % len(_CMP_COLORS)], label=f"{by}={g}", alpha=0.9)
+            ax.set_xticks(x + w * (len(groups) - 1) / 2); ax.set_xticklabels([str(c) for c in cats])
+            ax.set_ylabel("proportion")
+        else:
+            allv = np.concatenate([s.values for _, s in groups]) if groups else np.array([0.0])
+            edges = np.linspace(np.nanmin(allv), np.nanmax(allv), bins + 1)
+            for k, (g, s) in enumerate(groups):
+                ax.hist(s.values, bins=edges, density=True, alpha=0.5,
+                        color=_CMP_COLORS[k % len(_CMP_COLORS)], label=f"{by}={g}")
+            ax.set_ylabel("density")
+        ax.legend(fontsize=8, frameon=False)
+        ax.set_title(f"{column} by {by}", fontsize=12, fontweight="bold")
+    else:
+        s = d[column].dropna()
+        if is_cat:
+            vc = s.value_counts()
+            ax.bar([str(k) for k in vc.index], vc.values, color="#4C72B0", alpha=0.9)
+            ax.set_ylabel("count")
+            box = (f"n={summ['n']}   missing={summ['n_missing']}\n"
+                   f"{summ['n_categories']} categories   mode={summ['mode']}")
+        else:
+            ax.hist(s.values, bins=bins, color="#4C72B0", alpha=0.85, edgecolor="white", linewidth=0.3)
+            ax.axvline(summ["mean"], color="crimson", lw=1.4, label=f"mean={summ['mean']:.2f}")
+            ax.axvline(summ["median"], color="darkorange", lw=1.4, ls="--",
+                       label=f"median={summ['median']:.2f}")
+            ax.legend(fontsize=8, frameon=False)
+            ax.set_ylabel("count")
+            box = (f"n={summ['n']}   missing={summ['n_missing']}\n"
+                   f"mean={summ['mean']:.2f}  std={summ['std']:.2f}\n"
+                   f"min={summ['min']:.2f}  max={summ['max']:.2f}")
+        ax.text(0.97, 0.97, box, transform=ax.transAxes, ha="right", va="top", fontsize=8,
+                bbox=dict(boxstyle="round", fc="white", ec="#ccc", alpha=0.9))
+        ax.set_title(f"Distribution of {column}", fontsize=12, fontweight="bold")
+    ax.set_xlabel(column)
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    os.makedirs(path,exist_ok=True)
+    fig.tight_layout(); fig.savefig(os.path.join(path,column+'.png'), dpi=dpi, bbox_inches="tight"); plt.close(fig)
+    return {"path": path, "summary": summ}
+
+
+# ---- Others -----------------------------------------------------------
+def add_area_and_ratio_columns(df):
+    """For every column named XXX_width_YYY, look for the matching XXX_height_YYY
+    column and add:
+        XXX_area_YYY  = XXX_width_YYY * XXX_height_YYY
+        XXX_ratio_YYY = XXX_height_YYY / XXX_width_YYY
+
+    Columns without a matching height counterpart are skipped.
+    Modifies df in place and also returns it.
+    """
+    import numpy as np
+
+    width_cols = [c for c in df.columns if "_width_" in c or c.startswith("width_") or c.endswith("_width")]
+
+    for width_col in width_cols:
+        height_col = width_col.replace("width", "height")
+        if height_col not in df.columns:
+            continue  # no matching height column, skip
+
+        area_col = width_col.replace("width", "area")
+        ratio_col = width_col.replace("width", "ratio")
+
+        df[area_col] = df[width_col] * df[height_col]
+        # avoid division by zero -> NaN instead of inf/error
+        df[ratio_col] = np.where(
+            df[width_col] != 0,
+            df[height_col] / df[width_col],
+            np.nan,
+        )
+
+    return df
