@@ -845,14 +845,14 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 img = raw_image_data
 
             if debug:
-                selected_transforms = ['original'] + selected_transforms
+                selected_transforms = [('original',None)] + selected_transforms
                 selected_modality_names = ([selected_modality_names[0].split('_')[0] + '_original']
                                            + selected_modality_names)
 
             for k, augmentation_transform in enumerate(selected_transforms):
-                if isinstance(augmentation_transform, str) and augmentation_transform == 'original':
+                if augmentation_transform[0] == 'original':
                     img_view = img.copy()
-                elif isinstance(augmentation_transform, str) and augmentation_transform == 'grid':
+                elif augmentation_transform[0] == 'grid':
                     # select a random grid crop
                     if num > 0:
                         x_coords = [0] + sorted(list(grid[0, :] * rescale_factor[0])) + [img.width]
@@ -866,11 +866,12 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                         img_view = img.crop(coordinates)
                     else:
                         img_view = img.copy()
-                elif augmentation_transform is None:
+                    img_view = augmentation_transform[1](img_view)  # apply the callable transform
+                elif augmentation_transform[0] is None:
                     img_view = img.copy()
                 else:
                     # a callable transform
-                    img_view = augmentation_transform(img)
+                    img_view = augmentation_transform[1](img)
 
                 if invert_color and not debug:
                     img_view = ImageOps.invert(img_view)
@@ -954,12 +955,16 @@ def keep_questionnaire(last_q,censor_time, questionnaire_info, questionnaire_num
         return questionnaire_dt <= -censor_time #eg if censor time=1 -> i keep
         #all questionnaires that are at least 1 year before the case date, so dt_q<=-1
 
-def questionnaires_to_keep(last_q, censor_time, questionnaire_info, df,subject_id):
+def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id):
     '''take case_grid_pattern, the case_dt_q for each questionnaire, the training_df and the filtering modality to decide
     which questionnaires to sample for training
     case_grid_pattern is between 1 and 13
     case_dt can be missing (NaN) or numeric (remember is for the case only)'''
-    grid_pattern = df.loc[df['unique_id']==subject_id,'grid_pattern'].values[0]
+    if train_df is None:
+        print("IMPORTANT: Forcing censor_time to 'pre_diagnosis' because train_df is None")
+        censor_time = 'pre_diagnosis'
+    else:
+        grid_pattern = train_df.loc[train_df['unique_id']==subject_id,'grid_pattern'].values[0]
 
     if censor_time=='all':
         return list(range(1,14))

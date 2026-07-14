@@ -132,7 +132,35 @@ class PadToSquare:
             pad_h - pad_h // 2,
         )
         return F.pad(img, padding, fill=self.fill, padding_mode=self.padding_mode)
+class PadOrCropToSize:
+    """Force an image to size x size by center-padding and/or center-cropping.
+    Handles each axis independently: an image can be padded on one axis
+    and cropped on the other."""
 
+    def __init__(self, size, fill=0, padding_mode="constant"):
+        self.size = (size, size) if isinstance(size, int) else size
+        self.fill = fill
+        self.padding_mode = padding_mode
+
+    def __call__(self, img):
+        th, tw = self.size
+        w, h = img.size          # PIL is (w, h)
+
+        # --- 1. Pad any axis that is too small (no-op if already >= target)
+        pad_w = max(tw - w, 0)
+        pad_h = max(th - h, 0)
+        if pad_w or pad_h:
+            left = pad_w // 2
+            top = pad_h // 2
+            img = F.pad(
+                img,
+                [left, top, pad_w - left, pad_h - top],   # l, t, r, b
+                fill=self.fill,
+                padding_mode=self.padding_mode,
+            )
+
+        # --- 2. Crop any axis that is too large (no-op if already == target)
+        return F.center_crop(img, [th, tw])
 # Load transforms
 def get_transforms(exp_params, transform):
     if exp_params['custom_transform'] is None:
@@ -185,9 +213,9 @@ def get_transforms(exp_params, transform):
 def get_augmentation_transform(exp_params):
     def get_single_augmentation_transform(t_modality):
         if t_modality is None:
-            return None
+            t=None
         elif t_modality == 'random_crop_half':
-            return T.Compose([
+            t = T.Compose([
                 T.RandomCrop(
                     int(exp_params['input_size'] / 2), 
                     pad_if_needed=True, 
@@ -196,7 +224,7 @@ def get_augmentation_transform(exp_params):
                 )
             ]) 
         elif t_modality == 'random_crop':
-            return T.Compose([
+            t = T.Compose([
                 T.RandomCrop(
                     int(exp_params['input_size']), 
                     pad_if_needed=True, 
@@ -205,9 +233,13 @@ def get_augmentation_transform(exp_params):
                 )
             ]) 
         elif t_modality == 'grid':
-            return 'grid'
+            #pad to 64x64 
+            t = T.Compose([
+                PadOrCropToSize(64, fill=(255,255,255)) #pad shortersides and then centerCrop
+            ])
         else:
             raise ValueError(f"Unknown augmentation_transform: {exp_params['apply_augmentation']}")
+        return (t_modality,t)
     if isinstance(exp_params['data_modality'], list):
         '''in this case i have to return a list of transforms
         for the grid sampling it returns grid because i cnanot pre-load a transform'''
