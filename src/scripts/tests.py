@@ -292,18 +292,19 @@ def inspect_00000():
     csv_data = csv_data[['group_id','subject_id','unique_id','case_control','grid_pattern','case_grid_pattern']]
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         print(csv_data)'''
+
     
 if __name__ == "__main__":
-    load_path = "/home/a_morelli/datasets/id_lists/final_data_for_training.parquet"
+    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
     csv_data = pd.read_parquet(load_path)
     csv_data['subject_id'] = csv_data['unique_id'].str.split('_').str[0]
     csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1]
-    #'last_avail_q' (is an int)
-    # case_dt_dateq{last_avail_q} should be negative
-    cases = csv_data.copy()#[csv_data['case_control'] == 1]
-    print(f"Total cases: {len(cases)}") 
-    #check how many cases have a negative case_dt_dateq{last_avail_q}
-    cases_with_negative_date = cases[cases.apply(lambda row: row[f'case_dt_dateq{row["last_avail_q"]}'] < 0, axis=1)]
-    print(f"Cases with negative case_dt_dateq{{last_avail_q}}: {len(cases_with_negative_date)}")
+    #count how many rows have grid_pattern=0000000000000
+    filtered = csv_data[csv_data['grid_pattern'] == '0000000000000']
+    print(f"Number of rows with grid_pattern=0000000000000: {len(filtered)}")
+    print(f"unique subject_ids with grid_pattern=0000000000000: {filtered['subject_id'].unique()}")
+    '''filtered = csv_data[csv_data['subject_id'] == 'A4W2V8A1']
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(filtered)'''
     
     

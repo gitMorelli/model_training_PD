@@ -666,6 +666,7 @@ class ConcatenateViews(nn.Module):
         
         return features
 #Wrappers for PD models
+#Time-sequence models
 class SequenceClassifierHead(nn.Module):
     """Everything after the CNN: view aggregation + slot transformer + classification.
     All params land under `classifier.*` in the parent's named_parameters()."""
@@ -731,6 +732,115 @@ class SequenceQuestionnaireModel(nn.Module):
     def forward(self, frames, seq_ids, slot_ids, lengths, return_view_attn=False):
         N, k  = frames.shape[:2]
         feats = self.vision_model(frames.flatten(0, 1))             # (N*k, feat_dim)  <- only heavy step
+        return self.classifier(feats, N, k, seq_ids, slot_ids, lengths, return_view_attn)
+#unordered models
+class SetClassifierHead(nn.Module):
+    """Order-invariant head for a variable number of timesteps per subject.
+
+    Deep-Sets style aggregator:
+
+        logits = rho( pool_{t in available} phi(x_t) )
+
+    - No positional embeddings, only symmetric pooling ops
+      -> exactly permutation invariant in the timesteps.
+    - Masked pooling -> subjects with fewer than n_slots timesteps
+      (down to a single one) are handled naturally.
+    - n_slots is only the buffer capacity (max timesteps per subject in a
+      batch); it adds no parameters that depend on it, so the same trained
+      head works for any actual count <= n_slots. Default is 2 (pairs).
+
+    Pooled features fed to rho:
+      * masked mean of phi(x_t)
+      * masked std across timesteps (optional) - a symmetric "spread" term;
+        for n == 2 it equals |h0 - h1| / 2, and it is zero for n == 1
+      * normalized count (optional) - how many timesteps were available
+    """
+
+    def __init__(self, feat_dim, n_classes, n_slots=2,
+                 d_model=512, view_agg='attention', dropout=0.1,
+                 ff_mult=2, use_spread=True, use_count_feature=True):
+        super().__init__()
+        self.n_slots = n_slots
+        self.proj = nn.Linear(feat_dim, d_model) if feat_dim != d_model else nn.Identity()
+        self.view_agg = view_agg
+        self.view_pool = GatedAttentionPool(d_model) if view_agg == 'attention' else None
+
+        # shared per-timestep encoder (phi)
+        self.phi = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+
+        self.use_spread = use_spread
+        self.use_count_feature = use_count_feature
+        rho_in = d_model \
+            + (d_model if use_spread else 0) \
+            + (1 if use_count_feature else 0)
+
+        # set-level classifier (rho)
+        self.rho = nn.Sequential(
+            nn.LayerNorm(rho_in),
+            nn.Linear(rho_in, ff_mult * d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(ff_mult * d_model, n_classes),
+        )
+
+    def forward(self, feats, N, k, seq_ids, slot_ids, lengths, return_view_attn=False):
+        # feats: (N*k, feat_dim) straight from the CNN,
+        # N = sum(T_i) total timesteps in the batch
+        x = self.proj(feats).view(N, k, -1)                 # (N, k, d_model)
+        if self.view_pool is not None:
+            q_repr, view_attn = self.view_pool(x)           # (N, d_model)
+        else:
+            q_repr, view_attn = x.mean(1), None
+
+        B   = lengths.size(0)
+        D   = q_repr.size(-1)
+        dev = q_repr.device
+
+        # fail loudly instead of OOB-indexing / silently overwriting
+        assert int(slot_ids.max()) < self.n_slots, \
+            f"slot_id {int(slot_ids.max())} exceeds n_slots={self.n_slots}"
+        flat = seq_ids.long() * self.n_slots + slot_ids.long()
+        assert torch.unique(flat).numel() == flat.numel(), \
+            "duplicate (seq_id, slot_id) pair: two timesteps would overwrite each other"
+
+        # scatter available timesteps into a padded (B, n_slots, D) buffer;
+        # slot_ids are arbitrary scatter targets (0..T_i-1), not positions
+        buffer = q_repr.new_zeros(B, self.n_slots, D)
+        buffer[seq_ids, slot_ids] = q_repr
+        present = torch.zeros(B, self.n_slots, device=dev)
+        present[seq_ids, slot_ids] = 1.0                    # 1 = timestep available
+
+        h = self.phi(buffer) * present.unsqueeze(-1)        # zero out padded slots
+        n = present.sum(1, keepdim=True)                    # (B, 1), 1..n_slots
+        mean = h.sum(1) / n.clamp(min=1)
+
+        parts = [mean]
+        if self.use_spread:
+            var = ((h - mean.unsqueeze(1)) ** 2
+                   * present.unsqueeze(-1)).sum(1) / n.clamp(min=1)
+            parts.append(torch.sqrt(var + 1e-8))            # zero when n == 1
+        if self.use_count_feature:
+            parts.append((n - 1.0) / max(self.n_slots - 1, 1))  # in [0, 1]
+
+        logits = self.rho(torch.cat(parts, dim=-1))
+        return (logits, view_attn) if return_view_attn else logits
+
+
+class SetQuestionnaireModel(nn.Module):
+    def __init__(self, vision_model, feat_dim, n_classes, n_slots=2, **head_kwargs):
+        super().__init__()
+        self.vision_model = vision_model                    # -> cnn.*
+        self.classifier = SetClassifierHead(                # -> classifier.*
+            feat_dim, n_classes, n_slots=n_slots, **head_kwargs)
+
+    def forward(self, frames, seq_ids, slot_ids, lengths, return_view_attn=False):
+        N, k  = frames.shape[:2]
+        feats = self.vision_model(frames.flatten(0, 1))     # (N*k, feat_dim)
         return self.classifier(feats, N, k, seq_ids, slot_ids, lengths, return_view_attn)
 
 #others

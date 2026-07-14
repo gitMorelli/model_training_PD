@@ -21,6 +21,7 @@ import shutil
 #from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks import Callback
 
+
 # --- 5. Training & Validation Loop ---
 def train_model(model, train_loader, val_loader, criterion, optimizer, epochs):
     for epoch in range(epochs):
@@ -401,6 +402,7 @@ class LitModel(L.LightningModule):
                             self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
             self.write_log("-------------------------------------\n")
 
+#------- PD classes --------------
 class ModelPD(L.LightningModule):
     def __init__(self, write_log,model,num_0, num_1,num_classes=2, lr_backbone=1e-4,
                  lr_classifier_head=1e-3,example_input_array=torch.randn(1, 3, 224, 224),
@@ -767,25 +769,458 @@ class ModelPD(L.LightningModule):
                             self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
             self.write_log("-------------------------------------\n")
 
+
+# Base class: everything shared between the two training regimes
+class ModelPDBase(L.LightningModule):
+    """Shared machinery: forward, optimizers/schedulers, epoch logging,
+    gradient checks, class-ratio bookkeeping. Subclasses implement
+    `compute_loss_and_metrics(batch, stage)`."""
+ 
+    def __init__(self, write_log, model,
+                 total_units,                      # subjects (flat) or groups (grouped)
+                 num_classes=1,
+                 lr_backbone=1e-4, lr_classifier_head=1e-3,
+                 example_input_array=None,
+                 opt_groups=None, num_epochs=10, lr_scheduling='cosine',
+                 weight_decay=1e-4, warmup_fraction=0.1,
+                 eta_min_cosine=1e-6, batch_size=32):
+        super().__init__()
+        self.write_log = write_log
+        self.model = model
+        self.opt_groups = opt_groups
+ 
+        self.num_classes = num_classes
+        self.lr_backbone = lr_backbone
+        self.lr_classifier_head = lr_classifier_head
+        self.lr_scheduling = lr_scheduling
+        self.num_epochs = num_epochs
+        self.weight_decay = weight_decay
+        self.warmup_fraction = warmup_fraction
+        self.eta_min_cosine = eta_min_cosine
+        self.batch_size = batch_size
+ 
+        # NOTE: `total_units` counts *whatever the loader batches*:
+        # subjects for the flat loader, groups for the grouped loader.
+        self.total_units = total_units
+        self.total_steps = int(self.num_epochs * (total_units // batch_size))
+ 
+        if example_input_array is not None:
+            self.example_input_array = example_input_array
+ 
+        # bookkeeping shared by both regimes
+        self.train_sample_count = 0
+        self.train_class_0_count = 0
+        self.train_class_1_count = 0
+        self.val_class_0_count = 0
+        self.val_class_1_count = 0
+ 
+    # ---- forward ------------------------------------------------------------
+    def forward(self, frames, seq_ids, slot_ids, lengths):
+        return self.model(frames, seq_ids, slot_ids, lengths)
+ 
+    @staticmethod
+    def make_example_input(k, n_slots, n_views_frames=2, C=3, H=224, W=224):
+        T = min(n_views_frames, n_slots)
+        frames = torch.randn(T, k, C, H, W)
+        seq_ids = torch.zeros(T, dtype=torch.long)
+        slot_ids = torch.arange(T, dtype=torch.long)
+        lengths = torch.tensor([T])
+        return (frames, seq_ids, slot_ids, lengths)
+ 
+    # ---- steps delegate to the subclass --------------------------------------
+    def compute_loss_and_metrics(self, batch, stage):
+        """Return the loss tensor (or None to skip the step) for stage='train';
+        return value is ignored for stage='val'."""
+        raise NotImplementedError
+ 
+    def training_step(self, batch, batch_idx):
+        return self.compute_loss_and_metrics(batch, "train")
+ 
+    def validation_step(self, batch, batch_idx):
+        self.compute_loss_and_metrics(batch, "val")
+ 
+    # ---- small shared helpers -------------------------------------------------
+    def _guard_finite(self, tensor, what):
+        if not torch.isfinite(tensor).all():
+            self.write_log(f"Warning: NaN/inf in {what} at step {self.trainer.global_step}. Skipping.")
+            return False
+        return True
+ 
+    def _log_lrs(self):
+        opt = self.optimizers()
+        if self.opt_groups:
+            logged = set()
+            for g in opt.param_groups:
+                name = g.get('lr_name')
+                if name and name not in logged:
+                    self.log(name, g['lr'], on_step=False, on_epoch=True)
+                    logged.add(name)
+        else:
+            self.log("lr_backbone",        opt.param_groups[0]['lr'], on_step=False, on_epoch=True)
+            self.log("lr_classifier_head", opt.param_groups[1]['lr'], on_step=False, on_epoch=True)
+ 
+    def _update_class_counts(self, labels, stage):
+        t = labels.long().view(-1)
+        if stage == "train":
+            self.train_class_0_count += (t == 0).sum().item()
+            self.train_class_1_count += (t == 1).sum().item()
+        else:
+            self.val_class_0_count += (t == 0).sum().item()
+            self.val_class_1_count += (t == 1).sum().item()
+ 
+    # ---- epoch hooks ------------------------------------------------------------
+    def on_train_epoch_start(self):
+        if self.current_epoch == 0:
+            self.write_log(f"Device of model at start of training: {next(self.model.parameters()).device}")
+        self.train_sample_count = 0
+ 
+    def _log_epoch_summary_extras(self):
+        """Subclasses may append regime-specific lines to the epoch summary."""
+        pass
+ 
+    def on_train_epoch_end(self):
+        WHITE = "\033[97m"
+        RED = "\033[91m"
+        RESET = "\033[0m"
+ 
+        all_layers_info = []
+        total_trainable_params = 0
+        total_non_trainable_params = 0
+ 
+        for name, param in self.model.named_parameters():
+            layer_str = f"  - {name} | Shape: {list(param.shape)} | Parameters: {param.numel():,}"
+            if param.requires_grad:
+                all_layers_info.append(f"{WHITE}{layer_str}{RESET}")
+                total_trainable_params += param.numel()
+            else:
+                all_layers_info.append(f"{RED}{layer_str}{RESET}")
+                total_non_trainable_params += param.numel()
+ 
+        total_params = total_trainable_params + total_non_trainable_params
+ 
+        self.write_log(
+            f"\n[Epoch {self.current_epoch + 1}] "
+            f"Total Parameters: {total_params:,} | "
+            f"{WHITE}Trainable: {total_trainable_params:,}{RESET} | "
+            f"{RED}Non-trainable: {total_non_trainable_params:,}{RESET}"
+        )
+ 
+        if self.current_epoch in [0, 5]:
+            self.write_log(f"\n--- Epoch {self.current_epoch + 1} Summary ---")
+            self.write_log(f"Expected number of stepping batches: {self.trainer.estimated_stepping_batches}")
+            self.write_log(f"Epoch {self.current_epoch + 1}: Total Training Samples Processed: {self.train_sample_count}\n")
+            self.write_log(f"Expected total units (subjects or groups): {self.total_units}\n")
+            self._log_epoch_summary_extras()
+ 
+            self.write_log("\n--- Model Architecture Summary ---\n")
+            self.write_log(f"Total Parameters Count: {total_params:,}\n")
+            self.write_log(f"Total Trainable Parameters Count: {total_trainable_params:,}\n")
+            self.write_log(f"Total Non-trainable Parameters Count: {total_non_trainable_params:,}\n")
+            self.write_log("Model Layers Structure (white = trainable, red = frozen):\n")
+            for layer_info in all_layers_info:
+                self.write_log(f"{layer_info}\n")
+ 
+        n0, n1 = self.train_class_0_count, self.train_class_1_count
+        self.log("train_class_ratio", n0 / n1 if n1 > 0 else float("inf"), prog_bar=False)
+        self.train_class_0_count = 0
+        self.train_class_1_count = 0
+ 
+    def on_validation_epoch_end(self):
+        n0, n1 = self.val_class_0_count, self.val_class_1_count
+        self.log("val_class_ratio", n0 / n1 if n1 > 0 else float("inf"), prog_bar=False)
+        self.val_class_0_count = 0
+        self.val_class_1_count = 0
+ 
+    # ---- optimizers ---------------------------------------------------------------
+    def configure_optimizers(self):
+ 
+        def split_decay(named_params):
+            decay, no_decay = [], []
+            for name, p in named_params:
+                if not p.requires_grad:
+                    continue
+                if p.ndim <= 1 or name.endswith(".bias"):
+                    no_decay.append(p)
+                else:
+                    decay.append(p)
+            return decay, no_decay
+ 
+        def add_group(named, lr, lr_name):
+            decay, no_decay = split_decay(named)
+            if decay:
+                param_groups.append({'params': decay,    'lr': lr, 'weight_decay': self.weight_decay, 'lr_name': lr_name})
+            if no_decay:
+                param_groups.append({'params': no_decay, 'lr': lr, 'weight_decay': 0.0, 'lr_name': lr_name})
+ 
+        param_groups = []
+ 
+        if self.opt_groups:
+            for group in self.opt_groups:
+                named = [(name, param) for name, param in self.model.named_parameters()
+                         if any(key in name.lower() for key in group['names']) and param.requires_grad]
+                add_group(named, group['lr'], group['lr_name'])
+        else:
+            backbone, head = [], []
+            for name, param in self.model.named_parameters():
+                if not param.requires_grad:
+                    continue
+                if 'classifier' in name.lower():
+                    head.append((name, param))
+                else:
+                    backbone.append((name, param))
+            add_group(backbone, self.lr_backbone, 'lr_backbone')
+            add_group(head, self.lr_classifier_head, 'lr_head')
+ 
+        optimizer = optim.AdamW(param_groups)
+ 
+        if self.lr_scheduling == 'cosine':
+            total_steps = self.total_steps
+            warmup_steps = max(1, int(self.warmup_fraction * total_steps))
+ 
+            warmup = torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=1e-2, end_factor=1.0, total_iters=warmup_steps)
+            cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max(1, total_steps - warmup_steps), eta_min=self.eta_min_cosine)
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer, schedulers=[warmup, cosine], milestones=[warmup_steps])
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {"scheduler": scheduler, "interval": "step", "frequency": 1},
+            }
+        return {"optimizer": optimizer}
+ 
+    # ---- gradient sanity check ------------------------------------------------------
+    def on_after_backward(self):
+        if self.trainer.global_step == 0:
+            self.write_log("\n--- Gradient Check (First Batch) ---")
+            for name, param in self.model.named_parameters():
+                if param.requires_grad and param.grad is not None:
+                    if 'layer4' in name or 'classifier' in name:
+                        grad_abs_mean = param.grad.abs().mean().item()
+                        self.write_log(f"Layer '{name}': Mean Abs Gradient = {grad_abs_mean:.2e}")
+                        if grad_abs_mean < 1e-8:
+                            self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
+            self.write_log("-------------------------------------\n") 
+
+# Flat regime: standard BCE / CE training (original ModelPD behaviour)
+class ModelPDClassification(ModelPDBase):
+    """Per-subject BCE (num_classes=1) or CE (num_classes=2) with optional
+    class-balancing weights. Expects the flat collate:
+    (frames, seq_ids, slot_ids, lengths, labels, resized, subject_ids, modalities)."""
+ 
+    def __init__(self, write_log, model, num_0, num_1, num_classes=2,
+                 use_balanced_weights=True, balancing_factor=1.0, balanced_data=False,
+                 **base_kwargs):
+        total = num_0 + num_1
+        super().__init__(write_log, model, total_units=total,
+                         num_classes=num_classes, **base_kwargs)
+        self.save_hyperparameters(ignore=['model', 'write_log'])
+ 
+        self.num_0, self.num_1, self.total = num_0, num_1, total
+        self.balancing_factor = balancing_factor
+        self.balanced_data = balanced_data
+        self.use_balanced_weights = use_balanced_weights
+ 
+        weight_0 = total / (2 * num_0)
+        weight_1 = total / (2 * num_1)
+        pos_weight_val = num_0 / num_1 if num_1 > 0 else 1.0
+        self.register_buffer("class_weights",
+                             torch.tensor([weight_0, weight_1], dtype=torch.float32))
+        self.register_buffer("pos_weight",
+                             torch.tensor([pos_weight_val], dtype=torch.float32))
+ 
+        if num_classes == 2:
+            self.criterion = (nn.CrossEntropyLoss(weight=self.class_weights)
+                              if use_balanced_weights else nn.CrossEntropyLoss())
+        elif num_classes == 1:
+            self.criterion = (nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
+                              if use_balanced_weights else nn.BCEWithLogitsLoss())
+ 
+        n = 2 if num_classes == 1 else num_classes
+        self.val_balanced_acc = MulticlassRecall(num_classes=n, average="macro")
+ 
+    # ---- loss + metrics --------------------------------------------------------
+    def compute_loss_and_metrics(self, batch, stage):
+        frames, seq_ids, slot_ids, lengths, labels, *_ = batch
+        bsz = labels.size(0)
+ 
+        targets = labels.float().unsqueeze(1) if self.num_classes == 1 else labels
+        outputs = self(frames, seq_ids, slot_ids, lengths)
+ 
+        if stage == "train" and not self._guard_finite(outputs, "outputs"):
+            return None
+ 
+        loss = self.criterion(outputs, targets)
+        if stage == "train" and not self._guard_finite(loss, "loss"):
+            return None
+ 
+        if self.num_classes == 1:
+            preds = (outputs > 0.0).float()
+        else:
+            _, preds = torch.max(outputs, 1)
+        acc = torch.sum(preds == targets.data).float() / bsz
+ 
+        self._update_class_counts(labels, stage)
+        self.log(f"{stage}_loss", loss, on_epoch=True, prog_bar=True, batch_size=bsz)
+        self.log(f"{stage}_acc",  acc,  on_epoch=True, prog_bar=True, batch_size=bsz)
+ 
+        if stage == "train":
+            self.train_sample_count += bsz
+            self._log_lrs()
+            return loss
+        else:
+            self.val_balanced_acc.update(preds.long().view(-1), labels.long().view(-1))
+            self.log("val_balanced_acc", self.val_balanced_acc, on_epoch=True,
+                     prog_bar=True, batch_size=bsz)
+            return None
+ 
+    def _log_epoch_summary_extras(self):
+        self.write_log(f"Class 0 samples: {self.num_0}, Class 1 samples: {self.num_1}\n")
+        self.write_log(f"Balancing Factor: {self.balancing_factor}\n")
+        self.write_log(f"Balanced Data: {self.balanced_data}, Use Balanced Weights: {self.use_balanced_weights}\n")
+        self.write_log(f"Weights for Loss Function: {self.class_weights.tolist()}\n")
+ 
+    # ---- prediction ----------------------------------------------------------------
+    def predict_step(self, batch, batch_idx):
+        frames, seq_ids, slot_ids, lengths, labels, \
+            resizing_factors, subject_ids, modalities = batch
+ 
+        outputs = self(frames, seq_ids, slot_ids, lengths)
+ 
+        if self.num_classes == 1:
+            p1 = torch.sigmoid(outputs).flatten()
+            probs = torch.stack([1 - p1, p1], dim=1)
+            preds = (outputs > 0.0).long().flatten()
+        else:
+            _, preds = torch.max(outputs, 1)
+            probs = torch.softmax(outputs, dim=1)
+ 
+        return {
+            "probs": probs.detach().cpu(),
+            "preds": preds.detach().cpu(),
+            "labels": labels.detach().cpu().flatten(),
+            "subject_ids": subject_ids,
+        }
+ 
+# Grouped regime: conditional-logistic (within-group softmax) training
+class ModelPDGrouped(ModelPDBase):
+    """Case/control matched-set training. Expects the grouped collate:
+    (frames, seq_ids, slot_ids, lengths, labels, resized, subject_ids,
+     modalities, group_ids), where group_ids is per-subject with within-batch
+    indices 0..G-1 and each group contains exactly one positive.
+ 
+    The model must output one logit per subject (n_classes=1); an unweighted
+    BCE auxiliary term (bce_aux_weight) keeps the logit calibrated so
+    sigmoid(score) > 0.5 remains a meaningful standalone 0/1 prediction.
+    `total_units` passed to the base must be the number of GROUPS (batch_size
+    in the grouped loader counts groups)."""
+ 
+    def __init__(self, write_log, model, bce_aux_weight=0.3,
+                 **base_kwargs):
+        base_kwargs.pop('num_classes', None)   # grouped regime is always 1-logit
+        super().__init__(write_log, model,
+                         num_classes=1, **base_kwargs)
+        self.save_hyperparameters(ignore=['model', 'write_log'])
+ 
+        self.bce_aux_weight = bce_aux_weight
+        self.criterion_bce = nn.BCEWithLogitsLoss()   # unweighted, calibration only
+ 
+        self.val_balanced_acc = MulticlassRecall(num_classes=2, average="macro")
+ 
+    # ---- loss + metrics ---------------------------------------------------------
+    def compute_loss_and_metrics(self, batch, stage):
+        frames, seq_ids, slot_ids, lengths, labels, \
+            resized, subject_ids, modalities, group_ids = batch
+        bsz = labels.size(0)                          # subjects in batch
+        n_groups = int(group_ids.max().item()) + 1
+ 
+        scores = self(frames, seq_ids, slot_ids, lengths).squeeze(-1)   # (B,)
+ 
+        if stage == "train" and not self._guard_finite(scores, "outputs"):
+            return None
+ 
+        loss_grp = grouped_ce_loss(scores, labels, group_ids)
+        loss_bce = self.criterion_bce(scores, labels.float())
+        loss = loss_grp + self.bce_aux_weight * loss_bce
+ 
+        if stage == "train" and not self._guard_finite(loss, "loss"):
+            return None
+ 
+        with torch.no_grad():
+            grp_acc = group_accuracy(scores, labels, group_ids)
+            preds = (scores > 0.0).long()             # standalone 0/1
+            acc = (preds == labels.long()).float().mean()
+ 
+        self._update_class_counts(labels, stage)
+        self.log(f"{stage}_loss",      loss,     on_epoch=True, prog_bar=True, batch_size=bsz)
+        self.log(f"{stage}_loss_grp",  loss_grp, on_epoch=True, batch_size=bsz)
+        self.log(f"{stage}_loss_bce",  loss_bce, on_epoch=True, batch_size=bsz)
+        self.log(f"{stage}_group_acc", grp_acc,  on_epoch=True, prog_bar=True, batch_size=n_groups)
+        self.log(f"{stage}_acc",       acc,      on_epoch=True, batch_size=bsz)
+ 
+        if stage == "train":
+            self.train_sample_count += bsz
+            self._log_lrs()
+            return loss
+        else:
+            self.val_balanced_acc.update(preds, labels.long().view(-1))
+            self.log("val_balanced_acc", self.val_balanced_acc, on_epoch=True,
+                     prog_bar=True, batch_size=bsz)
+            return None
+ 
+    def _log_epoch_summary_extras(self):
+        self.write_log(f"BCE auxiliary weight: {self.bce_aux_weight}\n")
+ 
+    # ---- prediction --------------------------------------------------------------
+    def predict_step(self, batch, batch_idx):
+        frames, seq_ids, slot_ids, lengths, labels, \
+            resized, subject_ids, modalities, group_ids = batch
+ 
+        scores = self(frames, seq_ids, slot_ids, lengths).squeeze(-1)
+ 
+        # (a) standalone probability / 0-1 per subject
+        p1 = torch.sigmoid(scores)
+        probs = torch.stack([1 - p1, p1], dim=1)
+        preds_standalone = (scores > 0.0).long()
+ 
+        # (b) within-group prediction: the argmax of each group is flagged as the case
+        m = group_max(scores, group_ids)
+        preds_group = (scores == m[group_ids]).long()
+ 
+        return {
+            "scores": scores.detach().cpu(),
+            "probs": probs.detach().cpu(),
+            "preds": preds_standalone.detach().cpu(),
+            "preds_group": preds_group.detach().cpu(),
+            "labels": labels.detach().cpu().flatten(),
+            "group_ids": group_ids.detach().cpu(),
+            "subject_ids": subject_ids,
+        }
+ 
+
 #------ Loss functions ---------------
 def grouped_ce_loss(scores, labels, group_ids):
-    """scores (B,), labels (B,) with exactly one 1 per group, group_ids (B,) in 0..G-1.
-    Conditional logistic / within-group softmax NLL: mean over groups of
-    -score_case + logsumexp(scores in group)."""
+    """Conditional logistic / within-group softmax NLL.
+ 
+    scores    : (B,) raw logits, one per subject
+    labels    : (B,) 0/1, exactly one 1 per group
+    group_ids : (B,) group index in 0..G-1 (within-batch indices)
+ 
+    loss = mean over groups of ( logsumexp(scores in group) - score_of_case )
+    """
     G = int(group_ids.max().item()) + 1
-
-    # numerically stable logsumexp per group
-    m = torch.full((G,), float('-inf'), device=scores.device)
-    m = m.scatter_reduce(0, group_ids, scores, reduce='amax')
-    exp_sum = torch.zeros(G, device=scores.device).scatter_add(
+ 
+    m = group_max(scores, group_ids, G)                                    # (G,)
+    exp_sum = torch.zeros(G, device=scores.device, dtype=scores.dtype).scatter_add(
         0, group_ids, torch.exp(scores - m[group_ids]))
-    lse = m + exp_sum.log()                                   # (G,)
-
-    pos_score = torch.zeros(G, device=scores.device).scatter_add(
-        0, group_ids, scores * labels.float())                # (G,)
-
+    lse = m + exp_sum.log()                                                # (G,)
+ 
+    pos_score = torch.zeros(G, device=scores.device, dtype=scores.dtype).scatter_add(
+        0, group_ids, scores * labels.float())                             # (G,)
+ 
     return (lse - pos_score).mean()
 
+# -------------- Callbacks -------------------
 #tracking experiments
 class BestMetricTracker(L.Callback):
     def __init__(self):
@@ -821,3 +1256,29 @@ class BestMetricTracker(L.Callback):
             self.best_val_loss = val_loss.item()
             # If you want the epoch where the best validation loss happened:
             self.best_epoch = current_epoch
+
+class ClearCache(L.Callback):
+    def on_validation_epoch_start(self, trainer, pl_module):
+        torch.cuda.empty_cache()
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        torch.cuda.empty_cache()
+
+#-------- others ----------------
+def group_max(scores, group_ids, n_groups=None):
+    """Per-group max of `scores`. Returns tensor of shape (G,)."""
+    G = n_groups if n_groups is not None else int(group_ids.max().item()) + 1
+    m = torch.full((G,), float('-inf'), device=scores.device, dtype=scores.dtype)
+    return m.scatter_reduce(0, group_ids, scores, reduce='amax')
+ 
+ 
+def group_accuracy(scores, labels, group_ids):
+    """Fraction of groups whose highest-scoring member is the true case."""
+    G = int(group_ids.max().item()) + 1
+    m = group_max(scores, group_ids, G)
+    is_group_max = scores == m[group_ids]                                  # (B,)
+    correct = (is_group_max & (labels == 1)).float()
+    hits = torch.zeros(G, device=scores.device).scatter_add(0, group_ids, correct)
+    return hits.clamp(max=1).mean()
+ 
+ 

@@ -5,13 +5,13 @@
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=10             # Number of CPU cores per task
-#SBATCH --mem=32G                      # Job memory request
-#SBATCH --time=03:00:00                # Time limit hrs:min:sec
+#SBATCH --mem=86G                      # Job memory request
+#SBATCH --time=05:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
 #--gres=gpu:1
-#SBATCH --gres=gpu:h100:1
+#SBATCH --gres=gpu:v100:1
 #--gres=gpu:v100:1
 #--gres=gpu:p40:1
 #--nodelist=gpu05
@@ -25,6 +25,7 @@ ENV_PYTHON="/home/a_morelli/.conda/envs/torch_gpu/bin/python"
 
 # Add this line to resolve the libiomp5 conflict
 export KMP_DUPLICATE_LIB_OK=TRUE
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # --- Execution ---
 # You can run the script from any location using its full path
@@ -37,3 +38,5 @@ cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.train_PD_model \
     --num_workers 8
+echo "PYTORCH_CUDA_ALLOC_CONF=$PYTORCH_CUDA_ALLOC_CONF"
+nvidia-smi --query-gpu=name,memory.total --format=csv

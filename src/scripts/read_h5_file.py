@@ -193,8 +193,8 @@ def main():
         csv_data = pd.read_csv('/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs.csv')
         save_path = f"/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl"
     elif EXPERIMENT == 'PD':
-        csv_data = pd.read_parquet('/home/a_morelli/datasets/id_lists/final_data_for_training.parquet')
-        save_path = f"/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl"
+        csv_data = pd.read_parquet('/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet')
+        save_path = f"/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl"
     
     data = pre_load_grid_data(
         "/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5", 

@@ -515,15 +515,15 @@ def process_chunk_PD_grouped(output_path,worker_id, id_chunk,data=None):
 
             current_shard_name = sink.fname
             subjects_dict = {}
+            sample = {}
             for i, tar_pair in enumerate(tar_pairs):
                 if (i+1) % 10 == 0:
-                    print(f"[Worker {worker_id}] Processing {i+1}/{len(source_tars)}")
+                    print(f"[Worker {worker_id}] Processing {i+1}/{len(tar_pairs)}")
                 
                 tar_path, subject_id = tar_pair
                 original_id = os.path.basename(tar_path).split('.')[0].split('_')[1]
                 id_data = get_id_data_from_h5_file(hd5_FILE_PATH, original_id)
 
-                sample = {}
                 with tarfile.open(tar_path, 'r') as old_tar:
                     members = old_tar.getmembers()
                     sequences = {}
@@ -636,7 +636,7 @@ def process_chunk_PD_grouped(output_path,worker_id, id_chunk,data=None):
                     
                     # 2. Build ONE single WDS sample dictionary for the subject
                     # 1. Define your list of target keys
-                    subjects_dict['subject']={
+                    subjects_dict[subject_id]={
                         "label": label,
                         "at_least_warning": at_least_warning,
                         'case_grid_pattern': case_grid_pattern,
@@ -645,15 +645,16 @@ def process_chunk_PD_grouped(output_path,worker_id, id_chunk,data=None):
                         'last_q': last_q
                     }
                 
-                # 4. Serialize and encode exactly once
-                sample["__key__"]=group_subject_id
-                inner_data = {
-                    "subjects": subjects_dict,
-                    "group_id": group_subject_id
-                }
-                sample["json"] = json.dumps(inner_data).encode("utf-8")
-                # 4. Write the massive subject sample to the shard
-                sink.write(sample)
+            # 4. Serialize and encode exactly once
+            sample["__key__"]=group_subject_id
+            inner_data = {
+                "subjects": subjects_dict,
+                "group_id": group_subject_id
+            }
+            sample["json"] = json.dumps(inner_data).encode("utf-8")
+            # 4. Write the massive subject sample to the shard
+            sink.write(sample) #NOTE: webdataset checks if the data has to be written in the current shard or in the next here
+            #-> it may happen that the group is saved in the next (-> the shard_name in the json will be wrong for the subjects in the group)
 
     print(f"[Worker {worker_id}] Complete!")
 

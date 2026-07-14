@@ -6,7 +6,7 @@ from PIL import Image, ImageOps
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 import os
-import pandas as pd
+import pandas as pd 
 import torch.nn as nn
 import time
 import webdataset as wds
@@ -34,13 +34,13 @@ from src.utils.model_utils import SequenceQuestionnaireModel
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms
-from src.utils.training_utils import ModelPD, BestMetricTracker
+from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 exp_params = {
-    'list_of_ids_paths': "/home/a_morelli/datasets/id_lists/final_data_for_training.parquet",
-    'data_folder': "final_png_whitebg",
-    'grid_dict_path': "/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl",
+    'list_of_ids_paths': "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet",
+    'data_folder': "final_png_whitebg_grouped", #final_png_whitebg_grouped, final_png_whitebg
+    'grid_dict_path': "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl",
 
     #experiment parameters
     'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)],
@@ -48,10 +48,10 @@ exp_params = {
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
-    'use_balanced_weights': True,
+    'use_balanced_weights': False,
     'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': True, #note that this and balace_validation are independent
-    'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
+    'balanced_data': False, #note that this and balace_validation are independent
+    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
@@ -61,11 +61,11 @@ exp_params = {
     'filter_modality' : 'digit',
 
     #model definition
-    'model':"resnet50", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':"resnet18", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': os.path.join(
     '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
-    'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
+    'resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt'
 ), #None, see options below
     'model_structure': 'SequenceQuestionnaireModel',
     'model_parameters': {
@@ -75,6 +75,10 @@ exp_params = {
         'ff_mult':2,
         'dropout': 0.4,
     },
+
+    #training modality
+    'grouped': True, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
+    'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
 
     #Transforms definitions
     'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
@@ -88,18 +92,25 @@ exp_params = {
     'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 4,
-    'num_epochs': 100,
-    'patience': 20,
+    'batch_size': 1,
+    'num_epochs': 10,
+    'patience': 5,
     'eta_min_cosine': 1e-8,
     'weight_decay': 0.05, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
     'layers_to_unfreeze': ['classifier','layer4'],#['all','classifier'], #Update it for every model
     'seed': 42,
+    'accumulate_grad_batches': 4,   # effective batch = batch_size * 4 or None
+    'precision': "16-mixed",        # AMP: autocast + GradScaler handled for you or None
+    'gradient_clip_val':None,# 1.0,
 
-    'prefetch_factor':2,
+    'prefetch_factor':1,
 }
+if exp_params['grouped']:
+    exp_params['balance_validation'] = False
+    exp_params['balanced_data'] = False
+    exp_params['use_balanced_weights'] = False
 if isinstance(exp_params['data_modality'],list):
     exp_params['num_tiles'] = len(exp_params['data_modality'])
 #options for custom_pre_trained_weights:
@@ -157,22 +168,17 @@ def main():
 
     model, transform = model_initialization(write_log,exp_params,verbose=VERBOSE, **exp_params['model_parameters'])
     
+    train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
                                                                        grid_dict, transform, 
-                                                                       SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val)
+                                                                       SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
+                                                                       train_df=train_df)
     
     if DEBUG_IMGS:
         debug(train_loader,val_loader,exp_params)
     
-
-    example_input_array = ModelPD.make_example_input(k=exp_params['num_tiles'], n_slots=13)
-    lit_model = ModelPD(write_log,model=model, num_0=num_0, num_1=num_1, num_classes=exp_params['num_classes'],lr_backbone=exp_params['lr_backbone'], 
-                         lr_classifier_head=exp_params['lr_classifier_head'], example_input_array=example_input_array, 
-                         opt_groups=define_optimization_groups, num_epochs=exp_params['num_epochs'], lr_scheduling=exp_params['lr_scheduling'],
-                         balancing_factor=exp_params['balancing_factor'], balanced_data=exp_params['balanced_data'], use_balanced_weights=exp_params['use_balanced_weights'], 
-                         weight_decay=exp_params['weight_decay'], warmup_fraction=exp_params['warmup_fraction'], 
-                         eta_min_cosine=exp_params['eta_min_cosine'], batch_size=exp_params['batch_size'])
-
+    
+    lit_model = litmodel_initialization(model,num_0,num_1,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
 
     
     trainer, metrics_tracker = trainer_definition(current_version, exp_params)
@@ -202,6 +208,7 @@ def main():
 #### HELPER FUCNTIONS ####
 
 def trainer_definition(current_version, exp_params):
+
     # 2. Setup Checkpointing
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",               # Monitor validation loss
@@ -248,14 +255,18 @@ def trainer_definition(current_version, exp_params):
         version=current_version  # Works perfectly as an integer or string
     )
 
+    optional = ['precision', 'accumulate_grad_batches', 'gradient_clip_val']
+    extra_kwargs = {k: exp_params[k] for k in optional if exp_params.get(k) is not None}
+
     # 4. Initialize Trainer and Fit
     trainer = L.Trainer(
         max_epochs=exp_params['num_epochs'],
         logger = tb_logger,
         accelerator="auto",                # Automatically selects GPU/CPU/MPS
-        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker, periodic_ckpt],
+        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker, periodic_ckpt, ClearCache()],
         profiler="simple",  # Add this line to get a performance summary
-        enable_progress_bar=False  # Remove this CPU overhead
+        enable_progress_bar=False,  # Remove this CPU overhead
+        **extra_kwargs
     )
     # if you want you can set anothr kind of logger (not tensorboard but csv ..)
     return trainer, metrics_tracker
@@ -297,6 +308,32 @@ def model_initialization(write_log,exp_params, verbose=True, **kwargs):
         write_log(trainable_parameters_info)
     return model, transform
 
+def litmodel_initialization(model, num_0,num_1,write_log, define_optimization_groups,exp_params, exclusion_set, verbose):
+    additional_kwargs={
+    }
+    if exp_params['grouped']:
+        model_class=ModelPDGrouped
+        additional_kwargs['bce_aux_weight'] = exp_params['bce_aux_weight']
+        total_units = compute_unique_groups(exp_params, exclusion_set) #the total number of unique groups after filtering
+        if verbose:
+            print(f"Total unique groups in training set after filtering: {total_units}")
+    else:
+        model_class=ModelPDClassification
+        additional_kwargs['num_0']= num_0
+        additional_kwargs['num_1']= num_1
+        additional_kwargs['num_classes']= exp_params['num_classes']
+        additional_kwargs['use_balanced_weights']= exp_params['use_balanced_weights']
+        additional_kwargs['balancing_factor']= exp_params['balancing_factor']
+        additional_kwargs['balanced_data']= exp_params['balanced_data']
+        total_units = num_0 + num_1
+    example_input_array = model_class.make_example_input(k=exp_params['num_tiles'], n_slots=13)
+    lit_model = model_class(write_log,model=model,total_units=total_units,lr_backbone=exp_params['lr_backbone'], 
+                         lr_classifier_head=exp_params['lr_classifier_head'], example_input_array=example_input_array, 
+                         opt_groups=define_optimization_groups, num_epochs=exp_params['num_epochs'], lr_scheduling=exp_params['lr_scheduling'],
+                         weight_decay=exp_params['weight_decay'], warmup_fraction=exp_params['warmup_fraction'], 
+                         eta_min_cosine=exp_params['eta_min_cosine'], batch_size=exp_params['batch_size'],**additional_kwargs)
+    return lit_model
+
 def logging_initialization():
     #read the current version number (starts from 1)
     current_version=1
@@ -333,6 +370,22 @@ def logging_initialization():
         print(f"CUDA_VISIBLE_DEVICES: {visible}")
         write_log(f"GPU detected: {gpu} (Device ID: {device_id})")
     return write_log, current_version
+
+def compute_unique_groups(exp_params, exclusion_set):
+    # Compute unique groups for training 
+    train_groups = set()
+    
+    with open(exp_params['list_of_ids_paths'], 'rb') as f:
+        id_list_df = pd.read_parquet(f)
+    
+    # Filter out excluded IDs for training
+    train_df = id_list_df[~id_list_df['unique_id'].isin(exclusion_set)]
+    #create group_id column (unique_id = XXXX_YYYY with YYYY the group_id)
+    train_df['group_id'] = train_df['unique_id'].str.split('_').str[1]
+    # Get number of unique groups in training set
+    train_groups = set(train_df['group_id'].unique())
+    
+    return len(train_groups)
 
 def get_args():
     import argparse

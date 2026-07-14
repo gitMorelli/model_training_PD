@@ -202,7 +202,7 @@ def debug_images_PD(mean,std,loader,out_dir,input_is_batch=False): #(N, k, C, H,
         slot_to_q   : optional dict/callable slot->label (else "q{slot+1}")
         mean,std    : denormalization; pass None, None if frames already in [0,1]
         """
-        frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities = batch
+        frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities, *_ = batch
         seq_ids, slot_ids = seq_ids.cpu(), slot_ids.cpu()
         B = lengths.size(0)
 
@@ -404,7 +404,7 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
     slot_to_q   : optional dict/callable slot->label (else "q{slot+1}")
     """
     # unpack, tolerating the 5- or 6-element variant
-    frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities = batch
+    frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities, *_ = batch
 
     seq_ids  = seq_ids.cpu()
     slot_ids = slot_ids.cpu()

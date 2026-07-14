@@ -788,14 +788,16 @@ def _index_images(sample, grouped):
     Keys look like 'qX.modality.png' (flat) or 'subject.qX.modality.png' (grouped).
     """
     pool = {}
+    #print("Debug indexing function ..")
     for key, value in sample.items():
         if not key.endswith((".png", ".jpg", ".jpeg")):
             continue
         parts = key.split('.')
         if grouped:
-            subj = parts[0]
+            subj = parts[0].upper()
             q_num = int(parts[1][1:])
             mod_name = parts[2].lower()
+            #print(f"Indexing grouped image: subject={subj}, questionnaire={q_num}, modality={mod_name}", flush=True)
             pool.setdefault(subj, {}).setdefault(q_num, {})[mod_name] = value
         else:
             q_num = int(parts[0][1:])
@@ -806,7 +808,7 @@ def _index_images(sample, grouped):
 def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                                    modality_string_list, original_modality_names,
                                    grid_dict, censor_time, filter_modality,
-                                   huggingface_transform, invert_color, debug):
+                                   huggingface_transform, invert_color, debug, train_df):
     """Return a function that builds the full sequence for one subject.
 
     All the static configuration is captured in the closure, so the returned
@@ -908,8 +910,10 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         resized_list = []
         modalities = []
 
+        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id)
+
         for X in range(1, 14):
-            if not keep_questionnaire(last_q, censor_time, questionnaire_info, X):
+            if X not in q_to_keep:  # questionnaire not to keep based on censoring
                 continue
             if X not in subject_images:  # questionnaire not in the shard file
                 continue
@@ -950,16 +954,44 @@ def keep_questionnaire(last_q,censor_time, questionnaire_info, questionnaire_num
         return questionnaire_dt <= -censor_time #eg if censor time=1 -> i keep
         #all questionnaires that are at least 1 year before the case date, so dt_q<=-1
 
+def questionnaires_to_keep(last_q, censor_time, questionnaire_info, df,subject_id):
+    '''take case_grid_pattern, the case_dt_q for each questionnaire, the training_df and the filtering modality to decide
+    which questionnaires to sample for training
+    case_grid_pattern is between 1 and 13
+    case_dt can be missing (NaN) or numeric (remember is for the case only)'''
+    grid_pattern = df.loc[df['unique_id']==subject_id,'grid_pattern'].values[0]
+
+    if censor_time=='all':
+        return list(range(1,14))
+    elif censor_time=='pre_diagnosis':
+        return [q for q in range(1,last_q+1)]
+    elif censor_time=='pre_diagnosis_1y':
+        return [q for q in range(1,last_q+1) if questionnaire_info[q]['case_dt_dateq']<=-1]
+    elif censor_time=='last_and_previous':
+        list_questionnaires = [last_q]
+        for q in range(last_q-1,0,-1):
+            if grid_pattern[q-1]==1:
+                list_questionnaires.append(q)
+                break 
+    elif censor_time=='last_and_successive':
+        list_questionnaires = [last_q]
+        for q in range(last_q+1,14):
+            if grid_pattern[q-1]==1:
+                list_questionnaires.append(q)
+                break
+    return list_questionnaires
+
+
 #---------- yield smaples
 def create_sequence_flattener_PD_multiview(transform_func, augmentation_transform_list, n_views,
                                            modality_string_list, original_modality_names,
                                            exclusion_set, huggingface_transform=False,
-                                           invert_color=False, grid_dict=None, censor_time=0,
-                                           filter_modality='number_random', debug=False):
+                                           invert_color=False, grid_dict=None, censor_time='pre_diagnosis',
+                                           filter_modality='number_random', debug=False, train_df=None):
     build_sequence = _make_subject_sequence_builder(
         transform_func, augmentation_transform_list, modality_string_list,
         original_modality_names, grid_dict, censor_time, filter_modality,
-        huggingface_transform, invert_color, debug)
+        huggingface_transform, invert_color, debug, train_df)
 
     def flatten_samples(src):
         for sample in src:
@@ -992,11 +1024,11 @@ def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_tr
                                     modality_string_list, original_modality_names,
                                     exclusion_set, grid_dict, censor_time,
                                     filter_modality, huggingface_transform=False,
-                                    invert_color=False, debug=False, **kw):
+                                    invert_color=False, debug=False, train_df=None, **kw):
     build_sequence = _make_subject_sequence_builder(
         transform_func, augmentation_transform_list, modality_string_list,
         original_modality_names, grid_dict, censor_time, filter_modality,
-        huggingface_transform, invert_color, debug)
+        huggingface_transform, invert_color, debug, train_df)
 
     def flatten_groups(src):
         for sample in src:
@@ -1007,13 +1039,19 @@ def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_tr
             image_pool = _index_images(sample, grouped=True)  # subj -> q -> mod
             group_id = json_data["group_id"]
 
+            '''print("Start debugging dataloader ...")
+            print(image_pool.keys())
+            print("length exclusion set:", len(exclusion_set))
+            print("json -> \n", json_data["subjects"], flush=True)
+            assert 1==0, "debug"'''
+
             group = []
             for subject_id, meta in json_data["subjects"].items():
                 if subject_id in exclusion_set:
                     continue
                 result = build_sequence(subject_id, meta["last_q"],
                                         meta["questionnaire_info"],
-                                        image_pool.get(subject_id.split('_')[0], {}))
+                                        image_pool.get(subject_id, {}))
                 if result is None:
                     continue
                 sequence, questionnaires, modalities, resized = result
@@ -1030,7 +1068,7 @@ def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_tr
 
 def create_sequence_flattener_PD_grid(transform_func, augmentation_transform, n_views, modality_string,
                                               exclusion_set, huggingface_transform=False, invert_color=False,
-                                              grid_dict=None, censor_time=0):
+                                              grid_dict=None, censor_time='pre_diagnosis'):
     def flatten_samples(src):
         for sample in src:
             label = None
@@ -1143,7 +1181,7 @@ def create_sequence_flattener_PD_grid(transform_func, augmentation_transform, n_
 
 
 #------ collate functions
-def collate_variable_sequences_PD_grouped(samples, questionnaire_to_slot=None, debug=False):
+def collate_variable_sequences_PD_grouped(samples, debug=False):
     """Collate for the grouped loader.
  
     Each sample is one GROUP:
@@ -1216,17 +1254,18 @@ def _collate_subject_level(sequences, labels, subject_ids, questionnaires,
             modalities.append(modalities_list[b][i])
             if debug:
                 frames.append(sequences[b][i])
- 
-    return (frames,                                        # list of dicts if debug
-            torch.tensor(seq_ids),
-            torch.tensor(slot_ids),
-            lengths,
+    
+    # if the batch has three subjects then frames, seq_ids, slot_ids have dimension sum(T_i) where T_i is the number of time-steps for subject i
+    return (frames,  # list of dicts if debug
+            torch.tensor(seq_ids), #which subject the frame is from
+            torch.tensor(slot_ids), #which questionnaire/time-step if the frame
+            lengths, 
             labels,
             resized,
             subject_ids,
             modalities)
  
-def collate_variable_sequences_PD(samples, questionnaire_to_slot=None, debug=False):
+def collate_variable_sequences_PD(samples, debug=False):
     """Collate for the flat (per-subject) loader. Same output as before."""
     sequences       = [s[0] for s in samples]              # each (T_i, k, C, H, W)
     labels          = torch.stack([s[1] for s in samples])
@@ -1261,7 +1300,7 @@ def collate_groups_PD(batch_of_groups, debug=False):
 #------ Build dataset --------
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
                        huggingface_transform=False,augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None,
-                       censor_time=0, filter_modality='digit', debug=False, grouped=False):
+                       censor_time='pre_diagnosis', filter_modality='digit', debug=False, grouped=False, train_df=None):
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
@@ -1310,9 +1349,9 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                 .compose(compose_fn(transform, augmentation_transform, n_views=n_views, modality_string_list=modality_string,
                                     exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
                                     grid_dict=grid_dict, censor_time=censor_time,
-                                    original_modality_names=modality, filter_modality=filter_modality, debug=debug)) # This replaces .map() and .select()
+                                    original_modality_names=modality, filter_modality=filter_modality, debug=debug, train_df=train_df)) # This replaces .map() and .select()
                 .batched(batch_size,
-                        collation_fn=partial(collate_fn, questionnaire_to_slot=None, debug=debug),
+                        collation_fn=partial(collate_fn, debug=debug),
                         partial=False)
             )
         else:
@@ -1322,7 +1361,8 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     return dataset
 
 #pipelines
-def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, SHARD_PATTERN_train, SHARD_PATTERN_val):
+def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, 
+                       SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None):
     print(f"Reading from {SHARD_PATTERN_train} and {SHARD_PATTERN_val}..")
     augmentation_transform = get_augmentation_transform(exp_params)
     print("Augmentation transform:", augmentation_transform)
@@ -1344,8 +1384,8 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         grouped=exp_params.get('grouped', False),
     )
 
-    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, exclusion_set=exclusion_set, **common_kwargs)
-    val_dataset   = prepare_PD_dataset(SHARD_PATTERN_val, exclusion_set=val_exclusion_set, **common_kwargs)
+    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, exclusion_set=exclusion_set,train_df=train_df, **common_kwargs)
+    val_dataset   = prepare_PD_dataset(SHARD_PATTERN_val, exclusion_set=val_exclusion_set,train_df=train_df, **common_kwargs)
     
     train_loader = DataLoader(
         train_dataset, 
@@ -1554,6 +1594,15 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
     csv_data = csv_source.copy()
     csv_data = csv_data[csv_data['split'] == split]
     all_original_ids = set(original_data[original_data['split']==split]['unique_id'].unique())
+
+    if exp_params['grouped']: #if grouped modality i want only one case in each group -> have to deal with the cases that are
+        #also selected as controls
+        #remove all rows with case_control==0 and diag_park_final1_quest==1
+        print("Removing all rows with case_control==0 and diag_park_final1_quest==1 to avoid having cases also as controls in grouped modality")
+        print(f"Initial number of samples in {split} set: {len(csv_data)}")
+        csv_data = csv_data[~((csv_data['case_control']==0) & (csv_data['diag_park_final1_quest']==1))]
+        print(f"Number of samples in {split} set after removing cases also as controls: {len(csv_data)}")
+        print("-" * 50)
 
     csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1].astype(int)
     #exclude the subjects for which grid_pattern or case_grid_pattern is all 0 before last_avail_q
