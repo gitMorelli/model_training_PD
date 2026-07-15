@@ -27,20 +27,22 @@ import re
 import signal
 import sys
 import pickle
+import numpy as np
 
 from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict
 from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD
-from src.utils.model_utils import SequenceQuestionnaireModel
+from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
-from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms
+from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std
 from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 exp_params = {
     'list_of_ids_paths': "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet",
-    'data_folder': "final_png_whitebg_grouped", #final_png_whitebg_grouped, final_png_whitebg
+    'data_folder': "final_png_whitebg" ,#"final_png_whitebg_grouped", final_png_whitebg
     'grid_dict_path': "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl",
+    'class_col': 'diag_park_final1_quest',
 
     #experiment parameters
     'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)],
@@ -48,28 +50,25 @@ exp_params = {
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
-    'use_balanced_weights': False,
-    'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': False, #note that this and balace_validation are independent
+    'use_balanced_weights': True,
+    'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
+    'balanced_data': True, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
-    'filter_modality' : 'digit',
+    'censor_time': 'last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'filter_modality' : 'digit', 
 
     #model definition
     'model':"resnet18", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': os.path.join(
-    '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
-    'resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt'
-), #None, see options below
-    'model_structure': 'SequenceQuestionnaireModel',
+    'custom_pre_trained_weights': None, #None, see options below
+    'model_structure': 'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'model_parameters': {
-        'd_model': 256, 
+        'd_model': 128, 
         'n_heads': 4,
         'n_layers':1,
         'ff_mult':2,
@@ -77,8 +76,11 @@ exp_params = {
     },
 
     #training modality
-    'grouped': True, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
+    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
+    'synthetic': None, #['original','progressive_thickening','progressive_slant','progressive_size_drift', 
+    #'progressive_baseline_wave', 'progressive_tremor', 'progressive_ink_density'], #or None
+    'synthetic_proportions': [0.5, 0.2, 0.2, 0.1], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
     #Transforms definitions
     'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
@@ -92,20 +94,20 @@ exp_params = {
     'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 1,
-    'num_epochs': 10,
-    'patience': 5,
+    'batch_size': 4,
+    'num_epochs': 50,
+    'patience': 30,
     'eta_min_cosine': 1e-8,
     'weight_decay': 0.05, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
     'layers_to_unfreeze': ['classifier','layer4'],#['all','classifier'], #Update it for every model
     'seed': 42,
-    'accumulate_grad_batches': 4,   # effective batch = batch_size * 4 or None
-    'precision': "16-mixed",        # AMP: autocast + GradScaler handled for you or None
-    'gradient_clip_val':None,# 1.0,
+    'accumulate_grad_batches': 4,   # effective batch = batch_size * accumulate_grad_batches or None
+    'precision': None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
+    'gradient_clip_val': None, # 1.0,
 
-    'prefetch_factor':1,
+    'prefetch_factor': 2,
 }
 if exp_params['grouped']:
     exp_params['balance_validation'] = False
@@ -143,26 +145,31 @@ OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
 DEBUG_IMGS = True
 VERBOSE = True
-CLASS_COL = 'diag_park_final1_quest'
 
 #if you need the following variables load them from the csv_data ->
 #last available questionnaire for the subject, last_q = id_row['last_avail_q']
 #variables_to_add = ['etudegp', 'profq2', 'lateralite', 'relative_age', 'birth_date', 'follow_up_time']
 #filter these first when rebalancing: warning==1 if the control was selected with at least -> "at_least_warning": at_least_warning,
     
-def main():
+def main(exp_params):
     args = get_args()
     worker = args.num_workers
     prefetch_factor = exp_params['prefetch_factor'] if worker > 0 else None
 
+    validity_checks(exp_params)
+
     #set seed with lightning for reproducibility
     L.seed_everything(exp_params['seed'], workers=True)
+
+    exp_params['norm_mu'],exp_params['norm_std'] =get_mu_std(exp_params, verbose=VERBOSE)
+
+    exp_params=synthetic_data_override(exp_params, verbose=VERBOSE)
     
     #load grid_files for selecting chunks from the images during the dataloading
     grid_dict = load_grid_dict(exp_params)
 
     #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
-    exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=CLASS_COL)
+    exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=exp_params['class_col'])
 
     write_log, current_version = logging_initialization() 
 
@@ -178,7 +185,7 @@ def main():
         debug(train_loader,val_loader,exp_params)
     
     
-    lit_model = litmodel_initialization(model,num_0,num_1,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
+    lit_model = litmodel_initialization(model,counts,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
 
     
     trainer, metrics_tracker = trainer_definition(current_version, exp_params)
@@ -206,7 +213,40 @@ def main():
 
 
 #### HELPER FUCNTIONS ####
+def validity_checks(exp_params):
+    if exp_params['grouped']==False and 'group' in exp_params['data_folder']:
+        raise ValueError("Error: you have selected grouped=False but the data_folder contains 'group' in its name. Please check your settings.")
 
+def synthetic_data_override(exp_params, verbose=True):
+    '''this function generate a new training set with the synthetic classes, save it to file and override the id_list_path
+    -> the other functions go read that'''
+    if exp_params['synthetic'] is None:
+        return exp_params
+    train_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+    train_data['synth_label'] = 0
+    synthetic_modes = exp_params['synthetic']
+    synthetic_proportions = exp_params['synthetic_proportions']
+    num_synthetic_modes = len(synthetic_modes)
+    #assign randomly the synthetic labels to the training set based on the proportions
+    #shuffle the train_data
+    rng = np.random.default_rng(exp_params['seed'])          # seed for reproducibility
+    train_data['synth_label'] = rng.choice(num_synthetic_modes, size=len(train_data), p=synthetic_proportions)
+    #save as parquet with the same filename+_synthetic.parquet
+    synthetic_path = exp_params['list_of_ids_paths'].replace('.parquet', '_synthetic.parquet')
+    train_data.to_parquet(synthetic_path, index=False)
+    if verbose:
+        print(f"Synthetic data generated and saved to {synthetic_path} !!!!!!!!!!!!")
+        print("Now overriding experiment settings...  ")
+    exp_params['list_of_ids_paths'] = synthetic_path
+    exp_params['balance_validation'] = False
+    exp_params['balanced_data'] = False
+    exp_params['use_balanced_weights'] = False
+    exp_params['num_classes'] = num_synthetic_modes
+    exp_params['class_col'] = 'synth_label'
+    exp_params['filter_missing'] = 'all'
+
+    return exp_params
+    
 def trainer_definition(current_version, exp_params):
 
     # 2. Setup Checkpointing
@@ -295,6 +335,13 @@ def model_initialization(write_log,exp_params, verbose=True, **kwargs):
         dropout = kwargs.get('dropout', 0.4)
         model = SequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, 
                                            d_model=d_model, n_heads=n_heads, n_layers=n_layers, ff_mult=ff_mult, view_agg='attention', dropout=dropout)
+    elif exp_params['model_structure'] == 'SetQuestionnaireModel':
+        d_model = kwargs.get('d_model', 128)
+        ff_mult = kwargs.get('ff_mult', 2)
+        dropout = kwargs.get('dropout', 0.4)
+        model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'],  
+                                           d_model=d_model, ff_mult=ff_mult, view_agg='attention', dropout=dropout,
+                                           use_spread=True, use_count_feature=True,count_norm=2)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
     
@@ -308,7 +355,7 @@ def model_initialization(write_log,exp_params, verbose=True, **kwargs):
         write_log(trainable_parameters_info)
     return model, transform
 
-def litmodel_initialization(model, num_0,num_1,write_log, define_optimization_groups,exp_params, exclusion_set, verbose):
+def litmodel_initialization(model, counts,write_log, define_optimization_groups,exp_params, exclusion_set, verbose):
     additional_kwargs={
     }
     if exp_params['grouped']:
@@ -319,13 +366,14 @@ def litmodel_initialization(model, num_0,num_1,write_log, define_optimization_gr
             print(f"Total unique groups in training set after filtering: {total_units}")
     else:
         model_class=ModelPDClassification
-        additional_kwargs['num_0']= num_0
-        additional_kwargs['num_1']= num_1
+        if len(counts) == 2:
+            additional_kwargs['num_0']= counts[0]
+            additional_kwargs['num_1']= counts[1]
         additional_kwargs['num_classes']= exp_params['num_classes']
         additional_kwargs['use_balanced_weights']= exp_params['use_balanced_weights']
         additional_kwargs['balancing_factor']= exp_params['balancing_factor']
         additional_kwargs['balanced_data']= exp_params['balanced_data']
-        total_units = num_0 + num_1
+        total_units = sum(counts)  # total number of samples in all classes
     example_input_array = model_class.make_example_input(k=exp_params['num_tiles'], n_slots=13)
     lit_model = model_class(write_log,model=model,total_units=total_units,lr_backbone=exp_params['lr_backbone'], 
                          lr_classifier_head=exp_params['lr_classifier_head'], example_input_array=example_input_array, 
@@ -436,5 +484,5 @@ def check_incompatible_params(exp_params):
     "Error: Data modality = 'all' and USE_GRID=True are incompatible"
 
 if __name__ == "__main__":
-    main()
+    main(exp_params)
     

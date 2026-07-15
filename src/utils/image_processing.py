@@ -6,6 +6,10 @@ import torchvision.transforms as T
 import os
 from skimage.filters import threshold_otsu 
 from scipy import ndimage
+from PIL import ImageFilter
+import random
+import math
+import torch
 
 def convert_background_to_white(image):
     img = image.copy()
@@ -102,7 +106,7 @@ def recolor_border_via_profiles(image, coords, black_tolerance=5):
     return image
 
 
-# custom torch transforms
+# ----------------- custom torch transforms ---------------------
 class ResizeLongestSide:
     def __init__(self, size, interpolation=InterpolationMode.BILINEAR):
         self.size = size
@@ -161,7 +165,165 @@ class PadOrCropToSize:
 
         # --- 2. Crop any axis that is too large (no-op if already == target)
         return F.center_crop(img, [th, tw])
-# Load transforms
+
+# synthetic transformations
+class RandomMorphology:
+    """Erosion (min filter) thickens black ink; dilation (max filter) thins it.
+    MinFilter/MaxFilter only accept odd sizes (3, 5, 7…)"""
+    def __init__(self, p=0.5, kernel_sizes=(3,), mode="erode"):
+        self.p = p
+        self.kernel_sizes = kernel_sizes
+        self.mode = mode
+
+    def __call__(self, img):
+        if random.random() > self.p:
+            return img
+        k = random.choice(self.kernel_sizes)
+        mode = self.mode
+        if mode == "random":
+            mode = random.choice(["erode", "dilate"])
+        f = ImageFilter.MinFilter(k) if mode == "erode" else ImageFilter.MaxFilter(k)
+        return img.filter(f)
+
+class StrokeWeight:
+    """t -> stroke gets thicker (w>0) or thinner (w<0). Fractional via blending."""
+    def __init__(self, rate=1.0, max_px=2.5):
+        self.rate, self.max_px = rate, max_px   # rate in [-1,1]: sign = direction
+
+    def __call__(self, ink, t):
+        w = self.rate * t * self.max_px         # signed "pixels" of growth
+        if abs(w) < 1e-3:
+            return ink
+        k = 2 * int(math.ceil(abs(w))) + 1      # odd kernel covering the growth
+        a = abs(w) / (k // 2)                   # fractional blend weight
+        x = ink.unsqueeze(0)
+        pooled = (F.max_pool2d(x, k, 1, k // 2) if w > 0
+                  else -F.max_pool2d(-x, k, 1, k // 2))
+        return ((1 - a) * x + a * pooled).squeeze(0)
+
+class Slant:
+    """t -> increasing shear. Positive = leaning right."""
+    def __init__(self, rate=1.0, max_deg=18.0):
+        self.rate, self.max_deg = rate, max_deg
+
+    def __call__(self, ink, t):
+        ang = math.radians(self.rate * t * self.max_deg)
+        theta = torch.tensor([[1.0, math.tan(ang), 0.0],
+                              [0.0, 1.0,           0.0]])
+        return _warp_affine(ink, theta)
+
+class SizeDrift:
+    """t -> handwriting grows or shrinks; can be anisotropic (taller/narrower)."""
+    def __init__(self, rate_x=0.0, rate_y=0.0, max_frac=0.25):
+        self.rx, self.ry, self.m = rate_x, rate_y, max_frac
+
+    def __call__(self, ink, t):
+        sx = 1.0 + self.rx * t * self.m
+        sy = 1.0 + self.ry * t * self.m
+        theta = torch.tensor([[1 / sx, 0.0, 0.0],
+                              [0.0, 1 / sy, 0.0]])   # inverse: grid maps out->in
+        return _warp_affine(ink, theta)
+
+class BaselineWave:
+    """t -> the writing line stops being straight; low-frequency vertical wobble."""
+    def __init__(self, rate=1.0, max_amp=0.04, cycles=1.5):
+        self.rate, self.max_amp, self.cycles = rate, max_amp, cycles
+
+    def __call__(self, ink, t):
+        C, H, W = ink.shape
+        amp = self.rate * t * self.max_amp
+        if amp < 1e-4:
+            return ink
+        phase = random.uniform(0, 2 * math.pi)
+        xs = torch.linspace(-1, 1, W)
+        dy = amp * torch.sin(self.cycles * math.pi * xs + phase)  # (W,)
+        gy, gx = torch.meshgrid(torch.linspace(-1, 1, H),
+                                torch.linspace(-1, 1, W), indexing="ij")
+        grid = torch.stack([gx, gy + dy[None, :]], dim=-1)[None]
+        return F.grid_sample(ink[None], grid, mode="bilinear",
+                             padding_mode="zeros", align_corners=False).squeeze(0)
+
+class Tremor:
+    """t -> shaky hand: smooth random displacement field, amplitude grows with t."""
+    def __init__(self, rate=1.0, max_amp=0.012, smooth=17):
+        self.rate, self.max_amp, self.smooth = rate, max_amp, smooth
+
+    def __call__(self, ink, t):
+        C, H, W = ink.shape
+        amp = self.rate * t * self.max_amp
+        if amp < 1e-4:
+            return ink
+        d = torch.randn(1, 2, H, W)
+        k = self.smooth | 1
+        d = F.avg_pool2d(d, k, 1, k // 2)
+        d = F.avg_pool2d(d, k, 1, k // 2)          # two passes ≈ gaussian
+        d = d / d.abs().amax().clamp(min=1e-6) * amp
+        gy, gx = torch.meshgrid(torch.linspace(-1, 1, H),
+                                torch.linspace(-1, 1, W), indexing="ij")
+        grid = torch.stack([gx + d[0, 0], gy + d[0, 1]], dim=-1)[None]
+        return F.grid_sample(ink[None], grid, mode="bilinear",
+                             padding_mode="zeros", align_corners=False).squeeze(0)
+
+class InkDensity:
+    """t -> pen runs dry (fading, patchy) or presses harder (darker, blotchy)."""
+    def __init__(self, rate=-1.0, max_gamma=1.2):
+        self.rate, self.max_gamma = rate, max_gamma
+
+    def __call__(self, ink, t):
+        g = 1.0 + self.rate * t * self.max_gamma   # >1 fades ink, <1 darkens it
+        return ink.clamp(0, 1) ** max(g, 0.15)
+
+def _warp_affine(ink, theta):
+    grid = F.affine_grid(theta[None], (1, *ink.shape), align_corners=False)
+    return F.grid_sample(ink[None], grid, mode="bilinear",
+                         padding_mode="zeros", align_corners=False).squeeze(0)
+
+def to_ink(pil_img):
+    """PIL (0-255, black-on-white) -> float tensor (C,H,W) in [0,1], ink=1."""
+    x = TF.to_tensor(pil_img)          # handles L / RGB, divides by 255 for you
+    return 1.0 - x
+
+def to_img(ink):
+    """float tensor ink -> PIL (0-255, black-on-white)."""
+    return TF.to_pil_image((1.0 - ink).clamp(0, 1))
+
+class SyntheticTransform:
+    def __init__(self, exp_params,subject_id,train_df, persona_seed, n_steps=10, jitter=0.15):
+        synthetic_transform_names = exp_params['synthetic']
+        class_value = train_df.loc[train_df['unique_id'] == subject_id, 'synth_label'].values[0]
+        selected_transform = synthetic_transform_names[class_value]
+        rng = random.Random(persona_seed)
+        u = lambda: rng.uniform(-1, 1)   # drift direction+rate for this persona
+        self.n_steps, self.jitter = n_steps, jitter
+        if selected_transform == 'original':
+            self.transform = None
+        elif selected_transform == 'progressive_thickening':
+            self.transform = StrokeWeight(rate=abs(u()))
+        elif selected_transform == 'progressive_thinning':
+            self.transform = StrokeWeight(rate=-abs(u()))
+        elif selected_transform == 'progressive_slant':
+            self.transform = Slant(rate=u())
+        elif selected_transform == 'progressive_size_drift':
+            self.transform = SizeDrift(rate_x=u() * 0.6, rate_y=u())
+        elif selected_transform == 'progressive_baseline_wave':
+            self.transform = BaselineWave(rate=abs(u()))
+        elif selected_transform == 'progressive_tremor':
+            self.transform = Tremor(rate=abs(u()))
+        elif selected_transform == 'progressive_ink_density':
+            self.transform = InkDensity(rate=u())
+
+    def __call__(self, img, step):
+        if self.transform is None:
+            return img
+        t = step / max(self.n_steps - 1, 1)
+        ink = to_ink(img)
+        
+        tt = max(0.0, t * (1.0 + random.uniform(-self.jitter, self.jitter)))
+        ink = self.transform(ink, tt)
+
+        return to_img(ink).clamp(0, 1)
+
+#---------- Load transforms ---------------
 def get_transforms(exp_params, transform):
     if exp_params['custom_transform'] is None:
         return transform
@@ -265,6 +427,21 @@ def get_augmentation_transform(exp_params):
     else:
         print("Single data modality detected. Applying augmentation transform:", exp_params['apply_augmentation'])
         return get_single_augmentation_transform(exp_params['apply_augmentation'])
+
+def get_mu_std(exp_params,verbose=False):
+    #if it is a list of numbers keep it as is, if it is a string load the mu and std from the file
+    if isinstance(exp_params['norm_mu'], list) and isinstance(exp_params['norm_std'], list):
+        mu,std = exp_params['norm_mu'], exp_params['norm_std']
+    elif isinstance(exp_params['norm_mu'], str) or isinstance(exp_params['norm_std'], str):
+        if exp_params['norm_mu']=='mnist':
+            mu = (0.1307,0.1307,0.1307)
+            std = (0.3081,0.3081,0.3081)
+        elif exp_params['norm_mu']=='imagenet':
+            mu = (0.485,0.456,0.406)
+            std = (0.229,0.224,0.225)
+    if verbose:
+        print(f"Using normalization mean: {mu} and std: {std}")
+    return mu, std
 
 
 # CHECK IMAGE PROPERTIES

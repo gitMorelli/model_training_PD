@@ -300,11 +300,9 @@ if __name__ == "__main__":
     csv_data['subject_id'] = csv_data['unique_id'].str.split('_').str[0]
     csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1]
     #count how many rows have grid_pattern=0000000000000
-    filtered = csv_data[csv_data['grid_pattern'] == '0000000000000']
-    print(f"Number of rows with grid_pattern=0000000000000: {len(filtered)}")
-    print(f"unique subject_ids with grid_pattern=0000000000000: {filtered['subject_id'].unique()}")
-    '''filtered = csv_data[csv_data['subject_id'] == 'A4W2V8A1']
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-        print(filtered)'''
+    #check that in each group with the same group_id last_avail_q is the same
+    consistent = csv_data.groupby("group_id")["last_avail_q"].nunique().eq(1).all()
+    print(consistent)
+
     
     

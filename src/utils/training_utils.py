@@ -1011,11 +1011,12 @@ class ModelPDClassification(ModelPDBase):
     def __init__(self, write_log, model, num_0, num_1, num_classes=2,
                  use_balanced_weights=True, balancing_factor=1.0, balanced_data=False,
                  **base_kwargs):
-        total = num_0 + num_1
-        super().__init__(write_log, model, total_units=total,
+        super().__init__(write_log, model,
                          num_classes=num_classes, **base_kwargs)
         self.save_hyperparameters(ignore=['model', 'write_log'])
  
+        total = num_0 + num_1
+
         self.num_0, self.num_1, self.total = num_0, num_1, total
         self.balancing_factor = balancing_factor
         self.balanced_data = balanced_data

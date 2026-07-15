@@ -128,7 +128,7 @@ def main():
     csv_data = pd.read_parquet(exp_params['list_of_ids_paths'])
 
     #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
-    exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=CLASS_COL)
+    exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=CLASS_COL)
 
     _,transform = get_model(name=exp_params['model'], pretrained=True)
     transform = get_transforms(exp_params, transform)

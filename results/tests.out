@@ -1,20 +1,18 @@
-Number of rows with grid_pattern=0000000000000: 10
-unique subject_ids with grid_pattern=0000000000000: ['A4W2V8A1' 'B4N9H5L3' 'C5M8M6R4' 'C8L4S2Q2' 'F7S2R2F2' 'F1A0F2H5'
- 'B1Q2F0V4' 'G1J5R4C2' 'A0L2W0V0' 'A4X9Q0L8']
+True
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4949231
+Job ID: 4953254
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n02
+Nodelist: n19
 Nodes: 1
 Cores per node: 10
-Job started at: 2026-07-14 10:16:19
-Job ended at:   2026-07-14 10:16:28
+Job started at: 2026-07-15 09:11:56
+Job ended at:   2026-07-15 09:12:05
 Job Wall-clock time: 00:00:09
-CPU Utilized: 00:00:06
-CPU Efficiency: 6.67% of 00:01:30 core-walltime
-Memory Utilized: 1.71 MB
+CPU Utilized: 00:00:05
+CPU Efficiency: 5.56% of 00:01:30 core-walltime
+Memory Utilized: 1.77 MB
 Memory Efficiency: 0.04% of 4.00 GB

@@ -205,7 +205,7 @@ def get_dataloader(args,params):
 
     if params['selected_problem'] == "PD":
         #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
-        exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest')
+        exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest')
         train_loader,val_loader,_,_= prepare_loaders_PD(worker,params['prefetch_factor'],params, exclusion_set, val_exclusion_set,
                                                          grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val)
     else:

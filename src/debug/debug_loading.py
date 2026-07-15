@@ -68,8 +68,9 @@ params = {
     "invert_color": True,
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': -1, #0, -1 (if keep all) or a positive value
+    'censor_time': 'last_successive_and_previous', #0, -1 (if keep all) or a positive value
     'filter_modality': 'digit', #None, 'X', 'text', 'digit' (if None keep all modalities)
+    'grouped':False,
 
     #dataloader params
     "batch_size": 4,
@@ -101,14 +102,14 @@ elif params['selected_problem'] == "PD":
     CSV_LOAD_PATH = ""
 
     #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_8_7_26.parquet"
+    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
     params['full_dataset'] = "/home/a_morelli/datasets/id_lists/final_table_with_all_info_8_7_26.csv"
 
     #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
     data_folder = "final_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
     SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/dataset_info_PD"
 
-    params["h5_data_path"] = "/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl"
+    params["h5_data_path"] = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl"
 
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
@@ -433,10 +434,11 @@ def get_dataloader(args,params,pre_filtered_csv):
                                                              params['list_of_ids_paths'], SHARD_PATTERN_train)
     elif params['selected_problem'] == "PD":
         #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
-        exclusion_set, val_exclusion_set, num_0, num_1 = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest',
+        exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest',
                                                                                    pre_computed_csv=pre_filtered_csv)
+        train_df = pd.read_parquet(params['list_of_ids_paths'])
         train_loader,_,_,_= prepare_loaders_PD(worker,params['prefetch_factor'],params, exclusion_set, val_exclusion_set,
-                                                         grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val)
+                                                         grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=train_df)
         expected_shape = torch.randn(params['num_tiles'], 3, 224, 224)
 
     return train_loader, expected_shape

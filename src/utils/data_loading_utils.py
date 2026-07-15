@@ -22,7 +22,7 @@ import sys
 from functools import partial
 import pickle
 
-from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image
+from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform
 
 #Datasets and dataloaders for speed tests
 class InMemoryWdsDataset(torch.utils.data.Dataset):
@@ -808,14 +808,14 @@ def _index_images(sample, grouped):
 def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                                    modality_string_list, original_modality_names,
                                    grid_dict, censor_time, filter_modality,
-                                   huggingface_transform, invert_color, debug, train_df):
+                                   huggingface_transform, invert_color, debug, train_df, exp_params=None, is_synthetic = False):
     """Return a function that builds the full sequence for one subject.
 
     All the static configuration is captured in the closure, so the returned
     builder only needs the per-subject data.
     """
 
-    def build_questionnaire_views(X, images_for_q, original_id, questionnaire_info):
+    def build_questionnaire_views(X, images_for_q, original_id, questionnaire_info, synth_transform=None):
         """Build the list of augmented views for one questionnaire."""
         list_of_views = []
         list_of_modality_names = []
@@ -843,6 +843,10 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 imputed = True
             else:
                 img = raw_image_data
+            
+            if synth_transform: #i am creating synthetic time-series
+                img = synth_transform(img, X)
+            
 
             if debug:
                 selected_transforms = [('original',None)] + selected_transforms
@@ -904,6 +908,10 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         Returns (sequence, questionnaires, modalities, resized_list) or None
         if no usable frames were found.
         """
+        if is_synthetic:
+            persona_seed = random.randint(0, 2**32 - 1)
+            synth_transform = SyntheticTransform(exp_params,subject_id,train_df, persona_seed, n_steps=14, jitter=0.15)
+
         original_id = subject_id.split('_')[0]
 
         frames = []          # each entry -> (n_views, C, H, W)
@@ -911,7 +919,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         resized_list = []
         modalities = []
 
-        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id)
+        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id, subject_images)
 
         for X in range(1, 14):
             if X not in q_to_keep:  # questionnaire not to keep based on censoring
@@ -926,7 +934,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 continue
 
             views, names, rescale_factor = build_questionnaire_views(
-                X, subject_images[X], original_id, questionnaire_info)
+                X, subject_images[X], original_id, questionnaire_info, synth_transform=synth_transform)
 
             if len(views) == 0:
                 continue
@@ -955,7 +963,7 @@ def keep_questionnaire(last_q,censor_time, questionnaire_info, questionnaire_num
         return questionnaire_dt <= -censor_time #eg if censor time=1 -> i keep
         #all questionnaires that are at least 1 year before the case date, so dt_q<=-1
 
-def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id):
+def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id,subject_images):
     '''take case_grid_pattern, the case_dt_q for each questionnaire, the training_df and the filtering modality to decide
     which questionnaires to sample for training
     case_grid_pattern is between 1 and 13
@@ -975,37 +983,58 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
     elif censor_time=='last_and_previous':
         list_questionnaires = [last_q]
         for q in range(last_q-1,0,-1):
-            if grid_pattern[q-1]==1:
+            if grid_pattern[q-1]=='1' and q in subject_images:
                 list_questionnaires.append(q)
                 break 
     elif censor_time=='last_and_successive':
         list_questionnaires = [last_q]
         for q in range(last_q+1,14):
-            if grid_pattern[q-1]==1:
+            if grid_pattern[q-1]=='1' and q in subject_images:
                 list_questionnaires.append(q)
                 break
+    elif censor_time=='last_successive_and_previous':
+        list_questionnaires = [last_q]
+        for q in range(last_q+1,14):
+            if grid_pattern[q-1]=='1' and q in subject_images:
+                list_questionnaires.append(q)
+                break
+        for q in range(last_q-1,0,-1):
+            if grid_pattern[q-1]=='1' and q in subject_images:
+                list_questionnaires.append(q)
+                break 
+    print(f"List {subject_id}: ",list_questionnaires)
     return list_questionnaires
-
 
 #---------- yield smaples
 def create_sequence_flattener_PD_multiview(transform_func, augmentation_transform_list, n_views,
                                            modality_string_list, original_modality_names,
-                                           exclusion_set, huggingface_transform=False,
+                                           exclusion_set, exp_params=None,huggingface_transform=False,
                                            invert_color=False, grid_dict=None, censor_time='pre_diagnosis',
                                            filter_modality='number_random', debug=False, train_df=None):
+    #check if you have a column called 'synth_label' in the train_df
+    if train_df is not None and 'synth_label' in train_df.columns:
+        is_synthetic = True
+    else: 
+        is_synthetic = False
+    
     build_sequence = _make_subject_sequence_builder(
         transform_func, augmentation_transform_list, modality_string_list,
         original_modality_names, grid_dict, censor_time, filter_modality,
-        huggingface_transform, invert_color, debug, train_df)
+        huggingface_transform, invert_color, debug, train_df, exp_params=exp_params, is_synthetic=is_synthetic)
 
     def flatten_samples(src):
         for sample in src:
             json_data = _parse_sample_json(sample)
             if json_data is None:
                 continue
-
-            label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
+            
             subject_id = json_data.get("subject", "unknown")  # XXX_YYY format
+            if is_synthetic:
+                #get the label from the train_df
+                synth_label = train_df.loc[train_df['unique_id']==subject_id,'synth_label'].values
+                label = torch.tensor(synth_label[0], dtype=torch.long) if len(synth_label)>0 else torch.tensor(-1, dtype=torch.long)
+            else:
+                label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
             questionnaire_info = json_data.get("questionnaire_info", {})
             last_q = json_data.get("last_q", None)
 
@@ -1028,12 +1057,12 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
 def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_transform_list,
                                     modality_string_list, original_modality_names,
                                     exclusion_set, grid_dict, censor_time,
-                                    filter_modality, huggingface_transform=False,
+                                    filter_modality, exp_params=None,huggingface_transform=False,
                                     invert_color=False, debug=False, train_df=None, **kw):
     build_sequence = _make_subject_sequence_builder(
         transform_func, augmentation_transform_list, modality_string_list,
         original_modality_names, grid_dict, censor_time, filter_modality,
-        huggingface_transform, invert_color, debug, train_df)
+        huggingface_transform, invert_color, debug, train_df,exp_params=exp_params)
 
     def flatten_groups(src):
         for sample in src:
@@ -1184,7 +1213,6 @@ def create_sequence_flattener_PD_grid(transform_func, augmentation_transform, n_
 
     return flatten_samples
 
-
 #------ collate functions
 def collate_variable_sequences_PD_grouped(samples, debug=False):
     """Collate for the grouped loader.
@@ -1305,7 +1333,7 @@ def collate_groups_PD(batch_of_groups, debug=False):
 #------ Build dataset --------
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
                        huggingface_transform=False,augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None,
-                       censor_time='pre_diagnosis', filter_modality='digit', debug=False, grouped=False, train_df=None):
+                       censor_time='pre_diagnosis', filter_modality='digit', debug=False, grouped=False, train_df=None, exp_params=None):
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
@@ -1354,7 +1382,8 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                 .compose(compose_fn(transform, augmentation_transform, n_views=n_views, modality_string_list=modality_string,
                                     exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
                                     grid_dict=grid_dict, censor_time=censor_time,
-                                    original_modality_names=modality, filter_modality=filter_modality, debug=debug, train_df=train_df)) # This replaces .map() and .select()
+                                    original_modality_names=modality, filter_modality=filter_modality, debug=debug, train_df=train_df,
+                                    exp_params=exp_params)) # This replaces .map() and .select()
                 .batched(batch_size,
                         collation_fn=partial(collate_fn, debug=debug),
                         partial=False)
@@ -1389,8 +1418,8 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         grouped=exp_params.get('grouped', False),
     )
 
-    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, exclusion_set=exclusion_set,train_df=train_df, **common_kwargs)
-    val_dataset   = prepare_PD_dataset(SHARD_PATTERN_val, exclusion_set=val_exclusion_set,train_df=train_df, **common_kwargs)
+    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, exclusion_set=exclusion_set,train_df=train_df, exp_params=exp_params, **common_kwargs)
+    val_dataset   = prepare_PD_dataset(SHARD_PATTERN_val, exclusion_set=val_exclusion_set,train_df=train_df,exp_params=exp_params, **common_kwargs)
     
     train_loader = DataLoader(
         train_dataset, 
@@ -1609,8 +1638,8 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
         print(f"Number of samples in {split} set after removing cases also as controls: {len(csv_data)}")
         print("-" * 50)
 
+    #exclude the subjects for which grid_pattern or case_grid_pattern has a certain pattern (eg all 0 or 0 before last avail q or ...)
     csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1].astype(int)
-    #exclude the subjects for which grid_pattern or case_grid_pattern is all 0 before last_avail_q
     if exp_params['filter_missing'] == 'all':
         csv_data['last_avail_q'] = 13 #set last avail q to 13 for all subjects to reuse the same code
     print(f"Initial number of samples in {split} set: {len(csv_data)}")
@@ -1695,16 +1724,22 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
         print('#' * 50)
     
     filtered_csv_data_train = csv_data[~csv_data['unique_id'].isin(exclusion_set)]
+    train = filtered_csv_data_train[filtered_csv_data_train['split'] == 'train']
     #compute the number of samples for each class in the training set
-    num_0 = len(filtered_csv_data_train[(filtered_csv_data_train[class_col] == 0) & (filtered_csv_data_train['split'] == 'train')])
-    num_1 = len(filtered_csv_data_train[(filtered_csv_data_train[class_col] == 1) & (filtered_csv_data_train['split'] == 'train')])
+    counts = (
+        train[class_col]
+        .value_counts()
+        .reindex(range(train[class_col].max() + 1), fill_value=0)
+        .sort_index()
+    )
+
     if verbose:
         print("After applying the exclusion set, the training set has:")
-        print(f"Class 0: {num_0} samples")
-        print(f"Class 1: {num_1} samples")
-        print(f"Ratio of Class 1 to Class 0: {num_1 / num_0 if num_0 > 0 else 'undefined'}")
+        print(f"Class 0: {counts[0]} samples")
+        print(f"Class 1: {counts[1]} samples")
+        print(f"Ratio of Class 1 to Class 0: {counts[1] / counts[0] if counts[0] > 0 else 'undefined'}")
 
-    return exclusion_set, val_exclusion_set, num_0,num_1
+    return exclusion_set, val_exclusion_set, counts
 
 #Merging data from the full dataset 
 def merge_properties_from_full_dataset_PD(exp_params, csv_data, properties_to_add, verbose=True):
