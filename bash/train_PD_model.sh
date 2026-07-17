@@ -11,7 +11,7 @@
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
 #--gres=gpu:1
-#SBATCH --gres=gpu:v100:1
+#SBATCH --gres=gpu:a100:1
 #--gres=gpu:v100:1
 #--gres=gpu:p40:1
 #--nodelist=gpu05

@@ -29,15 +29,16 @@ import sys
 import pickle
 import numpy as np
 
-from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict
+from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict, synthetic_data_override
 from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
-from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std
+from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
+
 exp_params = {
     'list_of_ids_paths': "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet",
     'data_folder': "final_png_whitebg" ,#"final_png_whitebg_grouped", final_png_whitebg
@@ -50,23 +51,23 @@ exp_params = {
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
-    'use_balanced_weights': True,
-    'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': True, #note that this and balace_validation are independent
+    'use_balanced_weights': False,
+    'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
+    'balanced_data': False, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all',#'last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
     'model':"resnet18", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': None, #None, see options below
-    'model_structure': 'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+    'model_structure': 'SequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'model_parameters': {
         'd_model': 128, 
         'n_heads': 4,
@@ -78,14 +79,13 @@ exp_params = {
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': None, #['original','progressive_thickening','progressive_slant','progressive_size_drift', 
-    #'progressive_baseline_wave', 'progressive_tremor', 'progressive_ink_density'], #or None
-    'synthetic_proportions': [0.5, 0.2, 0.2, 0.1], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
+    'synthetic': ALL_SYNTHETIC_TRANSFORMS, #or None
+    'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
     #Transforms definitions
     'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-    'norm_mu': [0.06040578708052635, 0.06040578708052635, 0.06040578708052635],
-    'norm_std': [0.23823712766170502, 0.23823712766170502, 0.23823712766170502],
+    'norm_mu': 'imagenet', #imagenet,handedness,mnist
+    'norm_std': 'imagenet',
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
@@ -161,7 +161,7 @@ def main(exp_params):
     #set seed with lightning for reproducibility
     L.seed_everything(exp_params['seed'], workers=True)
 
-    exp_params['norm_mu'],exp_params['norm_std'] =get_mu_std(exp_params, verbose=VERBOSE)
+    exp_params['norm_mu'],exp_params['norm_std'] = get_mu_std(exp_params, verbose=VERBOSE)
 
     exp_params=synthetic_data_override(exp_params, verbose=VERBOSE)
     
@@ -208,7 +208,9 @@ def main(exp_params):
     # Save normal log
     save_experiment_logs(exp_params)
         
-    
+    #save the exp_params dictionary to a pickle file in the checkpoint folder
+    with open(os.path.join(CHECKPOINT_PATH,f'v_{current_version}', 'exp_params.pkl'), 'wb') as f:
+        pickle.dump(exp_params, f)
 
 
 
@@ -216,36 +218,6 @@ def main(exp_params):
 def validity_checks(exp_params):
     if exp_params['grouped']==False and 'group' in exp_params['data_folder']:
         raise ValueError("Error: you have selected grouped=False but the data_folder contains 'group' in its name. Please check your settings.")
-
-def synthetic_data_override(exp_params, verbose=True):
-    '''this function generate a new training set with the synthetic classes, save it to file and override the id_list_path
-    -> the other functions go read that'''
-    if exp_params['synthetic'] is None:
-        return exp_params
-    train_data = pd.read_parquet(exp_params['list_of_ids_paths'])
-    train_data['synth_label'] = 0
-    synthetic_modes = exp_params['synthetic']
-    synthetic_proportions = exp_params['synthetic_proportions']
-    num_synthetic_modes = len(synthetic_modes)
-    #assign randomly the synthetic labels to the training set based on the proportions
-    #shuffle the train_data
-    rng = np.random.default_rng(exp_params['seed'])          # seed for reproducibility
-    train_data['synth_label'] = rng.choice(num_synthetic_modes, size=len(train_data), p=synthetic_proportions)
-    #save as parquet with the same filename+_synthetic.parquet
-    synthetic_path = exp_params['list_of_ids_paths'].replace('.parquet', '_synthetic.parquet')
-    train_data.to_parquet(synthetic_path, index=False)
-    if verbose:
-        print(f"Synthetic data generated and saved to {synthetic_path} !!!!!!!!!!!!")
-        print("Now overriding experiment settings...  ")
-    exp_params['list_of_ids_paths'] = synthetic_path
-    exp_params['balance_validation'] = False
-    exp_params['balanced_data'] = False
-    exp_params['use_balanced_weights'] = False
-    exp_params['num_classes'] = num_synthetic_modes
-    exp_params['class_col'] = 'synth_label'
-    exp_params['filter_missing'] = 'all'
-
-    return exp_params
     
 def trainer_definition(current_version, exp_params):
 
@@ -318,6 +290,34 @@ def debug(train_dataloader,val_dataloader,exp_params):
     debug_images_PD(mean=exp_params['norm_mu'], std=exp_params['norm_std'], loader=train_dataloader, out_dir=os.path.join(SAVE_DEBUG_PATH,'train'))
     debug_images_PD(mean=exp_params['norm_mu'], std=exp_params['norm_std'], loader=val_dataloader, out_dir=os.path.join(SAVE_DEBUG_PATH,'val'))
 
+
+
+def litmodel_initialization(model, counts,write_log, define_optimization_groups,exp_params, exclusion_set, verbose):
+    additional_kwargs={
+    }
+    if exp_params['grouped']:
+        model_class=ModelPDGrouped
+        additional_kwargs['bce_aux_weight'] = exp_params['bce_aux_weight']
+        total_units = compute_unique_groups(exp_params, exclusion_set) #the total number of unique groups after filtering
+        if verbose:
+            print(f"Total unique groups in training set after filtering: {total_units}")
+    else:
+        model_class=ModelPDClassification
+        additional_kwargs['class_counts']= counts
+        additional_kwargs['num_classes']= exp_params['num_classes']
+        additional_kwargs['use_balanced_weights']= exp_params['use_balanced_weights']
+        #additional_kwargs['balancing_factor']= exp_params['balancing_factor']
+        additional_kwargs['balanced_data']= exp_params['balanced_data']
+        total_units = sum(counts)  # total number of samples in all classes
+    example_input_array = model_class.make_example_input(k=exp_params['num_tiles'], n_slots=13)
+    lit_model = model_class(write_log,model=model,total_units=total_units,lr_backbone=exp_params['lr_backbone'], 
+                         lr_classifier_head=exp_params['lr_classifier_head'], example_input_array=example_input_array, 
+                         opt_groups=define_optimization_groups, num_epochs=exp_params['num_epochs'], lr_scheduling=exp_params['lr_scheduling'],
+                         weight_decay=exp_params['weight_decay'], warmup_fraction=exp_params['warmup_fraction'], 
+                         eta_min_cosine=exp_params['eta_min_cosine'], batch_size=exp_params['batch_size'],**additional_kwargs)
+    return lit_model
+
+#model loading
 def model_initialization(write_log,exp_params, verbose=True, **kwargs):
     backbone,transform = get_model(name=exp_params['model'], pretrained=True, 
                                    custom_pre_trained_weights=exp_params['custom_pre_trained_weights'])
@@ -354,33 +354,6 @@ def model_initialization(write_log,exp_params, verbose=True, **kwargs):
         write_log("Model Architecture and Trainable Parameters right after initialization:")
         write_log(trainable_parameters_info)
     return model, transform
-
-def litmodel_initialization(model, counts,write_log, define_optimization_groups,exp_params, exclusion_set, verbose):
-    additional_kwargs={
-    }
-    if exp_params['grouped']:
-        model_class=ModelPDGrouped
-        additional_kwargs['bce_aux_weight'] = exp_params['bce_aux_weight']
-        total_units = compute_unique_groups(exp_params, exclusion_set) #the total number of unique groups after filtering
-        if verbose:
-            print(f"Total unique groups in training set after filtering: {total_units}")
-    else:
-        model_class=ModelPDClassification
-        if len(counts) == 2:
-            additional_kwargs['num_0']= counts[0]
-            additional_kwargs['num_1']= counts[1]
-        additional_kwargs['num_classes']= exp_params['num_classes']
-        additional_kwargs['use_balanced_weights']= exp_params['use_balanced_weights']
-        additional_kwargs['balancing_factor']= exp_params['balancing_factor']
-        additional_kwargs['balanced_data']= exp_params['balanced_data']
-        total_units = sum(counts)  # total number of samples in all classes
-    example_input_array = model_class.make_example_input(k=exp_params['num_tiles'], n_slots=13)
-    lit_model = model_class(write_log,model=model,total_units=total_units,lr_backbone=exp_params['lr_backbone'], 
-                         lr_classifier_head=exp_params['lr_classifier_head'], example_input_array=example_input_array, 
-                         opt_groups=define_optimization_groups, num_epochs=exp_params['num_epochs'], lr_scheduling=exp_params['lr_scheduling'],
-                         weight_decay=exp_params['weight_decay'], warmup_fraction=exp_params['warmup_fraction'], 
-                         eta_min_cosine=exp_params['eta_min_cosine'], batch_size=exp_params['batch_size'],**additional_kwargs)
-    return lit_model
 
 def logging_initialization():
     #read the current version number (starts from 1)

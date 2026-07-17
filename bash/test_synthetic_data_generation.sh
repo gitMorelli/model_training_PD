@@ -1,16 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=debug_loading
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/evaluation/debug_loading.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/debug_loading.err
+#SBATCH --job-name=test_synthetic
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/tests/synthetic_data_generation.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/tests/synthetic_data_generation.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=10              # Number of CPU cores per task
-#SBATCH --mem=86G                      # Job memory request
-#SBATCH --time=00:20:00                # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=4              # Number of CPU cores per task
+#SBATCH --mem=32G                      # Job memory request
+#SBATCH --time=00:10:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
 #--partition=visuq,gpgpuq
 #--gres=gpu:1
-#--gres=gpu:a100:1
+#--gres=gpu:h100:1
+#--gres=gpu:v100:1
 #--gres=gpu:p40:1
 #--nodelist=gpu04
 #--gres=gpu:t4:1
@@ -31,8 +32,5 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 # --- Hyperparameters ---
 
 cd $HOME_DIR
-
-echo "NODE: $(hostname)" 
 # --- Execution ---
-$ENV_PYTHON -m src.debug.debug_loading \
-    --num_workers 8
+$ENV_PYTHON -m src.tests.test_synthetic_data_generation 

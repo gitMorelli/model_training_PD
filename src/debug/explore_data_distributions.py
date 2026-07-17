@@ -45,9 +45,9 @@ from src.utils.data_loading_utils import merge_properties_from_full_dataset_PD
 
 metadata = {
     "experiment": "PD", #'handedness', 'pd'
-    "show_preview": False,
-    "analyze_training_data": True,
-    'analyze_statistics_data': False,
+    "show_preview": True,
+    "analyze_training_data": False,
+    'analyze_statistics_data': True,
     'integrate_csv': True,
     'columns_to_add': ['rempli_seulq12'],
     'preprocess': True,
@@ -70,7 +70,7 @@ if metadata["experiment"] == "handedness":
 elif metadata["experiment"] == "PD":
     metadata['training_set'] = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
     metadata['full_dataset'] = "/home/a_morelli/datasets/id_lists/final_table_with_all_info_8_7_26.csv"
-    metadata['statistics_path'] = "/home/a_morelli/datasets/id_lists/statistics/statistics_PD_11072026.csv"
+    metadata['statistics_path'] = "/home/a_morelli/datasets/id_lists/statistics/statistics_PD_15072026.csv"
     metadata['un_matched_path'] = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
     OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/pd"
     #MODEL_SPECIFIC_OUT_PATH = os.path.dirname(metadata['predictions_path'])
@@ -454,7 +454,7 @@ def run_pd_statistics_data_analysis(merged_df,out_path, df_unmatched=None):
     pd_train_analysis.save_metric_figures(p, "InkDensity", outdir=os.path.join(out_path,'ink_density_figures'))   # grid + ridgeline + summary + missing
     pd_train_analysis.save_metric_figures(p, "width", outdir=os.path.join(out_path,'width_figures'))   # grid + ridgeline + summary + missing
     pd_train_analysis.save_metric_figures(p, "height", outdir=os.path.join(out_path,'height_figures'))   # grid + ridgeline + summary + missing
-    pd_train_analysis.save_metric_figures(p, "area", outdir=os.path.join(out_path,'area_figures'))   # grid + ridgeline + summary + missing
+    #pd_train_analysis.save_metric_figures(p, "area", outdir=os.path.join(out_path,'area_figures'))   # grid + ridgeline + summary + missing
     pd_train_analysis.save_metric_figures(p, "ratio", outdir=os.path.join(out_path,'ratio_figures'))   # grid + ridgeline + summary + missing
 
     if df_unmatched is not None:

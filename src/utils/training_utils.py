@@ -1004,98 +1004,137 @@ class ModelPDBase(L.LightningModule):
 
 # Flat regime: standard BCE / CE training (original ModelPD behaviour)
 class ModelPDClassification(ModelPDBase):
-    """Per-subject BCE (num_classes=1) or CE (num_classes=2) with optional
-    class-balancing weights. Expects the flat collate:
-    (frames, seq_ids, slot_ids, lengths, labels, resized, subject_ids, modalities)."""
- 
-    def __init__(self, write_log, model, num_0, num_1, num_classes=2,
+    """Per-subject classification supporting an arbitrary number of classes.
+
+        num_classes == 1  -> binary head trained with BCEWithLogitsLoss
+                             (requires exactly 2 counts: [num_neg, num_pos])
+        num_classes >= 2  -> multiclass head trained with CrossEntropyLoss
+                             (requires num_classes counts)
+
+    Class balancing uses sklearn-style inverse-frequency weights:
+
+        w_c = total / (n_eff * count_c)
+
+    optionally interpolated toward uniform (1.0) by ``balancing_factor``
+    (0.0 -> no balancing, 1.0 -> full inverse-frequency balancing). At the
+    default of 1.0 this matches the original two-class weighting exactly.
+
+    Expects the flat collate:
+    (frames, seq_ids, slot_ids, lengths, labels, resized, subject_ids, modalities).
+    """
+
+    def __init__(self, write_log, model, class_counts, num_classes=None,
                  use_balanced_weights=True, balancing_factor=1.0, balanced_data=False,
                  **base_kwargs):
-        super().__init__(write_log, model,
-                         num_classes=num_classes, **base_kwargs)
-        self.save_hyperparameters(ignore=['model', 'write_log'])
- 
-        total = num_0 + num_1
+        # ---- normalize counts --------------------------------------------------
+        counts = torch.as_tensor(class_counts, dtype=torch.float32)
+        if counts.ndim != 1 or counts.numel() < 2:
+            raise ValueError("class_counts must be a 1-D sequence with >= 2 entries "
+                             "(e.g. [n_class0, n_class1, ...]).")
 
-        self.num_0, self.num_1, self.total = num_0, num_1, total
+        # Infer multiclass num_classes from the counts when not given.
+        # Binary BCE (num_classes=1) must be requested explicitly.
+        if num_classes is None:
+            num_classes = counts.numel()
+
+        # Effective number of classes for the weight formula: the BCE head is a
+        # 2-class problem even though its num_classes == 1.
+        n_eff = 2 if num_classes == 1 else num_classes
+        if counts.numel() != n_eff:
+            raise ValueError(
+                f"Expected {n_eff} class counts for num_classes={num_classes}, "
+                f"got {counts.numel()}.")
+
+        super().__init__(write_log, model, num_classes=num_classes, **base_kwargs)
+        self.save_hyperparameters(ignore=['model', 'write_log'])
+
+        self.class_counts = counts.tolist()
+        self.total = float(counts.sum().item())
         self.balancing_factor = balancing_factor
         self.balanced_data = balanced_data
         self.use_balanced_weights = use_balanced_weights
- 
-        weight_0 = total / (2 * num_0)
-        weight_1 = total / (2 * num_1)
-        pos_weight_val = num_0 / num_1 if num_1 > 0 else 1.0
-        self.register_buffer("class_weights",
-                             torch.tensor([weight_0, weight_1], dtype=torch.float32))
+
+        # ---- balancing weights -------------------------------------------------
+        raw_weights = self.total / (n_eff * counts.clamp(min=1.0))
+        # interpolate toward uniform (1.0): factor 0 -> off, 1 -> full balancing
+        class_weights = 1.0 + balancing_factor * (raw_weights - 1.0)
+        self.register_buffer("class_weights", class_weights)
+
+        # pos_weight for BCE = count_neg / count_pos, same interpolation applied
+        raw_pos = (counts[0] / counts[1]) if counts[1] > 0 else torch.tensor(1.0)
+        pos_weight = 1.0 + balancing_factor * (raw_pos - 1.0)
         self.register_buffer("pos_weight",
-                             torch.tensor([pos_weight_val], dtype=torch.float32))
- 
-        if num_classes == 2:
-            self.criterion = (nn.CrossEntropyLoss(weight=self.class_weights)
-                              if use_balanced_weights else nn.CrossEntropyLoss())
-        elif num_classes == 1:
+                             pos_weight.reshape(1).to(torch.float32))
+
+        # ---- criterion ---------------------------------------------------------
+        if num_classes == 1:
             self.criterion = (nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
                               if use_balanced_weights else nn.BCEWithLogitsLoss())
- 
-        n = 2 if num_classes == 1 else num_classes
-        self.val_balanced_acc = MulticlassRecall(num_classes=n, average="macro")
- 
+        else:
+            self.criterion = (nn.CrossEntropyLoss(weight=self.class_weights)
+                              if use_balanced_weights else nn.CrossEntropyLoss())
+
+        self.val_balanced_acc = MulticlassRecall(num_classes=n_eff, average="macro")
+
     # ---- loss + metrics --------------------------------------------------------
     def compute_loss_and_metrics(self, batch, stage):
         frames, seq_ids, slot_ids, lengths, labels, *_ = batch
         bsz = labels.size(0)
- 
-        targets = labels.float().unsqueeze(1) if self.num_classes == 1 else labels
+
+        targets = labels.float().unsqueeze(1) if self.num_classes == 1 else labels.long()
         outputs = self(frames, seq_ids, slot_ids, lengths)
- 
+
         if stage == "train" and not self._guard_finite(outputs, "outputs"):
             return None
- 
+
         loss = self.criterion(outputs, targets)
         if stage == "train" and not self._guard_finite(loss, "loss"):
             return None
- 
+
         if self.num_classes == 1:
-            preds = (outputs > 0.0).float()
+            preds = (outputs > 0.0).long().view(-1)
         else:
-            _, preds = torch.max(outputs, 1)
-        acc = torch.sum(preds == targets.data).float() / bsz
- 
+            preds = torch.argmax(outputs, dim=1)
+        acc = (preds == labels.long().view(-1)).float().mean()
+
         self._update_class_counts(labels, stage)
         self.log(f"{stage}_loss", loss, on_epoch=True, prog_bar=True, batch_size=bsz)
         self.log(f"{stage}_acc",  acc,  on_epoch=True, prog_bar=True, batch_size=bsz)
- 
+
         if stage == "train":
             self.train_sample_count += bsz
             self._log_lrs()
             return loss
         else:
-            self.val_balanced_acc.update(preds.long().view(-1), labels.long().view(-1))
+            self.val_balanced_acc.update(preds.view(-1), labels.long().view(-1))
             self.log("val_balanced_acc", self.val_balanced_acc, on_epoch=True,
                      prog_bar=True, batch_size=bsz)
             return None
- 
+
     def _log_epoch_summary_extras(self):
-        self.write_log(f"Class 0 samples: {self.num_0}, Class 1 samples: {self.num_1}\n")
+        counts_str = ", ".join(f"Class {i}: {int(c)}"
+                               for i, c in enumerate(self.class_counts))
+        self.write_log(f"Samples per class -> {counts_str}\n")
         self.write_log(f"Balancing Factor: {self.balancing_factor}\n")
-        self.write_log(f"Balanced Data: {self.balanced_data}, Use Balanced Weights: {self.use_balanced_weights}\n")
+        self.write_log(f"Balanced Data: {self.balanced_data}, "
+                       f"Use Balanced Weights: {self.use_balanced_weights}\n")
         self.write_log(f"Weights for Loss Function: {self.class_weights.tolist()}\n")
- 
-    # ---- prediction ----------------------------------------------------------------
+
+    # ---- prediction ------------------------------------------------------------
     def predict_step(self, batch, batch_idx):
         frames, seq_ids, slot_ids, lengths, labels, \
             resizing_factors, subject_ids, modalities = batch
- 
+
         outputs = self(frames, seq_ids, slot_ids, lengths)
- 
+
         if self.num_classes == 1:
             p1 = torch.sigmoid(outputs).flatten()
             probs = torch.stack([1 - p1, p1], dim=1)
             preds = (outputs > 0.0).long().flatten()
         else:
-            _, preds = torch.max(outputs, 1)
             probs = torch.softmax(outputs, dim=1)
- 
+            preds = torch.argmax(outputs, dim=1)
+
         return {
             "probs": probs.detach().cpu(),
             "preds": preds.detach().cpu(),

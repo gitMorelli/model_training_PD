@@ -55,7 +55,7 @@ params = {
     "invert_color": True, #even if set to true it is ignored when debug == True
     "use_grid": True,
 
-    "seed": 42,
+    "seed": 42, 
     "balanced_data": False,
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     "balancing_factor": 1,
@@ -64,8 +64,14 @@ params = {
     "invert_color": True,
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': -1, #0, -1 (if keep all) or a positive value
+    'censor_time': 'all', 
     'filter_modality': 'digit', #None, 'X', 'text', 'digit' (if None keep all modalities)
+    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
+    'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
+    'synthetic': None, #['original','progressive_thickening','progressive_slant','progressive_size_drift', 
+    #'progressive_baseline_wave', 'progressive_tremor', 'progressive_ink_density'], #or None
+    'synthetic_proportions': [0.5, 0.2, 0.2, 0.1], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
+
 
     #dataloader params
     "batch_size": 2,
@@ -102,13 +108,13 @@ elif params['selected_problem'] == "PD":
     CSV_LOAD_PATH = ""
 
     #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_8_7_26.parquet"
+    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
 
     #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
     data_folder = "final_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
     SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/dataset_info_PD"
 
-    params["h5_data_path"] = "/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl"
+    params["h5_data_path"] = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl"
 
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")

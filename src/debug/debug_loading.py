@@ -30,10 +30,10 @@ import torch.nn.functional as F
 import pickle
 import traceback
 
-from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD, merge_properties_from_full_dataset_PD
+from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD, merge_properties_from_full_dataset_PD, synthetic_data_override
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
-from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms
-from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD_with_meta, debug_images_PD
+from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std
+from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD
 from src.utils.visualization import SubjectViewer, launch_interactive_PD
 
 params = {
@@ -41,26 +41,32 @@ params = {
     'pre_filter_csv': False,
     'integrate_csv': False,
     'columns_to_add': ['rempli_seulq12'],
-    'interactive_visualization': True,
+    'interactive_visualization': False,
     'interactive_properties': ['unique_id', 'split',
                                'case_control','last_avail_q',
                                'rempli_pattern','grid_pattern',
-                               'case_grid_pattern','q_5_num_X'],
+                               'case_grid_pattern','q_5_num_X',
+                               'synth_label'],
 
     "data_modality": ['digit_full','digit_crop']+['digit' for _ in range(2)]+
     ['text_full']+['text' for _ in range(2)]+['X_crop'], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     "num_tiles": 3,
+    'synthetic': None, #['original','progressive_thinning','progressive_size_drift_y', 'progressive_tremor'], 
+    #'progressive_baseline_wave', 'progressive_tremor', 'progressive_ink_density'], #or None
+    'synthetic_proportions': [0.1, 0.3, 0.3,0.3], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
-    'model': 'resnet18', 
+
+    'model': 'resnet18',  
     "input_size": 224,
-    'mean_and_std': 'handedness',
+    'norm_mu': 'imagenet', #imagenet,handedness,mnist
+    'norm_std': 'imagenet',
     'custom_transform': 'pad_resize_normalize', #None
     "apply_augmentation": 'random_crop_half',#'random_crop_half', #None, 
     "invert_color": True,
     "use_grid": True,
 
     "seed": 42,
-    "balanced_data": True,
+    "balanced_data": False,
     'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
     "balancing_factor": 1,
     "majority_class_id": 0,
@@ -68,7 +74,7 @@ params = {
     "invert_color": True,
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'last_successive_and_previous', #0, -1 (if keep all) or a positive value
+    'censor_time': 'all', #long (keep only long sequences)
     'filter_modality': 'digit', #None, 'X', 'text', 'digit' (if None keep all modalities)
     'grouped':False,
 
@@ -117,14 +123,18 @@ SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 VERBOSE = True
 
 
-def main(run_random_samples_from_loader=True, run_study_loader = False, show_grids=False, run_compute_time=False, run_debug_from_shards=False,
+def main(params,run_random_samples_from_loader=False, 
+         run_study_loader = False, show_grids=False, 
+         run_compute_time=True, run_debug_from_shards=False,
          run_explore_files=False):
     args = get_args()
     random.seed(params['seed'])
-    mean,std = get_mean_std(params['mean_and_std'])
+    mean,std = get_mu_std(params, verbose=VERBOSE)
 
     params['norm_mu'] = mean
     params['norm_std'] = std
+
+    params = synthetic_data_override(params, verbose=True) #if i am using the synthetic version i need this line
 
     if params['pre_filter_csv']:
         pre_filtered_csv = run_pre_filtering()
@@ -139,16 +149,15 @@ def main(run_random_samples_from_loader=True, run_study_loader = False, show_gri
         if params['interactive_visualization']:
             interactive_random_samples(args, params, batches_to_show=3,mean=mean, std=std,pre_filtered_csv=pre_filtered_csv)
         else:
-            random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, 
-                                        mean=mean, std=std, no_text=True, pre_filtered_csv=pre_filtered_csv)
+            random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=6, 
+                                        mean=mean, std=std, no_text=False, pre_filtered_csv=pre_filtered_csv)
     
+    if run_compute_time:
+        compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=pre_filtered_csv)
 
     ### From here they work only for the handedness case #####
     if show_grids:
         grids_of_random_samples(args, out_folder=os.path.join(SAVE_PATH, "grids"), batches_to_show=3, mean=mean, std=std)
-    
-    if run_compute_time:
-        compute_time_to_iterate_on_dataloader(args)
         
     if run_study_loader:
         study_dataloader(args)
@@ -178,14 +187,6 @@ def main(run_random_samples_from_loader=True, run_study_loader = False, show_gri
 
 
 ########### Tensor visualization utils ############
-def get_mean_std(mean_and_std):
-    if mean_and_std == 'handedness':
-        mean = [0.06040578708052635, 0.06040578708052635, 0.06040578708052635]
-        std = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
-    else:
-        raise ValueError(f"Unknown mean/std setting: {mean_and_std}")
-    
-    return mean, std
 
 def denorm(t, mean, std):
     mean = torch.tensor(mean).view(-1, 1, 1)
@@ -512,10 +513,10 @@ def study_dataloader(args):
     train_loader_un_normalized, _ = get_dataloader(args,normalized=False)
     compute_per_modality_norm(train_loader_un_normalized, num_modalities=expected_shape[1], max_batches=None)
     dataset_overview(train_loader, num_modalities=expected_shape[1], num_classes=2, max_batches=50)
-def compute_time_to_iterate_on_dataloader(args):
+def compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=None):
     import time
     start = time.time()
-    train_loader, expected_shape = get_dataloader(args)
+    train_loader, expected_shape = get_dataloader(args, params, pre_filtered_csv)
     for batch_idx, batch in enumerate(train_loader):
         img_tensor, *_ = batch
         #print(f"Batch {batch_idx}: img_tensor shape: {img_tensor.shape}, label shape: {label.shape}, subject_id_batch shape: {subject_id_batch.shape}, questionnaire_batch shape: {questionnaire_batch.shape}")
@@ -528,6 +529,17 @@ def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, m
     os.makedirs(out_folder, exist_ok=True)
     #this functions shows images and properties of a random sample of images from the dataloader
     train_loader, expected_shape = get_dataloader(args, params, pre_filtered_csv)
+
+    if pre_filtered_csv is None:
+        pre_filtered_csv = pd.read_parquet(params['list_of_ids_paths'])
+        print("Loaded pre_filtered_csv, for interactive visualization, from file:", params['list_of_ids_paths'])
+    def get_meta(subject_id, cols=params['interactive_properties'], pre_filtered_csv=pre_filtered_csv):
+        """Look up a single row by unique_id and return a subset of columns."""
+        match = pre_filtered_csv.loc[pre_filtered_csv["unique_id"] == subject_id]
+        if match.empty:
+            return f"(no row for unique_id={subject_id})"
+        row = match.iloc[0]
+        return {c: row[c] for c in cols if c in row.index}
 
     if params['selected_problem'] == "handedness":
         n_batches=0
@@ -576,9 +588,10 @@ def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, m
             out_folder_this_batch=os.path.join(out_folder,f"batch_{n_batches}")
             os.makedirs(out_folder_this_batch, exist_ok=True)
             if no_text:
-                debug_images_PD(mean,std, batch, out_folder_this_batch, input_is_batch=True)
+                show_metadata=False
             else:
-                debug_images_PD_with_meta(mean,std, batch, out_folder_this_batch, compact = True, meta_fontsize=10)
+                show_metadata=True
+            debug_images_PD(mean,std, batch, out_folder_this_batch, input_is_batch=True,meta_fn=get_meta, show_metadata=show_metadata)
 
             if n_batches >= batches_to_show:
                 break
@@ -839,5 +852,5 @@ def explore_files(filename='worker94_shard-000000/D3I3J0N6.q1.hand.png'):
 ################################################################################
 
 if __name__ == "__main__":
-    main()
+    main(params)
     

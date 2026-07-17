@@ -28,21 +28,29 @@ import signal
 import sys
 import json
 # 4. Compute and display metrics using scikit-learn
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (
+    precision_recall_curve, average_precision_score, roc_auc_score,
+    precision_score, recall_score, f1_score, balanced_accuracy_score,
+    classification_report, confusion_matrix,
+)
+from sklearn.preprocessing import label_binarize
+import matplotlib.pyplot as plt
+import numpy as np
 
 from src.utils.data_loading_utils import melt_df, prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_dataset
-from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms
-from src.utils.training_utils import ModelPD
+from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std
+from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
+from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 exp_params = {
-    'list_of_ids_paths': "/home/a_morelli/datasets/id_lists/final_data_for_training.parquet",
+    'list_of_ids_paths': "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet",
     'data_folder': "final_png_whitebg",
-    'grid_dict_path': "/mnt/beegfs02/scratch/a_morelli/datasets/PD_data_h5.pkl",
+    'grid_dict_path': "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl",
     'predict_on_train': False, #if True the model will be evaluated on the training set as well
 
     #experiment parameters
@@ -59,22 +67,26 @@ exp_params = {
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': -1, #0, -1 (if keep all) or a positive value
+    'censor_time': 'successive', #0, -1 (if keep all) or a positive value
     'filter_modality': 'digit', #None, 'digit', 'text', 'X' (if None keep all)
 
     #model definition
     'model':"resnet18", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': os.path.join(
-    '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
-    'resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt'
-), #None, see options below
-    'model_structure': 'SequenceQuestionnaireModel',
+    'custom_pre_trained_weights': None, #None, see options below
+    'model_structure': 'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+    'model_parameters': {
+        'd_model': 128, 
+        'n_heads': 4,
+        'n_layers':1,
+        'ff_mult':2,
+        'dropout': 0.4,
+    },
 
     #Transforms definitions
     'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-    'norm_mu': [0.06040578708052635, 0.06040578708052635, 0.06040578708052635],
-    'norm_std': [0.23823712766170502, 0.23823712766170502, 0.23823712766170502],
+    'norm_mu': 'imagenet', #imagenet,handedness,mnist
+    'norm_std': 'imagenet',
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
@@ -92,6 +104,14 @@ exp_params = {
     'input_size': 224,
     'layers_to_unfreeze': ['all','classifier'], #Update it for every model
     'seed': 42,
+
+    #training modality
+    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
+    'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
+    'synthetic': None, #['original','progressive_thickening','progressive_slant','progressive_size_drift', 
+    #'progressive_baseline_wave', 'progressive_tremor', 'progressive_ink_density'], #or None
+    'synthetic_proportions': [0.5, 0.2, 0.2, 0.1], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
+
 }
 if isinstance(exp_params['data_modality'],list):
     exp_params['num_tiles'] = len(exp_params['data_modality'])
@@ -105,13 +125,13 @@ SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 #Checkpoint paths
 RESULTS_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
 CHECKPOINT_PATH = os.path.join(RESULTS_PATH, "checkpoints")
-checkpoint_to_load='v_6/best-epoch=20-val_loss=0.64.ckpt'#best-epoch=55-val_loss=0.91.ckpt'#best.ckpt , None last.ckpt
+checkpoint_to_load='v_15/best-epoch=31-val_loss=1.22.ckpt'
 
 VERBOSE = False
 CLASS_COL = 'diag_park_final1_quest'
 
 
-def main():
+def main(exp_params):
     args = get_args()
     worker = args.num_workers
     prefetch_factor = 2 if worker > 0 else None
@@ -127,11 +147,14 @@ def main():
 
     csv_data = pd.read_parquet(exp_params['list_of_ids_paths'])
 
+    exp_params['norm_mu'],exp_params['norm_std'] = get_mu_std(exp_params, verbose=VERBOSE)
+
     #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
     exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=CLASS_COL)
 
-    _,transform = get_model(name=exp_params['model'], pretrained=True)
-    transform = get_transforms(exp_params, transform)
+    #_,transform = get_model(name=exp_params['model'], pretrained=True)
+    #transform = get_transforms(exp_params, transform)
+    model, transform = model_initialization(exp_params,verbose=VERBOSE, **exp_params['model_parameters'])
     
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict, transform, 
                                                     SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val)
@@ -139,7 +162,7 @@ def main():
     # 1. Gather predictions using the best checkpoint saved during training
     # Setting ckpt_path="best" tells Lightning to automatically find your top model
     ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
-    lit_model = ModelPD.load_from_checkpoint(ckpt_path, write_log=False)
+    lit_model = ModelPDClassification.load_from_checkpoint(ckpt_path, write_log=False, model=model)
     tb_logger=False
     # 4. Initialize Trainer and Fit
     trainer = L.Trainer(
@@ -152,7 +175,9 @@ def main():
     results_df, all_probs, all_preds, all_labels = get_result_df(outputs)
     
     print(f"Evaluating model on validation set using checkpoint: {ckpt_path}")
-    analyze_results(all_preds, all_labels, results_df)
+    analyze_results(all_probs, all_labels, results_df, split="validation",
+                    pos_label=1, threshold=None, strategy="f1",
+                    target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
     
 
     if exp_params['predict_on_train']:
@@ -184,7 +209,7 @@ def get_result_df(outputs):
 
     #create a dataframe with the subject id, questionnaire, true label, predicted label and probabilities
     results_df = pd.DataFrame({
-        "subject_id": all_subjects,
+        "unique_id": all_subjects,
         "true_label": all_labels.numpy(),
         "predicted_label": all_preds.numpy(),
         "probability_0": all_probs[:, 0].numpy(),
@@ -192,7 +217,7 @@ def get_result_df(outputs):
     })
     return results_df, all_probs, all_preds, all_labels
 
-def analyze_results(all_preds, all_labels, results_df,split="validation"):
+def analyze_results_old(all_preds, all_labels, results_df,split="validation"):
     # 3. Convert to numpy arrays for statistics calculation
     y_pred = all_preds.numpy()
     y_true = all_labels.numpy()
@@ -211,18 +236,369 @@ def analyze_results(all_preds, all_labels, results_df,split="validation"):
         print(results_df.head(10))
 
 def store_results(csv_data, results_df, ckpt_path,params):
-    merged_df = pd.merge(csv_data, results_df, on='ident_projet', how='left')
+    merged_df = pd.merge(csv_data, results_df, on='unique_id', how='left')
     #check for duplicate rows
-    if merged_df.duplicated(subset=['ident_projet']).any():
-        print("Warning: There are duplicate rows in the merged dataframe based on 'ident_projet'.")
+    if merged_df.duplicated(subset=['unique_id']).any():
+        print("Warning: There are duplicate rows in the merged dataframe based on 'unique_id'.")
     else:
-        print("No duplicate rows found in the merged dataframe based on 'ident_projet'.")
+        print("No duplicate rows found in the merged dataframe based on 'unique_id'.")
     #save the merged dataframe in a csv file
     merged_df.to_csv(os.path.join(os.path.dirname(ckpt_path), f"predictions.csv"), index=False)
     #save params dict as predictions_metadata.json
     with open(os.path.join(os.path.dirname(ckpt_path), f"predictions_metadata.json"), 'w') as f:
         json.dump(params, f, indent=4)
 
+#temporary
+def model_initialization(exp_params, verbose=True, **kwargs):
+    backbone,transform = get_model(name=exp_params['model'], pretrained=True, 
+                                   custom_pre_trained_weights=exp_params['custom_pre_trained_weights'])
+    print("############# Model backbone loaded! #############")
+    transform = get_transforms(exp_params, transform)
+    out=test_output(exp_params['input_size'], backbone)
+    in_features = out.shape[1]  
+    
+    if exp_params['model_structure'] == 'SequenceQuestionnaireModel':
+        n_slots = 13  # This is a fixed value based on your description
+        d_model = kwargs.get('d_model', 128)
+        n_heads  = kwargs.get('n_heads', 4)
+        n_layers = kwargs.get('n_layers', 2)
+        ff_mult = kwargs.get('ff_mult', 2)
+        dropout = kwargs.get('dropout', 0.4)
+        model = SequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, 
+                                           d_model=d_model, n_heads=n_heads, n_layers=n_layers, ff_mult=ff_mult, view_agg='attention', dropout=dropout)
+    elif exp_params['model_structure'] == 'SetQuestionnaireModel':
+        d_model = kwargs.get('d_model', 128)
+        ff_mult = kwargs.get('ff_mult', 2)
+        dropout = kwargs.get('dropout', 0.4)
+        model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'],  
+                                           d_model=d_model, ff_mult=ff_mult, view_agg='attention', dropout=dropout,
+                                           use_spread=True, use_count_feature=True,count_norm=2)
+    else:
+        raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
+    
+    #unfreeze_layers(model,layer_names=exp_params['layers_to_unfreeze'])
+
+    return model, transform
+
+# ======================================================================
+# score helpers
+# ======================================================================
+def _as_pos_scores(all_scores, pos_label=1):
+    """Binary only: accept 1D P(pos) OR a 2D (N,2) array, return 1D P(pos)."""
+    s = np.asarray(all_scores)
+    if s.ndim == 2 and s.shape[1] == 2:
+        s = s[:, pos_label]
+    return s.ravel()
+
+
+def _as_prob_matrix(all_scores, num_classes=None):
+    """Return an (N, C) probability matrix from various score shapes.
+
+    Accepts:
+      - 1D array of P(pos)        -> treated as binary, expanded to (N, 2)
+      - 2D (N, C) probabilities   -> used as-is
+      - 2D (N, C) logits          -> softmaxed (detected when rows don't sum to 1)
+
+    argmax is invariant to softmax, but the AUC metrics need proper
+    probabilities, so we normalize logits here.
+    """
+    s = np.asarray(all_scores, dtype=float)
+    if s.ndim == 1:
+        s = np.column_stack([1.0 - s, s])          # binary P(pos) -> (N, 2)
+
+    row_sums = s.sum(axis=1)
+    if not np.allclose(row_sums, 1.0, atol=1e-3):  # looks like logits -> softmax
+        s = s - s.max(axis=1, keepdims=True)
+        e = np.exp(s)
+        s = e / e.sum(axis=1, keepdims=True)
+
+    if num_classes is not None and s.shape[1] != num_classes:
+        raise ValueError(f"expected {num_classes} columns, got {s.shape[1]}")
+    return s
+
+
+# ======================================================================
+# binary path (unchanged behavior) -- used when C == 2
+# ======================================================================
+def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90):
+    """Choose a decision threshold for the positive class (binary only).
+
+    strategy="f1"            -> threshold that maximizes F1 on the positive class
+    strategy="target_recall" -> best-precision threshold that still hits
+                                recall >= target_recall
+    """
+    precision, recall, thresholds = precision_recall_curve(y_true, y_scores)
+    precision, recall = precision[:-1], recall[:-1]
+
+    if strategy == "f1":
+        f1 = np.where(
+            (precision + recall) > 0,
+            2 * precision * recall / (precision + recall + 1e-12),
+            0.0,
+        )
+        return float(thresholds[np.argmax(f1)])
+
+    if strategy == "target_recall":
+        ok = recall >= target_recall
+        if not ok.any():
+            return float(thresholds[np.argmax(recall)])
+        idx = np.where(ok)[0]
+        best = idx[np.argmax(precision[idx])]
+        return float(thresholds[best])
+
+    raise ValueError(f"unknown strategy: {strategy}")
+
+
+def _threshold_free_report_binary(y_true, y_scores, pos_label=1):
+    prevalence = float(np.mean(y_true == pos_label))
+    pr_auc = average_precision_score(y_true, y_scores, pos_label=pos_label)
+    roc_auc = roc_auc_score(y_true, y_scores)
+
+    print("\n--- Threshold-free metrics ---")
+    print(f"PR-AUC (avg precision) : {pr_auc:.3f}   "
+          f"[random baseline = prevalence = {prevalence:.3f}]")
+    print(f"ROC-AUC                : {roc_auc:.3f}   [random baseline = 0.500]")
+    return pr_auc, roc_auc, prevalence
+
+
+def _baseline_table_binary(y_true, pos_label=1, seed=0):
+    rng = np.random.default_rng(seed)
+    n = len(y_true)
+    prevalence = float(np.mean(y_true == pos_label))
+
+    def row(name, y_hat):
+        return {
+            "model": name,
+            "PD_precision": precision_score(y_true, y_hat, pos_label=pos_label, zero_division=0),
+            "PD_recall":    recall_score(y_true, y_hat, pos_label=pos_label, zero_division=0),
+            "PD_f1":        f1_score(y_true, y_hat, pos_label=pos_label, zero_division=0),
+            "balanced_acc": balanced_accuracy_score(y_true, y_hat),
+        }
+
+    neg = 1 - pos_label
+    all_healthy = np.full(n, neg, dtype=int)
+    all_pd      = np.full(n, pos_label, dtype=int)
+    unif        = rng.integers(0, 2, size=n)
+    strat       = (rng.random(n) < prevalence).astype(int)
+
+    return pd.DataFrame([
+        row("always healthy (majority)", all_healthy),
+        row("always PD (minority)",      all_pd),
+        row("uniform random 50/50",      unif),
+        row("stratified random",         strat),
+    ])
+
+
+def _plot_pr_curve_binary(y_true, y_scores, pos_label=1, threshold=None, path=None):
+    if plt is None:
+        print("matplotlib not available; skipping PR plot")
+        return
+    precision, recall, _ = precision_recall_curve(y_true, y_scores, pos_label=pos_label)
+    ap = average_precision_score(y_true, y_scores, pos_label=pos_label)
+    prevalence = float(np.mean(y_true == pos_label))
+
+    plt.figure(figsize=(5, 5))
+    plt.plot(recall, precision, label=f"model (AP={ap:.3f})")
+    plt.axhline(prevalence, ls="--", color="gray", label=f"random (AP={prevalence:.3f})")
+    if threshold is not None:
+        yp = (y_scores >= threshold).astype(int)
+        plt.scatter([recall_score(y_true, yp, pos_label=pos_label, zero_division=0)],
+                    [precision_score(y_true, yp, pos_label=pos_label, zero_division=0)],
+                    color="red", zorder=5, label=f"threshold={threshold:.3f}")
+    plt.xlabel("recall (PD)"); plt.ylabel("precision (PD)")
+    plt.xlim(0, 1); plt.ylim(0, 1); plt.legend(); plt.tight_layout()
+    plt.savefig(path) if path else plt.show()
+
+
+def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
+                    threshold, strategy, target_recall, plot, out_dir_path):
+    y_scores = y_prob[:, pos_label]
+
+    # 1. threshold-free view
+    _threshold_free_report_binary(y_true, y_scores, pos_label)
+
+    # 2. pick / apply a threshold
+    if threshold is None:
+        threshold = pick_threshold(y_true, y_scores, strategy=strategy,
+                                   target_recall=target_recall)
+        extra = (", target_recall=%.2f" % target_recall) if strategy == "target_recall" else ""
+        print(f"\nChosen threshold ({strategy}{extra}): {threshold:.3f}")
+    else:
+        print(f"\nUsing fixed threshold: {threshold:.3f}")
+    y_pred = (y_scores >= threshold).astype(int)
+
+    # 3. report at that threshold
+    print("\n--- Classification Report @ threshold ---")
+    print(classification_report(y_true, y_pred, target_names=class_names, zero_division=0))
+    print("--- Confusion Matrix @ threshold ---")
+    print(confusion_matrix(y_true, y_pred))
+
+    # 4. baselines
+    print("\n--- Baseline comparison (positive = %s) ---" % class_names[pos_label])
+    with pd.option_context("display.float_format", "{:.3f}".format):
+        print(_baseline_table_binary(y_true, pos_label).to_string(index=False))
+
+    if plot:
+        _plot_pr_curve_binary(y_true, y_scores, pos_label, threshold,
+                              path=os.path.join(out_dir_path, f"pr_curve_{split}.png"))
+    return {"threshold": threshold, "y_pred": y_pred}
+
+
+# ======================================================================
+# multiclass path -- used when C > 2
+# ======================================================================
+def _threshold_free_report_mc(y_true, y_prob, class_names):
+    C = y_prob.shape[1]
+    classes = np.arange(C)
+    prevalence = np.array([(y_true == c).mean() for c in classes])
+    Y = label_binarize(y_true, classes=classes)   # (N, C) one-hot
+
+    # per-class one-vs-rest average precision; macro = simple mean
+    ap = np.full(C, np.nan)
+    for c in classes:
+        if Y[:, c].sum() > 0:                      # class present in y_true
+            ap[c] = average_precision_score(Y[:, c], y_prob[:, c])
+    macro_ap = np.nanmean(ap)
+
+    try:
+        roc_auc = roc_auc_score(y_true, y_prob, multi_class="ovr",
+                                average="macro", labels=classes)
+    except ValueError:
+        roc_auc = float("nan")                     # a class missing from y_true
+
+    print("\n--- Threshold-free metrics (macro, one-vs-rest) ---")
+    print(f"macro PR-AUC : {macro_ap:.3f}   "
+          f"[random baseline = mean prevalence = {prevalence.mean():.3f}]")
+    print(f"macro ROC-AUC: {roc_auc:.3f}   [random baseline = 0.500]")
+    print("  per-class AP:")
+    for c in classes:
+        print(f"    {class_names[c]:>15s}: AP={ap[c]:.3f}   "
+              f"[prevalence={prevalence[c]:.3f}]")
+    return macro_ap, roc_auc, prevalence
+
+
+def _baseline_table_mc(y_true, class_names, seed=0):
+    rng = np.random.default_rng(seed)
+    n = len(y_true)
+    classes = np.arange(len(class_names))
+    prevalence = np.array([(y_true == c).mean() for c in classes])
+    majority = int(np.argmax(prevalence))
+
+    def row(name, y_hat):
+        return {
+            "model": name,
+            "macro_precision": precision_score(y_true, y_hat, average="macro", zero_division=0),
+            "macro_recall":    recall_score(y_true, y_hat, average="macro", zero_division=0),
+            "macro_f1":        f1_score(y_true, y_hat, average="macro", zero_division=0),
+            "balanced_acc":    balanced_accuracy_score(y_true, y_hat),
+        }
+
+    always_majority = np.full(n, majority, dtype=int)
+    unif            = rng.integers(0, len(classes), size=n)
+    strat           = rng.choice(classes, size=n, p=prevalence)
+
+    return pd.DataFrame([
+        row(f"always majority ({class_names[majority]})", always_majority),
+        row("uniform random",    unif),
+        row("stratified random", strat),
+    ])
+
+
+def _plot_pr_curve_mc(y_true, y_prob, class_names, path=None):
+    if plt is None:
+        print("matplotlib not available; skipping PR plot")
+        return
+    classes = np.arange(len(class_names))
+    Y = label_binarize(y_true, classes=classes)
+
+    plt.figure(figsize=(6, 6))
+    for c in classes:
+        if Y[:, c].sum() == 0:
+            continue
+        precision, recall, _ = precision_recall_curve(Y[:, c], y_prob[:, c])
+        ap = average_precision_score(Y[:, c], y_prob[:, c])
+        plt.plot(recall, precision, label=f"{class_names[c]} (AP={ap:.3f})")
+    plt.xlabel("recall"); plt.ylabel("precision")
+    plt.title("One-vs-rest PR curves")
+    plt.xlim(0, 1); plt.ylim(0, 1); plt.legend(); plt.tight_layout()
+    plt.savefig(path) if path else plt.show()
+
+
+def _analyze_multiclass(y_true, y_prob, results_df, split, class_names,
+                        plot, out_dir_path):
+    n_classes = y_prob.shape[1]
+    labels = np.arange(n_classes)
+
+    # 1. threshold-free view (macro OvR)
+    _threshold_free_report_mc(y_true, y_prob, class_names)
+
+    # 2. predictions via argmax (no threshold in multiclass)
+    y_pred = np.argmax(y_prob, axis=1)
+
+    # 3. report
+    print("\n--- Classification Report (argmax) ---")
+    print(classification_report(y_true, y_pred, labels=labels,
+                                target_names=class_names, zero_division=0))
+    print("--- Confusion Matrix (rows=true, cols=pred) ---")
+    print(confusion_matrix(y_true, y_pred, labels=labels))
+
+    # 4. baselines
+    print("\n--- Baseline comparison (macro-averaged) ---")
+    with pd.option_context("display.float_format", "{:.3f}".format):
+        print(_baseline_table_mc(y_true, class_names).to_string(index=False))
+
+    if plot:
+        _plot_pr_curve_mc(y_true, y_prob, class_names,
+                          path=os.path.join(out_dir_path, f"pr_curve_{split}.png"))
+    return {"threshold": None, "y_pred": y_pred}
+
+
+# ======================================================================
+# dispatcher
+# ======================================================================
+def analyze_results(all_scores, all_labels, results_df, split="validation",
+                    class_names=None, pos_label=1, threshold=None, strategy="f1",
+                    target_recall=0.90, plot=False, out_dir_path='.'):
+    """
+    all_scores : per-sample class probabilities.
+                 - binary: 1D P(pos) or 2D (N, 2)
+                 - multiclass: 2D (N, C) probabilities or logits
+                 (NOT hard predictions -- PR-AUC/thresholding need scores.)
+    class_names: list of length C. Defaults to ["healthy","PD"] when C==2,
+                 else ["class 0", ...].
+    Binary (C==2): threshold-based analysis, tuned via `strategy`/`threshold`.
+    Multiclass (C>2): argmax-based analysis with macro / per-class metrics;
+                      `pos_label`, `threshold`, `strategy` are ignored.
+    Assumes labels are integers in [0, C-1].
+    """
+    y_true = all_labels.numpy() if hasattr(all_labels, "numpy") else np.asarray(all_labels)
+    y_true = y_true.astype(int).ravel()
+    scores = all_scores.numpy() if hasattr(all_scores, "numpy") else all_scores
+    y_prob = _as_prob_matrix(scores)
+    n_classes = y_prob.shape[1]
+
+    if class_names is None:
+        class_names = (["healthy", "PD"] if n_classes == 2
+                       else [f"class {i}" for i in range(n_classes)])
+    if len(class_names) != n_classes:
+        raise ValueError(f"class_names has {len(class_names)} entries "
+                         f"but scores imply {n_classes} classes")
+
+    print(f"\n================ {split.upper()} STATISTICS ================")
+
+    if n_classes == 2:
+        result = _analyze_binary(y_true, y_prob, results_df, split, class_names,
+                                 pos_label, threshold, strategy, target_recall,
+                                 plot, out_dir_path)
+    else:
+        result = _analyze_multiclass(y_true, y_prob, results_df, split,
+                                     class_names, plot, out_dir_path)
+
+    print("=======================================================")
+    with pd.option_context("display.max_rows", None, "display.max_columns", None):
+        print(results_df.head(10))
+    return result
+
 if __name__ == "__main__":
-    main()
+    main(exp_params)
     

@@ -293,16 +293,13 @@ def inspect_00000():
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         print(csv_data)'''
 
-    
+
 if __name__ == "__main__":
-    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
-    csv_data = pd.read_parquet(load_path)
-    csv_data['subject_id'] = csv_data['unique_id'].str.split('_').str[0]
-    csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1]
-    #count how many rows have grid_pattern=0000000000000
-    #check that in each group with the same group_id last_avail_q is the same
-    consistent = csv_data.groupby("group_id")["last_avail_q"].nunique().eq(1).all()
-    print(consistent)
+    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
+    csv_data = pd.read_csv(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
 
     
     

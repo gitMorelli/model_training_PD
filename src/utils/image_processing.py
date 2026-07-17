@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
-import torchvision.transforms.functional as F
+import torchvision.transforms.functional as TF
+import torch.nn.functional as F
 from torchvision.transforms import InterpolationMode
 import torchvision.transforms as T
 import os
@@ -113,10 +114,10 @@ class ResizeLongestSide:
         self.interpolation = interpolation
 
     def __call__(self, img):
-        _, h, w = F.get_dimensions(img)        # works for PIL or tensor
+        _, h, w = TF.get_dimensions(img)        # works for PIL or tensor
         scale = self.size / max(h, w)
         new_h, new_w = round(h * scale), round(w * scale)
-        return F.resize(img, [new_h, new_w], interpolation=self.interpolation)
+        return TF.resize(img, [new_h, new_w], interpolation=self.interpolation)
 class PadToSquare:
     """Pad a PIL Image to a square by adding equal borders to the shorter side."""
     def __init__(self, fill=0, padding_mode="constant"):
@@ -135,7 +136,7 @@ class PadToSquare:
             pad_w - pad_w // 2,
             pad_h - pad_h // 2,
         )
-        return F.pad(img, padding, fill=self.fill, padding_mode=self.padding_mode)
+        return TF.pad(img, padding, fill=self.fill, padding_mode=self.padding_mode)
 class PadOrCropToSize:
     """Force an image to size x size by center-padding and/or center-cropping.
     Handles each axis independently: an image can be padded on one axis
@@ -156,7 +157,7 @@ class PadOrCropToSize:
         if pad_w or pad_h:
             left = pad_w // 2
             top = pad_h // 2
-            img = F.pad(
+            img = TF.pad(
                 img,
                 [left, top, pad_w - left, pad_h - top],   # l, t, r, b
                 fill=self.fill,
@@ -164,9 +165,22 @@ class PadOrCropToSize:
             )
 
         # --- 2. Crop any axis that is too large (no-op if already == target)
-        return F.center_crop(img, [th, tw])
+        return TF.center_crop(img, [th, tw])
 
 # synthetic transformations
+ALL_SYNTHETIC_TRANSFORMS = [
+    "original",
+    "progressive_thickening",
+    "progressive_thinning",
+    "progressive_slant",
+    "progressive_size_drift",
+    "progressive_baseline_wave",
+    "progressive_tremor",
+    "progressive_ink_density",
+    'progressive_size_drift_x',
+    'progressive_size_drift_y',
+]
+
 class RandomMorphology:
     """Erosion (min filter) thickens black ink; dilation (max filter) thins it.
     MinFilter/MaxFilter only accept odd sizes (3, 5, 7…)"""
@@ -203,7 +217,7 @@ class StrokeWeight:
 
 class Slant:
     """t -> increasing shear. Positive = leaning right."""
-    def __init__(self, rate=1.0, max_deg=18.0):
+    def __init__(self, rate=1.0, max_deg=30.0):
         self.rate, self.max_deg = rate, max_deg
 
     def __call__(self, ink, t):
@@ -214,7 +228,7 @@ class Slant:
 
 class SizeDrift:
     """t -> handwriting grows or shrinks; can be anisotropic (taller/narrower)."""
-    def __init__(self, rate_x=0.0, rate_y=0.0, max_frac=0.25):
+    def __init__(self, rate_x=0.0, rate_y=0.0, max_frac=2):
         self.rx, self.ry, self.m = rate_x, rate_y, max_frac
 
     def __call__(self, ink, t):
@@ -226,7 +240,7 @@ class SizeDrift:
 
 class BaselineWave:
     """t -> the writing line stops being straight; low-frequency vertical wobble."""
-    def __init__(self, rate=1.0, max_amp=0.04, cycles=1.5):
+    def __init__(self, rate=1.0, max_amp=0.1, cycles=1.5):
         self.rate, self.max_amp, self.cycles = rate, max_amp, cycles
 
     def __call__(self, ink, t):
@@ -245,7 +259,7 @@ class BaselineWave:
 
 class Tremor:
     """t -> shaky hand: smooth random displacement field, amplitude grows with t."""
-    def __init__(self, rate=1.0, max_amp=0.012, smooth=17):
+    def __init__(self, rate=1.0, max_amp=0.1, smooth=8):
         self.rate, self.max_amp, self.smooth = rate, max_amp, smooth
 
     def __call__(self, ink, t):
@@ -266,15 +280,16 @@ class Tremor:
 
 class InkDensity:
     """t -> pen runs dry (fading, patchy) or presses harder (darker, blotchy)."""
-    def __init__(self, rate=-1.0, max_gamma=1.2):
+    def __init__(self, rate=-1.0, max_gamma=8):
         self.rate, self.max_gamma = rate, max_gamma
 
     def __call__(self, ink, t):
         g = 1.0 + self.rate * t * self.max_gamma   # >1 fades ink, <1 darkens it
-        return ink.clamp(0, 1) ** max(g, 0.15)
+        return ink.clamp(0, 1) ** max(g, 0.02)
 
 def _warp_affine(ink, theta):
-    grid = F.affine_grid(theta[None], (1, *ink.shape), align_corners=False)
+    grid = F.affine_grid(theta[None], (1, *ink.shape), align_corners=False) #if the image size after transform is bigger -> cut it ->
+    #preserves original dimensions
     return F.grid_sample(ink[None], grid, mode="bilinear",
                          padding_mode="zeros", align_corners=False).squeeze(0)
 
@@ -304,7 +319,11 @@ class SyntheticTransform:
         elif selected_transform == 'progressive_slant':
             self.transform = Slant(rate=u())
         elif selected_transform == 'progressive_size_drift':
-            self.transform = SizeDrift(rate_x=u() * 0.6, rate_y=u())
+            self.transform = SizeDrift(rate_x=u(), rate_y=u())
+        elif selected_transform == 'progressive_size_drift_x':
+            self.transform = SizeDrift(rate_x=u(), rate_y=u()*0.1)
+        elif selected_transform == 'progressive_size_drift_y':
+            self.transform = SizeDrift(rate_x=u()*0.1, rate_y=u())
         elif selected_transform == 'progressive_baseline_wave':
             self.transform = BaselineWave(rate=abs(u()))
         elif selected_transform == 'progressive_tremor':
@@ -321,7 +340,7 @@ class SyntheticTransform:
         tt = max(0.0, t * (1.0 + random.uniform(-self.jitter, self.jitter)))
         ink = self.transform(ink, tt)
 
-        return to_img(ink).clamp(0, 1)
+        return to_img(ink)
 
 #---------- Load transforms ---------------
 def get_transforms(exp_params, transform):
@@ -439,6 +458,9 @@ def get_mu_std(exp_params,verbose=False):
         elif exp_params['norm_mu']=='imagenet':
             mu = (0.485,0.456,0.406)
             std = (0.229,0.224,0.225)
+        elif exp_params['norm_mu']=='handedness':
+            mu = [0.06040578708052635, 0.06040578708052635, 0.06040578708052635]
+            std = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
     if verbose:
         print(f"Using normalization mean: {mu} and std: {std}")
     return mu, std

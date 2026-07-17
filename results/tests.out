@@ -1,18 +1,113 @@
-True
+Column: ident_projet
+Column: diag_park_final1_quest
+Column: date_suivi_diag1_quest
+Column: birth_month
+Column: birth_year
+Column: aexclure
+Column: dateq1
+Column: dateq2
+Column: dateq3
+Column: dateq4
+Column: dateq5
+Column: dateq6
+Column: dateq7
+Column: dateq8
+Column: dateq9
+Column: dateq10
+Column: dateq11
+Column: dateq12
+Column: dateq13
+Column: q_1_avail
+Column: q_2_avail
+Column: q_3_avail
+Column: q_4_avail
+Column: q_5_avail
+Column: q_6_avail
+Column: q_7_avail
+Column: q_8_avail
+Column: q_9_avail
+Column: q_10_avail
+Column: q_11_avail
+Column: q_12_avail
+Column: q_13_avail
+Column: q_1_grid_file_avail
+Column: q_2_grid_file_avail
+Column: q_3_grid_file_avail
+Column: q_4_grid_file_avail
+Column: q_5_grid_file_avail
+Column: q_6_grid_file_avail
+Column: q_7_grid_file_avail
+Column: q_8_grid_file_avail
+Column: q_9_grid_file_avail
+Column: q_10_grid_file_avail
+Column: q_11_grid_file_avail
+Column: q_12_grid_file_avail
+Column: q_13_grid_file_avail
+Column: age_suivi_diag1_quest
+Column: cas_prev_dg1
+Column: lateralite
+Column: etudegp
+Column: actprofq2
+Column: profq2
+Column: rempli_seulq11
+Column: rempli_seulq12
+Column: q_1_num_X
+Column: q_2_num_X
+Column: q_3_num_X
+Column: q_4_num_X
+Column: q_5_num_X
+Column: q_6_num_X
+Column: q_7_num_X
+Column: q_8_num_X
+Column: q_9_num_X
+Column: q_10_num_X
+Column: q_11_num_X
+Column: q_12_num_X
+Column: q_13_num_X
+Column: q_1_num_text
+Column: q_2_num_text
+Column: q_3_num_text
+Column: q_4_num_text
+Column: q_5_num_text
+Column: q_6_num_text
+Column: q_7_num_text
+Column: q_8_num_text
+Column: q_9_num_text
+Column: q_10_num_text
+Column: q_11_num_text
+Column: q_12_num_text
+Column: q_13_num_text
+Column: q_1_num_digit
+Column: q_2_num_digit
+Column: q_3_num_digit
+Column: q_4_num_digit
+Column: q_5_num_digit
+Column: q_6_num_digit
+Column: q_7_num_digit
+Column: q_8_num_digit
+Column: q_9_num_digit
+Column: q_10_num_digit
+Column: q_11_num_digit
+Column: q_12_num_digit
+Column: q_13_num_digit
+Column: birth_date
+Column: years_diff
+Column: years_int
+Column: split
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4953254
+Job ID: 4981255
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n19
+Nodelist: n06
 Nodes: 1
 Cores per node: 10
-Job started at: 2026-07-15 09:11:56
-Job ended at:   2026-07-15 09:12:05
-Job Wall-clock time: 00:00:09
-CPU Utilized: 00:00:05
-CPU Efficiency: 5.56% of 00:01:30 core-walltime
-Memory Utilized: 1.77 MB
-Memory Efficiency: 0.04% of 4.00 GB
+Job started at: 2026-07-17 13:44:22
+Job ended at:   2026-07-17 13:44:32
+Job Wall-clock time: 00:00:10
+CPU Utilized: 00:00:08
+CPU Efficiency: 8.00% of 00:01:40 core-walltime
+Memory Utilized: 44.09 MB
+Memory Efficiency: 1.08% of 4.00 GB

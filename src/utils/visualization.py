@@ -175,7 +175,7 @@ def debug_images_dataset_stacked(
         print(f"Anteprima [{name}] salvata con successo in: {modality_output_path}")
 
 # Visualization for PD time series data
-def debug_images_PD(mean,std,loader,out_dir,input_is_batch=False): #(N, k, C, H, W), N = sum(T_i) - Format
+def debug_images_PD_old(mean,std,loader,out_dir,input_is_batch=False): #(N, k, C, H, W), N = sum(T_i) - Format
     def _denorm_to_hwc(img, mean, std):
         """(C,H,W) tensor -> (H,W[,C]) numpy in [0,1] for imshow."""
         img = img.detach().cpu().float()
@@ -256,7 +256,8 @@ def debug_images_PD(mean,std,loader,out_dir,input_is_batch=False): #(N, k, C, H,
         batch = next(iter(loader))                  # WebLoader(batch_size=None)
     os.makedirs(out_dir, exist_ok=True)
     debug_show_batch(batch, out_dir=out_dir)
-def debug_images_PD_with_meta(mean, std, batch, out_dir,
+
+def debug_images_PD_with_meta_old(mean, std, batch, out_dir,
                               slot_to_q=None,
                               max_subjects=None, dpi=110,
                               meta_fontsize=5.5,
@@ -393,6 +394,120 @@ def debug_images_PD_with_meta(mean, std, batch, out_dir,
 
     os.makedirs(out_dir, exist_ok=True)
     return debug_show_batch(batch, out_dir=out_dir)
+
+def debug_images_PD(mean, std, loader, out_dir, input_is_batch=False,
+                    meta_fn=None, show_metadata=True):
+    #(N, k, C, H, W), N = sum(T_i) - Format
+    def _denorm_to_hwc(img, mean, std):
+        """(C,H,W) tensor -> (H,W[,C]) numpy in [0,1] for imshow."""
+        img = img.detach().cpu().float()
+        if mean is not None and std is not None:
+            m = torch.tensor(mean).view(-1, 1, 1)
+            s = torch.tensor(std).view(-1, 1, 1)
+            img = img * s + m
+        img = img.clamp(0, 1).permute(1, 2, 0).numpy()
+        return img[:, :, 0] if img.shape[-1] == 1 else img      # squeeze grayscale
+
+    def _format_meta(meta):
+        """Turn the dict returned by get_meta into text lines for the card."""
+        if meta is None:
+            return ""
+        if isinstance(meta, str):                 # get_meta's "(no row...)" fallback
+            return meta
+        lines = []
+        for key, val in meta.items():
+            if isinstance(val, float):
+                val = f"{val:.4g}"
+            lines.append(f"{key}: {val}")
+        return "\n".join(lines)
+
+    def debug_show_batch(batch, out_dir="debug_batches",
+                        subject_ids=None, slot_to_q=None,
+                        mean=mean, std=std,
+                        max_subjects=None, dpi=110,
+                        meta_fn=None, show_metadata=True):
+        """
+        Save one PNG per subject. Layout: rows = views (k), cols = questionnaires (slot order).
+        If meta_fn is given and show_metadata is True, a metadata card
+        (meta_fn(subject_id)) is drawn to the right.
+        """
+        frames, seq_ids, slot_ids, lengths, labels, resizing_factors, subject_ids, modalities, *_ = batch
+        seq_ids, slot_ids = seq_ids.cpu(), slot_ids.cpu()
+        B = lengths.size(0)
+
+        if slot_to_q is None:
+            slot_name = lambda s: f"q{s + 1}"
+        elif callable(slot_to_q):
+            slot_name = slot_to_q
+        else:
+            slot_name = lambda s: slot_to_q.get(s, f"q{s + 1}")
+
+        os.makedirs(out_dir, exist_ok=True)
+        paths = []
+        n_show = B if max_subjects is None else min(B, max_subjects)
+
+        for b in range(n_show):
+            sel = (seq_ids == b).nonzero(as_tuple=True)[0]     # frame indices for subject b
+            if sel.numel() == 0:
+                continue
+            sel = sel[torch.argsort(slot_ids[sel])]            # questionnaires in slot order
+            slots = slot_ids[sel].tolist()
+            modes = [modalities[i] for i in sel.tolist()]
+
+            sub = frames[sel]                                  # (T_b, k, C, H, W)
+            T_b, k, C = sub.shape[:3]
+
+            sid = subject_ids[b] if subject_ids is not None else f"subject_{b}"
+
+            # ---- figure layout: image grid (+ optional card column) ----
+            has_card = meta_fn is not None and show_metadata
+            card_w = 3.0                                        # card width in inches
+            n_cols = T_b + (1 if has_card else 0)
+            fig_w = 2.2 * T_b + (card_w if has_card else 0)
+            fig = plt.figure(figsize=(fig_w, 2.2 * k))
+            width_ratios = [1] * T_b + ([card_w / 2.2] if has_card else [])
+            gs = fig.add_gridspec(k, n_cols, width_ratios=width_ratios)
+
+            # image axes
+            axes = [[fig.add_subplot(gs[i, j]) for j in range(T_b)] for i in range(k)]
+            for j in range(T_b):                               # column = questionnaire
+                axes[0][j].set_title(slot_name(slots[j]), fontsize=10)
+                for i in range(k):                             # row = view
+                    ax = axes[i][j]
+                    ax.imshow(_denorm_to_hwc(sub[j, i], mean, std),
+                            cmap="gray" if C == 1 else None)
+                    ax.set_xticks([]); ax.set_yticks([])
+                    if j == 0:
+                        ax.set_ylabel(f"{modes[j][i]}", fontsize=9)
+
+            # metadata card spanning all rows in the last column
+            if has_card:
+                card_ax = fig.add_subplot(gs[:, T_b])
+                card_ax.axis("off")
+                card_ax.text(0.0, 1.0, _format_meta(meta_fn(sid)),
+                             va="top", ha="left", fontsize=9, family="monospace",
+                             transform=card_ax.transAxes,
+                             bbox=dict(boxstyle="round,pad=0.6",
+                                       facecolor="#f7f7f9",
+                                       edgecolor="#bbbbbb", linewidth=1))
+
+            lab = labels[b].item() if torch.is_tensor(labels) else labels[b]
+            fig.suptitle(f"{sid}   label={lab}   T={T_b}  k={k}", fontsize=11)
+            fig.tight_layout()
+
+            path = os.path.join(out_dir, f"subject_{b}.png")
+            fig.savefig(path, dpi=dpi, bbox_inches="tight")
+            plt.close(fig)
+            paths.append(path)
+
+        return paths
+
+    if input_is_batch:
+        batch = loader
+    else:
+        batch = next(iter(loader))                  # WebLoader(batch_size=None)
+    os.makedirs(out_dir, exist_ok=True)
+    debug_show_batch(batch, out_dir=out_dir, meta_fn=meta_fn, show_metadata=show_metadata)
 
 def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects=None):
     """

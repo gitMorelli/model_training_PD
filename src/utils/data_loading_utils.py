@@ -844,8 +844,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             else:
                 img = raw_image_data
             
-            if synth_transform: #i am creating synthetic time-series
-                img = synth_transform(img, X)
+            '''if synth_transform: #i am creating synthetic time-series
+                img = synth_transform(img, X-1)'''
             
 
             if debug:
@@ -902,15 +902,17 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
 
         return list_of_views, list_of_modality_names, rescale_factor
 
-    def build_subject_sequence(subject_id, last_q, questionnaire_info, subject_images):
+    def build_subject_sequence(subject_id, last_q, questionnaire_info, subject_images, case_grid_pattern):
         """Loop questionnaires 1..13 and build the sequence for one subject.
 
         Returns (sequence, questionnaires, modalities, resized_list) or None
         if no usable frames were found.
         """
         if is_synthetic:
-            persona_seed = random.randint(0, 2**32 - 1)
-            synth_transform = SyntheticTransform(exp_params,subject_id,train_df, persona_seed, n_steps=14, jitter=0.15)
+            persona_seed = random.randint(0, 2**10 - 1)
+            synth_transform = SyntheticTransform(exp_params,subject_id,train_df, persona_seed, n_steps=13, jitter=0.05)
+        else:
+            synth_transform = None
 
         original_id = subject_id.split('_')[0]
 
@@ -919,7 +921,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         resized_list = []
         modalities = []
 
-        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id, subject_images)
+        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id, subject_images, case_grid_pattern)
 
         for X in range(1, 14):
             if X not in q_to_keep:  # questionnaire not to keep based on censoring
@@ -963,23 +965,32 @@ def keep_questionnaire(last_q,censor_time, questionnaire_info, questionnaire_num
         return questionnaire_dt <= -censor_time #eg if censor time=1 -> i keep
         #all questionnaires that are at least 1 year before the case date, so dt_q<=-1
 
-def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id,subject_images):
+def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id,subject_images, case_grid_pattern):
     '''take case_grid_pattern, the case_dt_q for each questionnaire, the training_df and the filtering modality to decide
     which questionnaires to sample for training
     case_grid_pattern is between 1 and 13
     case_dt can be missing (NaN) or numeric (remember is for the case only)'''
     if train_df is None:
-        print("IMPORTANT: Forcing censor_time to 'pre_diagnosis' because train_df is None")
+        #print("IMPORTANT: Forcing censor_time to 'pre_diagnosis' because train_df is None")
         censor_time = 'pre_diagnosis'
     else:
         grid_pattern = train_df.loc[train_df['unique_id']==subject_id,'grid_pattern'].values[0]
 
+    def filter_grid_pattern(case_grid_pattern, selected_questionnaires):
+        new_list = []
+        for q in selected_questionnaires:
+            if case_grid_pattern[q-1]=='1':
+                new_list.append(q)
+        return new_list
+
     if censor_time=='all':
-        return list(range(1,14))
+        list_questionnaires = list(range(1,14))
     elif censor_time=='pre_diagnosis':
-        return [q for q in range(1,last_q+1)]
+        list_questionnaires = [q for q in range(1,last_q+1)]
+        list_questionnaires = filter_grid_pattern(case_grid_pattern, list_questionnaires)
     elif censor_time=='pre_diagnosis_1y':
-        return [q for q in range(1,last_q+1) if questionnaire_info[q]['case_dt_dateq']<=-1]
+        list_questionnaires = [q for q in range(1,last_q+1) if questionnaire_info[q]['case_dt_dateq']<=-1]
+        list_questionnaires = filter_grid_pattern(case_grid_pattern, list_questionnaires)
     elif censor_time=='last_and_previous':
         list_questionnaires = [last_q]
         for q in range(last_q-1,0,-1):
@@ -1002,7 +1013,20 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
             if grid_pattern[q-1]=='1' and q in subject_images:
                 list_questionnaires.append(q)
                 break 
-    print(f"List {subject_id}: ",list_questionnaires)
+    elif censor_time=='successive':
+        list_questionnaires = []
+        for q in range(last_q+1,14):
+            if grid_pattern[q-1]=='1' and q in subject_images:
+                list_questionnaires.append(q)
+        list_questionnaires = filter_grid_pattern(case_grid_pattern, list_questionnaires)
+    elif censor_time=='long':
+        def count_ones(s):
+            return s.count('1')
+        if count_ones(grid_pattern)>=8:
+            list_questionnaires = [q for q in range(1,14)]
+        else:
+            list_questionnaires = []
+    #print(f"List {subject_id}: ",list_questionnaires)
     return list_questionnaires
 
 #---------- yield smaples
@@ -1016,6 +1040,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
         is_synthetic = True
     else: 
         is_synthetic = False
+    #print(is_synthetic, "is_synthetic", flush=True)
     
     build_sequence = _make_subject_sequence_builder(
         transform_func, augmentation_transform_list, modality_string_list,
@@ -1033,10 +1058,12 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                 #get the label from the train_df
                 synth_label = train_df.loc[train_df['unique_id']==subject_id,'synth_label'].values
                 label = torch.tensor(synth_label[0], dtype=torch.long) if len(synth_label)>0 else torch.tensor(-1, dtype=torch.long)
+                #print("synthetic label for subject", subject_id, "is", label.item(),flush=True)
             else:
                 label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
             questionnaire_info = json_data.get("questionnaire_info", {})
             last_q = json_data.get("last_q", None)
+            case_grid_pattern = json_data.get("case_grid_pattern", None)
 
             if label.item() == -1:
                 continue
@@ -1045,7 +1072,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
 
             image_pool = _index_images(sample, grouped=False)
 
-            result = build_sequence(subject_id, last_q, questionnaire_info, image_pool)
+            result = build_sequence(subject_id, last_q, questionnaire_info, image_pool,case_grid_pattern)
             if result is None:
                 continue
 
@@ -1085,7 +1112,7 @@ def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_tr
                     continue
                 result = build_sequence(subject_id, meta["last_q"],
                                         meta["questionnaire_info"],
-                                        image_pool.get(subject_id, {}))
+                                        image_pool.get(subject_id, {}),meta['case_grid_pattern'])
                 if result is None:
                     continue
                 sequence, questionnaires, modalities, resized = result
@@ -1357,10 +1384,14 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     shard_files.sort()
         
     # 3. Build the WebDataset Pipeline
-    dataset = wds.WebDataset(shard_files, shardshuffle=100)
+    dataset = wds.WebDataset(shard_files, shardshuffle=100) #shuffle the shards, but not the samples inside the shards 
 
     if split_workers:
         dataset = dataset.select(wds.split_by_worker)
+    
+    '''shuffle_buffer = exp_params.get('shuffle_buffer', 1000) if exp_params else 1000
+    if shuffle_buffer: 
+        dataset = dataset.shuffle(shuffle_buffer) #shuffle the samples'''
 
     if grid_dict: 
         if modality_string != 'all' and not isinstance(modality, list) and n_views >= 1:
@@ -1777,6 +1808,37 @@ def merge_properties_from_full_dataset_PD(exp_params, csv_data, properties_to_ad
     
     return csv_data
 
+#Preparing synthetic data dataframe
+def synthetic_data_override(exp_params, verbose=True):
+    '''this function generate a new training set with the synthetic classes, save it to file and override the id_list_path
+    -> the other functions go read that'''
+    if exp_params['synthetic'] is None:
+        return exp_params
+    train_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+    train_data['synth_label'] = 0
+    synthetic_modes = exp_params['synthetic']
+    synthetic_proportions = exp_params['synthetic_proportions']
+    num_synthetic_modes = len(synthetic_modes)
+    #assign randomly the synthetic labels to the training set based on the proportions
+    #shuffle the train_data
+    rng = np.random.default_rng(exp_params['seed'])          # seed for reproducibility
+    train_data['synth_label'] = rng.choice(num_synthetic_modes, size=len(train_data), p=synthetic_proportions)
+    #save as parquet with the same filename+_synthetic.parquet
+    synthetic_path = exp_params['list_of_ids_paths'].replace('.parquet', '_synthetic.parquet')
+    train_data.to_parquet(synthetic_path, index=False)
+    if verbose:
+        print(f"Synthetic data generated and saved to {synthetic_path} !!!!!!!!!!!!")
+        print("Now overriding experiment settings...  ")
+    exp_params['list_of_ids_paths'] = synthetic_path
+    exp_params['balance_validation'] = False
+    exp_params['balanced_data'] = False
+    exp_params['use_balanced_weights'] = False
+    exp_params['num_classes'] = num_synthetic_modes
+    exp_params['class_col'] = 'synth_label'
+    exp_params['filter_missing'] = 'all'
+
+    return exp_params
+
 #Loading the grid_file data
 def pre_load_grid_data(h5_filepath,csv_data):
     '''
@@ -1840,3 +1902,31 @@ def load_grid_dict(exp_params):
     else:
         print("Grid usage is disabled. No grid dictionary will be loaded.")
         return None
+
+#preparing the pre-training dataset (csv)
+def prepare_pre_training(df, data_selected_source):
+    data_selected = data_selected_source.copy()
+    def combine_avail_columns(df):
+        cols = [f"q_{i}_avail" for i in range(1, 14)]
+        df['avail_pattern'] = df[cols].astype(int).astype(str).agg(''.join, axis=1)
+        df = df.drop(columns=cols)
+        return df
+    def combine_grid_columns(df):
+        cols = [f"q_{i}_grid_file_avail" for i in range(1, 14)]
+        df['grid_pattern'] = df[cols].astype(int).astype(str).agg(''.join, axis=1)
+        df = df.drop(columns=cols)
+        return df
+    df = combine_avail_columns(df)
+    df = combine_grid_columns(df)
+    df = df['grid_pattern', 'avail_pattern', 'ident_projet', 'split']
+
+    #create a ident_projet column from the unique_id column of data_selected; unique_id is in the form XXXX_YYYYY with XXXX the ident_projet
+    data_selected['ident_projet'] = data_selected['unique_id'].str.split('_').str[0]
+    #get the unique ident_projet from data_selected
+    unique_ident_projet = data_selected['ident_projet'].unique()
+    #exclude the rows in df that are in unique_ident_projet
+    df = df[~df['ident_projet'].isin(unique_ident_projet)]
+    #change the name of ident_projet to unique_id in df
+    df = df.rename(columns={'ident_projet': 'unique_id'})
+
+    return df

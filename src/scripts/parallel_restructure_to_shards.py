@@ -12,9 +12,11 @@ import multiprocessing as mp
 import concurrent.futures
 import numpy as np
 import cv2
+import random
 
 from src.utils.image_processing import convert_background_to_white, get_tiles, recolor_border_via_profiles
 from src.utils.file_utils import get_id_data_from_h5_file 
+from src.utils.data_loading_utils import prepare_pre_training
 
 # from src.utils.file_utils import recreate_dir 
 # NOTE: Avoid clearing directories programmatically in a distributed environment 
@@ -34,6 +36,7 @@ questionnaire_templates_PATH="/home/a_morelli/datasets/others/template_sizes.jso
 
 LIST_OF_IDS_PD_TEST_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/progress.csv"
 LIST_OF_IDS_PD_PATH = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
+LIST_OF_IDS_PD_PRE_MATCHING_PATH = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
 QUESTIONNAIRES = [str(i) for i in range(1,14)] # q1 to q12, inclusive. Adjust as needed.
 
 #LIST_OF_IDS_HANDEDNESS_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/handedness_model_ids.csv"
@@ -43,7 +46,7 @@ QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(i) for i in range(1,14)] # q1 to q12
 MODALITIES_TO_INCLUDE = ["hand_sentences_full","hand", "number_random", "X"] # ["hand", "number_random", "X","sentence"] # Adjust as needed based on which modalities you want to include in the WDS samples
 
 
-CODE_TO_RUN = "for_PD" #"for_handedness" #for_PD or for_handedness or for_PD_test
+CODE_TO_RUN = "for_PDpretraining" #"for_handedness" #for_PD or for_handedness or for_PD_test, "for_PDpretraining"
 
 #OUTPUT_PATH = "/mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel"
 OUTPUT_PATH = f"/mnt/beegfs02/scratch/a_morelli/model_training/{CODE_TO_RUN.split('_', 1)[1]}/"
@@ -66,6 +69,8 @@ if CONVERT_TO_WHITE:
 
 if GROUPED:
     OUTPUT_PATH += "_grouped"
+
+OUTPUT_PATH += "_shuffled"
 
 MAX_SHARD_SIZE = 1e9 # 1e9 ~1 GB per shard
 MAX_SHARD_COUNT = 1000 # Max items per shard
@@ -657,6 +662,148 @@ def process_chunk_PD_grouped(output_path,worker_id, id_chunk,data=None):
             #-> it may happen that the group is saved in the next (-> the shard_name in the json will be wrong for the subjects in the group)
 
     print(f"[Worker {worker_id}] Complete!")
+def process_chunk_PD_pretraining(output_path,worker_id, id_chunk,data=None):
+
+    """
+    Worker function executed by individual CPU cores.
+    Each worker gets a unique ID and its own subset of subject IDs.
+    """
+    #open the file with the sizes of the pages for each questionnaire
+    template_size_data = json.load(open(questionnaire_templates_PATH))
+
+    if not id_chunk:
+        return
+
+    # Create a unique output pattern for this specific worker to prevent file-write collisions
+    output_pattern = os.path.join(output_path, f"worker{worker_id}_shard-%06d.tar")
+    
+    source_tars = []
+    for subject_id in id_chunk:
+        tar_path = os.path.join(SOURCE_folder, f"id_{subject_id}.tar")
+        if os.path.isfile(tar_path):
+            source_tars.append((tar_path,subject_id)) 
+        else:
+            print(f"Warning: {tar_path} not found. Skipping.")
+
+    print(f"[Worker {worker_id}] Starting conversion of {len(source_tars)} subjects...")
+
+    with wds.ShardWriter(output_pattern, maxsize=MAX_SHARD_SIZE, maxcount=MAX_SHARD_COUNT) as sink:
+
+        current_shard_name = sink.fname
+        for i, tar_pair in enumerate(source_tars):
+            if (i+1) % 10 == 0:
+                print(f"[Worker {worker_id}] Processing {i+1}/{len(source_tars)}")
+            
+            tar_path, subject_id = tar_pair
+            id_data = get_id_data_from_h5_file(hd5_FILE_PATH, subject_id)
+
+            sample = {}
+            with tarfile.open(tar_path, 'r') as old_tar:
+                members = old_tar.getmembers()
+                sequences = {}
+                json_files = {}
+                for m in members:
+                    # 1. Parse members to group PNGs
+                    if m.isfile() and m.name.endswith('.png'):
+                        folder = m.name.split('/')[1] #folder=qX 
+                        questionnaire = folder[1:] # remove the 'q' from 'qX' to match the questionnaire numbers in the CSV
+                        if questionnaire in QUESTIONNAIRES: 
+                            if questionnaire not in sequences:
+                                sequences[questionnaire] = []
+                            sequences[questionnaire].append(m)
+                    # analyze json to check if images have to be rescaled
+                    if m.isfile() and m.name.endswith('.json'):
+                        questionnaire = m.name.split("/")[1][1:] 
+                        json_files[questionnaire] = m
+                
+                #get info for this id 
+                #get last questionnaire for this id (the last_q of the corresponding case)
+                id_row = data.loc[data['unique_id'] == subject_id].iloc[0]
+                grid_pattern = id_row['grid_pattern']
+                avail_pattern = id_row['avail_pattern']
+                
+                questionnaire_info = {}
+                # 3. Add images
+                for questionnaire, files in sequences.items():
+                    files.sort(key=lambda x: x.name) 
+                    questionnaire_info[questionnaire] = {}
+
+                    #open the corresponding json file
+                    to_rescale,rescale_factor = False, (1.0,1.0)
+                    if questionnaire in json_files:
+                        f = old_tar.extractfile(json_files[questionnaire])
+                        json_data = json.load(f)
+                        #iterate on the pages and check how many have to be rescaled
+                        to_rescale,rescale_factor = get_images_to_rescale(json_data,questionnaire, template_size_data, 
+                                                                            scale_tolerance=SCALE_TOLERANCE)
+                    questionnaire_info[questionnaire]['to_rescale'] = to_rescale
+                    questionnaire_info[questionnaire]['rescale_factor'] = rescale_factor
+                    
+                    for m in files: #iterate on the data modalities
+                        if not os.path.basename(m.name) in ["hand.png", "number_random.png", "X.png"]: 
+                            continue
+                        clean_name = os.path.basename(m.name).split('.')[0]
+
+                        file_bytes = old_tar.extractfile(m).read()
+                        np_arr = np.frombuffer(file_bytes, np.uint8)
+                        img = cv2.imdecode(np_arr, cv2.IMREAD_UNCHANGED)
+                        if len(img.shape) == 2:  # If it only has height and width (1 channel)
+                            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+                        array_val = id_data['q'+questionnaire][clean_name][1] #get the array value for q6 number class
+                        num_tiles = id_data['q'+questionnaire][clean_name][0]
+                        coords = get_tiles(img,array_val,num_tiles) #returns a list of [(xtl, ytl, xbr, ybr),x] 
+                        #with x=tile number if tile contains a mark, -1 otherwise 
+
+                        if CONVERT_TO_WHITE: #recolor before rescaling or rescale both the image and the grid (or there will be a mismatch
+                            #between grid dimensions and image dimensions)
+                            img = recolor_border_via_profiles(img, coords)
+                        
+                        if to_rescale:
+                            img = cv2.resize(img, (0,0), fx=rescale_factor[0], fy=rescale_factor[1], interpolation=cv2.INTER_LANCZOS4)
+                        
+                        img = preprocess_image(img,RESIZE,PADDED, CONVERT_TO_WHITE)
+                        
+                        if CONVERT_TO_JPG:
+                            # 3. Check for alpha channel (4 channels: BGRA) and drop it for JPEG conversion
+                            if len(img.shape) == 3 and img.shape[2] == 4:
+                                img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                                
+                            # 4. Encode to JPEG bytes with quality=90
+                            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
+                            success, buffer = cv2.imencode('.jpg', img, encode_param)
+                            if success:
+                                file_bytes = buffer.tobytes()
+                            extension_out = 'jpg'
+                        else:
+                            # 5. Encode to PNG bytes
+                            success, buffer = cv2.imencode('.png', img)
+                            if success:
+                                file_bytes = buffer.tobytes()
+                            extension_out = 'png'
+                        
+                        file_key = f"q{questionnaire}.{clean_name}.{extension_out}"
+                        sample[file_key] = file_bytes
+                
+                # 2. Build ONE single WDS sample dictionary for the subject
+                # 1. Define your list of target keys
+                
+                # 2. Initialize the dictionary with your base data
+                inner_data = {
+                    "subject": subject_id, 
+                    'grid_pattern': grid_pattern,
+                    'avail_pattern': avail_pattern,
+                    "questionnaire_info": questionnaire_info,
+                    'shard_name' : current_shard_name,
+                }
+                
+                # 4. Serialize and encode exactly once
+                sample["__key__"]=subject_id
+                sample["json"] = json.dumps(inner_data).encode("utf-8")
+                # 4. Write the massive subject sample to the shard
+                sink.write(sample)
+
+    print(f"[Worker {worker_id}] Complete!")
 
 
 def get_images_to_rescale(data,questionnaire, template_data, scale_tolerance=0.1):
@@ -818,7 +965,27 @@ if __name__ == "__main__":
             if GROUPED:
                 convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD_grouped,num_test_ids=None,data=split_data)
             else:
+                #randomly shuffle the id_list to avoid patterns in the shard reading order
+                random.shuffle(id_list)
                 convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD,num_test_ids=None,data=split_data) 
+            # Run checks only on Task 0 to avoid messy logs
+            if int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)) == 0:
+                run_checks(output_path)
+    if CODE_TO_RUN == "for_PDpretraining":
+        #read from parquet file 
+        data_selected = pd.read_parquet(LIST_OF_IDS_PD_PATH) #has the ids selected for training
+        
+        data = pd.read_csv(LIST_OF_IDS_PD_PRE_MATCHING_PATH) #has all the ids
+        data = prepare_pre_training(data, data_selected) #remove all the ids selected for training and prepare grid_pattern and avail_pattern
+
+        print(data.head())
+        for train_split in ['train','val','test']:
+            split_data = data[data['split'] == train_split]
+            id_list = split_data['unique_id'].tolist()[:] #unique_id is in the form XXXXX_YY with YY the matching group, 
+            output_path = os.path.join(OUTPUT_PATH,train_split)
+            #randomly shuffle the id_list to avoid patterns in the shard reading order
+            random.shuffle(id_list)
+            convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD_pretraining,num_test_ids=None,data=split_data) 
             # Run checks only on Task 0 to avoid messy logs
             if int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)) == 0:
                 run_checks(output_path)
