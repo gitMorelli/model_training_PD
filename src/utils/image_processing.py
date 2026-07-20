@@ -529,8 +529,8 @@ def get_augmentation_transform(exp_params):
 
 def get_mu_std(exp_params,verbose=False):
     #if it is a list of numbers keep it as is, if it is a string load the mu and std from the file
-    if isinstance(exp_params['norm_mu'], list) and isinstance(exp_params['norm_std'], list):
-        mu,std = exp_params['norm_mu'], exp_params['norm_std']
+    if isinstance(exp_params['norm_mu'], (list, tuple)) and isinstance(exp_params['norm_std'], (list, tuple)):
+        mu, std = exp_params['norm_mu'], exp_params['norm_std']
     elif isinstance(exp_params['norm_mu'], str) or isinstance(exp_params['norm_std'], str):
         if exp_params['norm_mu']=='mnist':
             mu = (0.1307,0.1307,0.1307)

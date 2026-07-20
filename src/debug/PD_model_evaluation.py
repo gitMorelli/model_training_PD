@@ -27,6 +27,7 @@ import re
 import signal
 import sys
 import json
+import pickle
 # 4. Compute and display metrics using scikit-learn
 from sklearn.metrics import (
     precision_recall_curve, average_precision_score, roc_auc_score,
@@ -36,6 +37,7 @@ from sklearn.metrics import (
 from sklearn.preprocessing import label_binarize
 import matplotlib.pyplot as plt
 import numpy as np
+import sys, os, contextlib
 
 from src.utils.data_loading_utils import melt_df, prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
@@ -58,6 +60,8 @@ with open(params_path, 'rb') as f:
 
 exp_params['predict_on_train'] = False
 exp_params['balance_validation'] = False
+exp_params['batch_size'] = 1
+#'precision': "16-mixed",
 
 #PATHS
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,exp_params['data_folder'])
@@ -65,7 +69,7 @@ SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 
 VERBOSE = False
-CLASS_COL = 'diag_park_final1_quest'
+CLASS_COL = exp_params['class_col'] 
 
 
 def main(exp_params):
@@ -94,8 +98,9 @@ def main(exp_params):
     #transform = get_transforms(exp_params, transform)
     model, transform = model_initialization(None,exp_params,verbose=VERBOSE,val=True, **exp_params['model_parameters'])
     
+    train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict, transform, 
-                                                    SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val)
+                                                    SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df)
     
     # 1. Gather predictions using the best checkpoint saved during training
     # Setting ckpt_path="best" tells Lightning to automatically find your top model
@@ -114,19 +119,22 @@ def main(exp_params):
     results_df, all_probs, all_preds, all_labels = get_result_df(outputs)
     
     print(f"Evaluating model on validation set using checkpoint: {ckpt_path}")
-    analyze_results(all_probs, all_labels, results_df, split="validation",
-                    pos_label=1, threshold=None, strategy="f1",
-                    target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
-    
 
-    if exp_params['predict_on_train']:
-        outputs = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
-        results_df_train, all_probs, all_preds, all_labels = get_result_df(outputs)
-        analyze_results(all_preds, all_labels, results_df, split="train")
+    log_path = os.path.join(os.path.dirname(ckpt_path), f"stats.txt") #copy prints also to a log file in the checkpoint folder
+    with tee_stdout(log_path):
+        analyze_results(all_probs, all_labels, results_df, split="validation",
+                        pos_label=1, threshold=None, strategy="f1",
+                        target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
+        
 
-        #concatenate the result dataframes
-        results_complete = pd.concat([results_df, results_df_train], ignore_index=True)
-        results_df = results_complete.copy()
+        if exp_params['predict_on_train']:
+            outputs = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
+            results_df_train, all_probs, all_preds, all_labels = get_result_df(outputs)
+            analyze_results(all_preds, all_labels, results_df, split="train")
+
+            #concatenate the result dataframes
+            results_complete = pd.concat([results_df, results_df_train], ignore_index=True)
+            results_df = results_complete.copy()
     
     store_results(csv_data, results_df, ckpt_path,exp_params)
 
@@ -138,22 +146,47 @@ def get_args():
     parser.add_argument("--batches_to_test", type=int, default=50, help="Number of batches to process for benchmark")
     return parser.parse_args()
 
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, data):
+        for s in self.streams:
+            s.write(data)
+    def flush(self):
+        for s in self.streams:
+            s.flush()
 
-def get_result_df(outputs):
-    # 2. Concatenate all batch outputs into unified tensors
-    all_probs = torch.cat([batch["probs"] for batch in outputs])
-    all_preds = torch.cat([batch["preds"] for batch in outputs])
-    all_labels = torch.cat([batch["labels"] for batch in outputs])
+@contextlib.contextmanager
+def tee_stdout(path, mode="w"):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, mode, encoding="utf-8") as f:
+        old = sys.stdout
+        sys.stdout = _Tee(old, f)
+        try:
+            yield
+        finally:
+            sys.stdout = old
+
+def get_result_df(outputs, class_names=None):
+    all_probs = torch.cat([batch["probs"] for batch in outputs]).detach().cpu()
+    all_preds = torch.cat([batch["preds"] for batch in outputs]).detach().cpu()
+    all_labels = torch.cat([batch["labels"] for batch in outputs]).detach().cpu()
     all_subjects = [sid for batch in outputs for sid in batch["subject_ids"]]
 
-    #create a dataframe with the subject id, questionnaire, true label, predicted label and probabilities
+    n_classes = all_probs.shape[1]
+    if class_names is None:
+        class_names = range(n_classes)
+    assert len(class_names) == n_classes
+
     results_df = pd.DataFrame({
         "unique_id": all_subjects,
         "true_label": all_labels.numpy(),
         "predicted_label": all_preds.numpy(),
-        "probability_0": all_probs[:, 0].numpy(),
-        "probability_1": all_probs[:, 1].numpy() 
     })
+    probs_np = all_probs.numpy()
+    for i, name in enumerate(class_names):
+        results_df[f"probability_{name}"] = probs_np[:, i]
+
     return results_df, all_probs, all_preds, all_labels
 
 def analyze_results_old(all_preds, all_labels, results_df,split="validation"):
@@ -183,9 +216,10 @@ def store_results(csv_data, results_df, ckpt_path,params):
         print("No duplicate rows found in the merged dataframe based on 'unique_id'.")
     #save the merged dataframe in a csv file
     merged_df.to_csv(os.path.join(os.path.dirname(ckpt_path), f"predictions.csv"), index=False)
-    #save params dict as predictions_metadata.json
-    with open(os.path.join(os.path.dirname(ckpt_path), f"predictions_metadata.json"), 'w') as f:
-        json.dump(params, f, indent=4)
+    #save params dict as predictions_metadata.pkl
+    #save the exp_params dictionary to a pickle file in the checkpoint folder
+    with open(os.path.join(os.path.dirname(ckpt_path), f"predictions_metadata.pkl"), 'wb') as f:
+        pickle.dump(params, f)
 
 def litmodel_initialization(model, ckpt_path, exp_params):
     if exp_params['grouped']:

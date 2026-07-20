@@ -19,7 +19,7 @@ import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger
 import random
-import shutil
+import shutil 
 #from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks import Callback
 
@@ -28,14 +28,15 @@ from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 
 def main():
-    model_name ='swin_s'
+    model_name ='FiveStageResidualStridedConvNet'
+    num_channels = 1 #1 for grayscale, 3 for RGB
     classifier_name='linear'
     output_path=f"data/model_structures/{model_name}_structure.txt"
     if not os.path.exists(output_path):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     backbone,transform = get_model(name=model_name, pretrained=True)
-    out=test_output(224, backbone)
+    out=test_output(224, backbone, channels=num_channels) #test the output of the backbone to determine the number of features for the classification head
     in_features = out.shape[1]
     classificaton_head = get_classification_head(name=classifier_name,in_features=in_features)
     model = JoinedModels(backbone, classificaton_head)

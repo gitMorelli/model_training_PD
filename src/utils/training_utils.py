@@ -578,27 +578,32 @@ class ModelPD(L.LightningModule):
     
     # --- Epoch End Hooks ---
     def on_train_epoch_end(self):
-        # ANSI color codes
         WHITE = "\033[97m"
         RED = "\033[91m"
         RESET = "\033[0m"
 
-        # 1. Walk every parameter in model order, coloring each line by trainable status
+        # 0. Map each parameter to its optimizer group's current lr (and name)
+        param_lr = {}
+        optimizer = self.optimizers()
+        # self.optimizers() may return a single optimizer or a list
+        optimizers = optimizer if isinstance(optimizer, (list, tuple)) else [optimizer]
+        for opt in optimizers:
+            for group in opt.param_groups:
+                for p in group["params"]:
+                    param_lr[id(p)] = (group["lr"], group.get("lr_name", "?"))
+
+        # 1. Walk every parameter in model order
         all_layers_info = []
         total_trainable_params = 0
         total_non_trainable_params = 0
-
         for name, param in self.model.named_parameters():
-            # param.shape gives tensor dimensions (e.g. [512, 2])
-            # param.numel() gives the total number of scalar elements
             layer_str = f"  - {name} | Shape: {list(param.shape)} | Parameters: {param.numel():,}"
-
             if param.requires_grad:
-                # White = trainable
-                all_layers_info.append(f"{WHITE}{layer_str}{RESET}")
+                lr, lr_name = param_lr.get(id(param), (None, None))
+                lr_str = f" | LR: {lr:.3e} ({lr_name})" if lr is not None else " | LR: NOT IN OPTIMIZER"
+                all_layers_info.append(f"{WHITE}{layer_str}{lr_str}{RESET}")
                 total_trainable_params += param.numel()
             else:
-                # Red = frozen / non-trainable
                 all_layers_info.append(f"{RED}{layer_str}{RESET}")
                 total_non_trainable_params += param.numel()
 
@@ -678,12 +683,25 @@ class ModelPD(L.LightningModule):
                 param_groups.append({'params': no_decay, 'lr': lr, 'weight_decay': 0.0, 'lr_name': lr_name})
 
         param_groups = []
-
         if self.opt_groups:
+            assigned = set()  # parameter names already claimed by an earlier group
             for group in self.opt_groups:
                 named = [(name, param) for name, param in self.model.named_parameters()
-                        if any(key in name.lower() for key in group['names']) and param.requires_grad]
+                        if name not in assigned
+                        and any(key in name.lower() for key in group['names'])
+                        and param.requires_grad]
+                assigned.update(name for name, _ in named)
                 add_group(named, group['lr'], group['lr_name'])
+
+            # Leftover check: every trainable parameter must belong to some group.
+            leftover = [name for name, param in self.model.named_parameters()
+                        if param.requires_grad and name not in assigned]
+            if leftover:
+                raise ValueError(
+                    f"configure_optimizers: {len(leftover)} trainable parameters "
+                    f"matched no optimization group and would silently not be "
+                    f"trained: {leftover}"
+                )
         else:
             backbone, head = [], []
             for name, param in self.model.named_parameters():
@@ -696,7 +714,7 @@ class ModelPD(L.LightningModule):
             add_group(backbone, self.lr_backbone, 'lr_backbone')
             add_group(head, self.lr_classifier_head, 'lr_head')
 
-        optimizer = optim.AdamW(param_groups)   # weight_decay now lives per-group
+        optimizer = optim.AdamW(param_groups)
 
         if self.lr_scheduling == 'cosine':
             # total optimizer steps for the whole run; accounts for grad accumulation & devices

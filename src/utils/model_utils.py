@@ -15,6 +15,7 @@ from tqdm import tqdm
 from torchvision.transforms import InterpolationMode
 from torchvision import datasets, transforms
 from transformers import VisionEncoderDecoderModel, ViTModel, ViTForImageClassification
+import torch.nn.functional as F
 
 #custom models
 class SimpleMockModel(nn.Module):
@@ -89,6 +90,109 @@ class CustomBinaryCNN(nn.Module):
         x = self.flatten(x)
         x = self.classifier(x)
         return x
+class FiveStageResidualStridedConvNet(nn.Module): #can get any input size -> consider using diff size for diff modalities
+    """
+    ~2.5M-parameter encoder producing a `feat_dim`-dimensional embedding.
+ 
+    Args:
+        feat_dim: dimension of the output feature vector.
+        widths: channel width of each of the five stages. Halve them
+            (16, 32, 64, 128, 128) for a ~0.7M-parameter version if you
+            observe overfitting during fine-tuning.
+        in_channels: number of input channels (1 for grayscale).
+        dropout: dropout applied before the final linear head.
+        ssl_projection: if True, also build a SimCLR-style MLP projection
+            head; activate it per-call with forward(x, project=True).
+        proj_dim: output dimension of the projection head.
+    """
+ 
+    def __init__(
+        self,
+        feat_dim: int = 256,
+        widths: tuple = (32, 64, 128, 256, 256),
+        in_channels: int = 1,
+        dropout: float = 0.1,
+        ssl_projection: bool = False,
+        proj_dim: int = 128,
+    ):
+        super().__init__()
+        w1 = widths[0]
+ 
+        # Stem: stride 1 -- keep full resolution for thin strokes.
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_channels, w1, 3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(w1),
+            nn.ReLU(inplace=True),
+        )
+ 
+        # Five residual stages; stage 1 keeps resolution, stages 2-5 halve it.
+        in_chs = (w1,) + tuple(widths[:-1])
+        downsamples = (False, True, True, True, True)
+        self.stages = nn.ModuleList()
+        for in_ch, out_ch, down in zip(in_chs, widths, downsamples):
+            stride = 2 if down else 1
+            stage = nn.ModuleDict(
+                {
+                    "conv1": nn.Conv2d(in_ch, out_ch, 3, stride=stride,
+                                       padding=1, bias=False),
+                    "bn1": nn.BatchNorm2d(out_ch),
+                    "conv2": nn.Conv2d(out_ch, out_ch, 3, stride=1,
+                                       padding=1, bias=False),
+                    "bn2": nn.BatchNorm2d(out_ch),
+                    # 1x1 projection on the skip path when shape changes,
+                    # identity otherwise.
+                    "skip": (
+                        nn.Sequential(
+                            nn.Conv2d(in_ch, out_ch, 1, stride=stride,
+                                      bias=False),
+                            nn.BatchNorm2d(out_ch),
+                        )
+                        if down or in_ch != out_ch
+                        else nn.Identity()
+                    ),
+                }
+            )
+            self.stages.append(stage)
+ 
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.dropout = nn.Dropout(dropout)
+        self.head = nn.Linear(widths[-1], feat_dim)
+        self.feat_dim = feat_dim
+ 
+        # Optional SimCLR-style projection head for SSL pre-training.
+        self.projector = (
+            nn.Sequential(
+                nn.Linear(feat_dim, feat_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(feat_dim, proj_dim),
+            )
+            if ssl_projection
+            else None
+        )
+ 
+    def forward(self, x: torch.Tensor, project: bool = False) -> torch.Tensor:
+        x = self.stem(x)
+        for stage in self.stages:
+            identity = stage["skip"](x)
+            out = F.relu(stage["bn1"](stage["conv1"](x)), inplace=True)
+            out = stage["bn2"](stage["conv2"](out))
+            x = F.relu(out + identity, inplace=True)
+ 
+        x = self.pool(x).flatten(1)
+        x = self.dropout(x)
+        x = self.head(x)
+ 
+        if project:
+            if self.projector is None:
+                raise RuntimeError(
+                    "Projection head not built; construct the model with "
+                    "ssl_projection=True to use forward(x, project=True)."
+                )
+            x = F.normalize(self.projector(x), dim=1)
+        return x
+
+
+#custom time series models
 
 #custom classification heads
 class CustomMLP(nn.Module):
@@ -446,6 +550,10 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         model = CustomBinaryCNN() 
         input_size = kwargs.get('input_size', 224)
         transform = simple_resize_transform(input_size)
+    elif name == 'FiveStageResidualStridedConvNet':
+        model = FiveStageResidualStridedConvNet(**kwargs)
+        input_size = kwargs.get('input_size', 224)
+        transform = simple_resize_transform(input_size)
     else:
         raise ValueError(f"Model {name} is not supported.")
     #pretrained_modality = kwargs.get('custom_pretrained','original')
@@ -590,7 +698,7 @@ def load_backbone_from_lightning_ckpt(backbone, ckpt_path):
     print(f"Successfully loaded {len(backbone_state_dict)} tensors into the backbone.")
     return backbone
 
-#Multiple instance learning
+#Multiple instance learning modules
 class GatedAttentionPool(nn.Module):
     def __init__(self, dim, hidden=128):
         super().__init__()
@@ -665,7 +773,8 @@ class ConcatenateViews(nn.Module):
 
         
         return features
-#Wrappers for PD models
+
+
 #Time-sequence models
 class SequenceClassifierHead(nn.Module):
     """Everything after the CNN: view aggregation + slot transformer + classification.
@@ -836,8 +945,8 @@ class SetQuestionnaireModel(nn.Module):
         return self.classifier(feats, N, k, seq_ids, lengths, return_view_attn)
 
 #others
-def test_output(size, model):
-    dummy_input = torch.rand(1, 3, size, size)
+def test_output(size, model,channels=3):
+    dummy_input = torch.rand(1, channels, size, size)
     dummy_input.shape
     '''if huggingface:
         # the transform is actually an huggingface processor in this case

@@ -880,6 +880,10 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
 
                 if invert_color and not debug:
                     img_view = ImageOps.invert(img_view)
+                
+                to_grayscale = exp_params.get('to_grayscale', False) if exp_params else False
+                if to_grayscale:
+                    img_view = T.Grayscale(num_output_channels=1)(img_view)
 
                 if transform_func is not None:
                     if huggingface_transform:
@@ -1369,6 +1373,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
         'X': 'X',
         'text': 'hand',
         'digit': 'number_random',
+        'digitOrdered': 'number',
         'sent': 'hand_sentences_full'
     }
     if isinstance(modality, list):

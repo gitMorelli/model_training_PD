@@ -43,10 +43,10 @@ QUESTIONNAIRES = [str(i) for i in range(1,14)] # q1 to q12, inclusive. Adjust as
 LIST_OF_IDS_HANDEDNESS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs_w_sentences.csv"
 QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(i) for i in range(1,14)] # q1 to q12, inclusive. Adjust as needed.
 
-MODALITIES_TO_INCLUDE = ["hand_sentences_full","hand", "number_random", "X"] # ["hand", "number_random", "X","sentence"] # Adjust as needed based on which modalities you want to include in the WDS samples
+MODALITIES_TO_INCLUDE = ["hand_sentences_full","hand", "number_random", "number", "X"] # ["hand", "number_random", "X","sentence"] # Adjust as needed based on which modalities you want to include in the WDS samples
 
 
-CODE_TO_RUN = "for_PDpretraining" #"for_handedness" #for_PD or for_handedness or for_PD_test, "for_PDpretraining"
+CODE_TO_RUN = "for_PD" #"for_handedness" #for_PD or for_handedness or for_PD_test, "for_PDpretraining"
 
 #OUTPUT_PATH = "/mnt/beegfs01/scratch/a_morelli/model_training/sharded_test_parallel"
 OUTPUT_PATH = f"/mnt/beegfs02/scratch/a_morelli/model_training/{CODE_TO_RUN.split('_', 1)[1]}/"
@@ -394,15 +394,10 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
 
                     
                     for m in files: #iterate on the data modalities
-                        if not os.path.basename(m.name) in ["hand.png", "number_random.png", "X.png"]: 
-                            continue
+                        #get the basename without extensions
                         clean_name = os.path.basename(m.name).split('.')[0]
-
-                        #get info on the number of chunks and save it for each questionnaire and modality
-                        '''corresp_name = name_mapping[clean_name]
-                        key_num_marks = f'q_{questionnaire}_num_{corresp_name}'
-                        num_marks = data[data['unique_id'] == subject_id][key_num_marks].values[0]
-                        questionnaire_info[questionnaire][key_num_marks] = num_marks'''
+                        if not clean_name in MODALITIES_TO_INCLUDE: 
+                            continue
 
                         file_bytes = old_tar.extractfile(m).read()
                         np_arr = np.frombuffer(file_bytes, np.uint8)

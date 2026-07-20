@@ -92,6 +92,7 @@ exp_params = {
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
+    'to_grayscale': False, #if True converts the images to grayscale (1 channel) before feeding them to the model
     
     #Training params definition
     'lr_backbone': 1e-4,
@@ -135,13 +136,7 @@ SAVE_DEBUG_PATH = "/home/a_morelli/vscode_projects/model_training/data/debug_tra
 huggingface_transform=True if exp_params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
 exp_params['huggingface_transform'] = huggingface_transform
 
-define_optimization_groups = [
-        {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': 1e-5, 'lr_name': 'lr_1'},
-        {'names': ['layer2'],'lr': 3e-5, 'lr_name': 'lr_2'},
-        {'names': ['layer3'],'lr': 1e-4, 'lr_name': 'lr_3'},
-        {'names': ['layer4'],'lr': 1e-7, 'lr_name': 'lr_4'},
-        {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
-    ] # or None or other configurations fo other models'''
+define_optimization_groups = get_optimization_groups(model_name=exp_params['model'],exp_params=exp_params)
 
 
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
@@ -217,6 +212,7 @@ def main(exp_params):
     copy_path = os.path.join(CHECKPOINT_PATH,f'v_{current_version}', base_name)
     shutil.copy(exp_params['list_of_ids_paths'], copy_path)
     exp_params['list_of_ids_paths'] = copy_path
+    exp_params['optimization_groups'] = define_optimization_groups
     
     # Save normal log
     save_experiment_logs(exp_params)
@@ -228,6 +224,25 @@ def main(exp_params):
 
 
 #### HELPER FUCNTIONS ####
+def get_optimization_groups(model_name,exp_params):
+    if 'resnet' in model_name:
+        define_optimization_groups = [
+            {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': 1e-5, 'lr_name': 'lr_1'},
+            {'names': ['layer2'],'lr': 3e-5, 'lr_name': 'lr_2'},
+            {'names': ['layer3'],'lr': 1e-4, 'lr_name': 'lr_3'},
+            {'names': ['layer4'],'lr': 1e-7, 'lr_name': 'lr_4'},
+            {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
+        ] # or None or other configurations fo other models
+    elif 'FiveStageResidualStridedConvNet' in model_name:
+        define_optimization_groups = [
+            {'names': ['stem', 'stages.0'], 'lr': 1e-5, 'lr_name': 'lr_1'},   # ~ conv1/bn1/layer1
+            {'names': ['stages.1'],         'lr': 3e-5, 'lr_name': 'lr_2'},   # ~ layer2
+            {'names': ['stages.2'],         'lr': 1e-4, 'lr_name': 'lr_3'},   # ~ layer3
+            {'names': ['stages.3', 'stages.4'], 'lr': 1e-7, 'lr_name': 'lr_4'},  # ~ layer4
+            {'names': ['head', 'projector'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
+        ]
+    
+
 def validity_checks(exp_params):
     if exp_params['grouped']==False and 'group' in exp_params['data_folder']:
         raise ValueError("Error: you have selected grouped=False but the data_folder contains 'group' in its name. Please check your settings.")
@@ -302,8 +317,6 @@ def debug(train_dataloader,val_dataloader,exp_params):
 
     debug_images_PD(mean=exp_params['norm_mu'], std=exp_params['norm_std'], loader=train_dataloader, out_dir=os.path.join(SAVE_DEBUG_PATH,'train'))
     debug_images_PD(mean=exp_params['norm_mu'], std=exp_params['norm_std'], loader=val_dataloader, out_dir=os.path.join(SAVE_DEBUG_PATH,'val'))
-
-
 
 def litmodel_initialization(model, counts,write_log, define_optimization_groups,exp_params, exclusion_set, verbose):
     additional_kwargs={
