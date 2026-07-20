@@ -4,8 +4,8 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/debug_loading.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=10              # Number of CPU cores per task
-#SBATCH --mem=86G                      # Job memory request
+#SBATCH --cpus-per-task=12              # Number of CPU cores per task
+#SBATCH --mem=96G                      # Job memory request
 #SBATCH --time=00:20:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
 #--partition=visuq,gpgpuq
@@ -33,6 +33,10 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 
 echo "NODE: $(hostname)" 
+echo $SLURM_CPUS_PER_TASK
+nproc
+cat /sys/fs/cgroup/cpu.max
+
 # --- Execution ---
 $ENV_PYTHON -m src.debug.debug_loading \
-    --num_workers 8
+    --num_workers 10

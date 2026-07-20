@@ -1304,6 +1304,18 @@ class ClearCache(L.Callback):
     def on_validation_epoch_end(self, trainer, pl_module):
         torch.cuda.empty_cache()
 
+class TimeLoader(Callback):
+    def __init__(self):
+        self.n, self.tot, self.win = 0, 0.0, []
+    def on_train_batch_end(self, trainer, pl_module, *a):
+        d = trainer.profiler.recorded_durations[
+            "[_TrainingEpochLoop].train_dataloader_next"][-1]
+        self.n += 1; self.tot += d; self.win.append(d)
+        if self.n % 100 == 0:
+            print(f"batch {self.n} mean={self.tot/self.n:.4f} "
+                  f"last100={sum(self.win)/100:.4f} max={max(self.win):.4f}")
+            self.win = []
+
 #-------- others ----------------
 def group_max(scores, group_ids, n_groups=None):
     """Per-group max of `scores`. Returns tensor of shape (G,)."""

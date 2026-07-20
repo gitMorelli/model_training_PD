@@ -21,6 +21,7 @@ import h5py
 import sys
 from functools import partial
 import pickle
+import cv2
 
 from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform
 
@@ -844,8 +845,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             else:
                 img = raw_image_data
             
-            '''if synth_transform: #i am creating synthetic time-series
-                img = synth_transform(img, X-1)'''
+            if synth_transform: #i am creating synthetic time-series
+                img = synth_transform(img, X-1)
             
 
             if debug:
@@ -889,7 +890,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     img_tensor = T.ToTensor()(img_view)
 
                 if debug:
-                    if isinstance(augmentation_transform, str) and augmentation_transform == 'original':
+                    if augmentation_transform[0] == 'original':
                         metadata = debug_image_properties(img_view)
                     else:
                         metadata = debug_image_properties(img_tensor)
@@ -1389,9 +1390,9 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     if split_workers:
         dataset = dataset.select(wds.split_by_worker)
     
-    '''shuffle_buffer = exp_params.get('shuffle_buffer', 1000) if exp_params else 1000
+    shuffle_buffer = exp_params.get('shuffle_buffer', 1000) if exp_params else 1000
     if shuffle_buffer: 
-        dataset = dataset.shuffle(shuffle_buffer) #shuffle the samples'''
+        dataset = dataset.shuffle(shuffle_buffer) #shuffle the samples
 
     if grid_dict: 
         if modality_string != 'all' and not isinstance(modality, list) and n_views >= 1:
@@ -1428,6 +1429,10 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
 #pipelines
 def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, 
                        SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None):
+    def worker_init_fn(worker_id):
+        # Force OpenCV to use a single thread per DataLoader worker process
+        cv2.setNumThreads(0)
+
     print(f"Reading from {SHARD_PATTERN_train} and {SHARD_PATTERN_val}..")
     augmentation_transform = get_augmentation_transform(exp_params)
     print("Augmentation transform:", augmentation_transform)
@@ -1447,6 +1452,8 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         filter_modality=exp_params['filter_modality'],
         debug=exp_params.get('debug', False),
         grouped=exp_params.get('grouped', False),
+        #persistent_workers=worker > 0,
+
     )
 
     train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, exclusion_set=exclusion_set,train_df=train_df, exp_params=exp_params, **common_kwargs)
@@ -1457,14 +1464,16 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         num_workers=worker, 
         batch_size=None, 
         prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
-        pin_memory=True
+        pin_memory=False,
+        worker_init_fn=worker_init_fn,
     ) #add collate_fn=lambda x: x,  if you want to bypass thedefault converter (default converter converts numpy to tensors)
     val_loader = DataLoader(
         val_dataset, 
-        num_workers=worker, 
+        num_workers=max(2, worker // 2), 
         batch_size=None, 
         prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
-        pin_memory=True
+        pin_memory=False, #creates a stall when true and variable size batches (eg custom collate)
+        worker_init_fn=worker_init_fn,
     )
     return train_loader, val_loader, train_dataset, val_dataset
 ####################################################################################################################
@@ -1823,16 +1832,12 @@ def synthetic_data_override(exp_params, verbose=True):
     #shuffle the train_data
     rng = np.random.default_rng(exp_params['seed'])          # seed for reproducibility
     train_data['synth_label'] = rng.choice(num_synthetic_modes, size=len(train_data), p=synthetic_proportions)
-    #save as parquet with the same filename+_synthetic.parquet
     synthetic_path = exp_params['list_of_ids_paths'].replace('.parquet', '_synthetic.parquet')
     train_data.to_parquet(synthetic_path, index=False)
     if verbose:
         print(f"Synthetic data generated and saved to {synthetic_path} !!!!!!!!!!!!")
         print("Now overriding experiment settings...  ")
     exp_params['list_of_ids_paths'] = synthetic_path
-    exp_params['balance_validation'] = False
-    exp_params['balanced_data'] = False
-    exp_params['use_balanced_weights'] = False
     exp_params['num_classes'] = num_synthetic_modes
     exp_params['class_col'] = 'synth_label'
     exp_params['filter_missing'] = 'all'

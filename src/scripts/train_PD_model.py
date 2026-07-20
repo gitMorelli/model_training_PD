@@ -35,7 +35,10 @@ from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireMo
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
-from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
+from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader
+
+#set variables
+#torch.set_num_threads(2)  # Set the number of threads cores for the main process (eg 2+workers=num physical cores)
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 
@@ -52,8 +55,8 @@ exp_params = {
     'num_tiles': 3,
     'use_grid': True,
     'use_balanced_weights': False,
-    'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': False, #note that this and balace_validation are independent
+    'balancing_factor': 2, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
+    'balanced_data': True, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
@@ -94,17 +97,17 @@ exp_params = {
     'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 4,
-    'num_epochs': 50,
-    'patience': 30,
+    'batch_size': 2,
+    'num_epochs': 30,
+    'patience': 10,
     'eta_min_cosine': 1e-8,
     'weight_decay': 0.05, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
     'layers_to_unfreeze': ['classifier','layer4'],#['all','classifier'], #Update it for every model
     'seed': 42,
-    'accumulate_grad_batches': 4,   # effective batch = batch_size * accumulate_grad_batches or None
-    'precision': None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
+    'accumulate_grad_batches': 4,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'precision': "16-mixed", #None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
     'gradient_clip_val': None, # 1.0,
 
     'prefetch_factor': 2,
@@ -197,6 +200,11 @@ def main(exp_params):
     exp_params['best_train_acc'] = "N/A (Cancelled)"
     exp_params['current_version'] = current_version
 
+    '''it = iter(train_loader)
+    for _ in range(60): next(it)
+    t = time.time()
+    for _ in range(300): next(it)
+    print("pre-fit time per dataloader:", (time.time() - t) / 300)'''
     trainer.fit(lit_model, train_dataloaders=train_loader, val_dataloaders=val_loader)
     
     # If it finishes successfully, update the metrics dictionary with the real values
@@ -204,6 +212,11 @@ def main(exp_params):
     exp_params["best_val_loss"] = metrics_tracker.best_val_loss
     exp_params["best_val_acc"] = metrics_tracker.best_val_acc
     exp_params["best_train_acc"] = metrics_tracker.best_train_acc
+    #copy the list_ids parquet file to the checkpoint folder with the name 
+    base_name = os.path.basename(exp_params['list_of_ids_paths'])
+    copy_path = os.path.join(CHECKPOINT_PATH,f'v_{current_version}', base_name)
+    shutil.copy(exp_params['list_of_ids_paths'], copy_path)
+    exp_params['list_of_ids_paths'] = copy_path
     
     # Save normal log
     save_experiment_logs(exp_params)
@@ -275,7 +288,7 @@ def trainer_definition(current_version, exp_params):
         max_epochs=exp_params['num_epochs'],
         logger = tb_logger,
         accelerator="auto",                # Automatically selects GPU/CPU/MPS
-        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker, periodic_ckpt, ClearCache()],
+        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker, periodic_ckpt, ClearCache(),TimeLoader()],
         profiler="simple",  # Add this line to get a performance summary
         enable_progress_bar=False,  # Remove this CPU overhead
         **extra_kwargs
@@ -318,7 +331,7 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
     return lit_model
 
 #model loading
-def model_initialization(write_log,exp_params, verbose=True, **kwargs):
+def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs):
     backbone,transform = get_model(name=exp_params['model'], pretrained=True, 
                                    custom_pre_trained_weights=exp_params['custom_pre_trained_weights'])
     print("############# Model backbone loaded! #############")
@@ -344,6 +357,9 @@ def model_initialization(write_log,exp_params, verbose=True, **kwargs):
                                            use_spread=True, use_count_feature=True,count_norm=2)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
+
+    if val:
+        return model, transform
     
     unfreeze_layers(model,layer_names=exp_params['layers_to_unfreeze'])
 

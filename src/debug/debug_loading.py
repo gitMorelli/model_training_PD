@@ -29,10 +29,11 @@ from collections import defaultdict
 import torch.nn.functional as F
 import pickle
 import traceback
+import cProfile, pstats
 
 from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD, merge_properties_from_full_dataset_PD, synthetic_data_override
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
-from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std
+from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD
 from src.utils.visualization import SubjectViewer, launch_interactive_PD
 
@@ -48,12 +49,10 @@ params = {
                                'case_grid_pattern','q_5_num_X',
                                'synth_label'],
 
-    "data_modality": ['digit_full','digit_crop']+['digit' for _ in range(2)]+
-    ['text_full']+['text' for _ in range(2)]+['X_crop'], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+    "data_modality": ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     "num_tiles": 3,
-    'synthetic': None, #['original','progressive_thinning','progressive_size_drift_y', 'progressive_tremor'], 
-    #'progressive_baseline_wave', 'progressive_tremor', 'progressive_ink_density'], #or None
-    'synthetic_proportions': [0.1, 0.3, 0.3,0.3], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
+    'synthetic': ALL_SYNTHETIC_TRANSFORMS, #or None
+    'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
 
     'model': 'resnet18',  
@@ -66,9 +65,9 @@ params = {
     "use_grid": True,
 
     "seed": 42,
-    "balanced_data": False,
+    "balanced_data": True,
     'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
-    "balancing_factor": 1,
+    "balancing_factor": 2,
     "majority_class_id": 0,
     "threshold_num": 1,
     "invert_color": True,
@@ -513,16 +512,34 @@ def study_dataloader(args):
     train_loader_un_normalized, _ = get_dataloader(args,normalized=False)
     compute_per_modality_norm(train_loader_un_normalized, num_modalities=expected_shape[1], max_batches=None)
     dataset_overview(train_loader, num_modalities=expected_shape[1], num_classes=2, max_batches=50)
-def compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=None):
+def compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=None, per_batch=True):
     import time
     start = time.time()
     train_loader, expected_shape = get_dataloader(args, params, pre_filtered_csv)
-    for batch_idx, batch in enumerate(train_loader):
-        img_tensor, *_ = batch
-        #print(f"Batch {batch_idx}: img_tensor shape: {img_tensor.shape}, label shape: {label.shape}, subject_id_batch shape: {subject_id_batch.shape}, questionnaire_batch shape: {questionnaire_batch.shape}")
-    end = time.time()
-    elapsed_time = end - start
-    print(f"Time taken to iterate over the dataloader: {elapsed_time:.2f} seconds")
+
+    if per_batch:
+        it = iter(train_loader)
+        t_0 = time.time()
+        for _ in range(60):      # drain the pre-filled queue
+            next(it)
+        t = time.time()
+        print('Per batch time (short)' , (t-t_0) / 60, 'seconds')
+        N = 500
+        for _ in range(N):
+            next(it)
+        print('Per batch time' , (time.time() - t) / N, 'seconds')
+    else: #total
+        for batch_idx, batch in enumerate(train_loader):
+            img_tensor, *_ = batch
+            #print(f"Batch {batch_idx}: img_tensor shape: {img_tensor.shape}, label shape: {label.shape}, subject_id_batch shape: {subject_id_batch.shape}, questionnaire_batch shape: {questionnaire_batch.shape}")
+        end = time.time()
+        elapsed_time = end - start
+        print(f"Time taken to iterate over the dataloader: {elapsed_time:.2f} seconds")
+    
+    '''ds = iter(train_dataset)      # bypass DataLoader, single process
+    for _ in range(3): next(ds)
+    cProfile.run('[next(ds) for _ in range(20)]', '/tmp/prof')
+    pstats.Stats('/tmp/prof').sort_stats('cumulative').print_stats(25)'''
 
 #show batches
 def random_samples_from_dataloader(args, params, out_folder,batches_to_show=3, mean=None,std=None, no_text=False, pre_filtered_csv=None):

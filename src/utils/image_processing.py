@@ -11,6 +11,12 @@ from PIL import ImageFilter
 import random
 import math
 import torch
+import math
+import random
+
+import cv2
+import numpy as np
+from PIL import Image
 
 def convert_background_to_white(image):
     img = image.copy()
@@ -199,117 +205,191 @@ class RandomMorphology:
         f = ImageFilter.MinFilter(k) if mode == "erode" else ImageFilter.MaxFilter(k)
         return img.filter(f)
 
-class StrokeWeight:
-    """t -> stroke gets thicker (w>0) or thinner (w<0). Fractional via blending."""
-    def __init__(self, rate=1.0, max_px=2.5):
-        self.rate, self.max_px = rate, max_px   # rate in [-1,1]: sign = direction
+# Default source of per-call randomness (phase / tremor field). Inject a seeded
+# np.random.Generator into the stochastic transforms for reproducibility.
+_RNG = np.random.default_rng()
 
-    def __call__(self, ink, t):
-        w = self.rate * t * self.max_px         # signed "pixels" of growth
+# Cache of identity coordinate grids keyed by (H, W). remap needs contiguous
+# float32 map_x / map_y the size of the output; the base grids only depend on
+# the image size, so we build them once.
+_GRID_CACHE: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
+
+
+def _identity_grid(H: int, W: int) -> tuple[np.ndarray, np.ndarray]:
+    key = (H, W)
+    g = _GRID_CACHE.get(key)
+    if g is None:
+        xs, ys = np.meshgrid(
+            np.arange(W, dtype=np.float32),
+            np.arange(H, dtype=np.float32),
+        )
+        g = (np.ascontiguousarray(xs), np.ascontiguousarray(ys))
+        _GRID_CACHE[key] = g
+    return g
+
+
+def _affine_inv(ink: np.ndarray, M: np.ndarray) -> np.ndarray:
+    """Apply an output->input (inverse) 2x3 affine map with bilinear sampling."""
+    H, W = ink.shape[:2]
+    return cv2.warpAffine(
+        ink, M, (W, H),
+        flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+        borderMode=cv2.BORDER_CONSTANT, borderValue=0,
+    )
+
+class StrokeWeight:
+    """t -> stroke gets thicker (w>0) or thinner (w<0). Fractional via blending.
+
+    max_pool2d(stride 1) is grayscale dilation with a flat square element;
+    -max_pool2d(-x) is erosion. Fractional growth is a blend toward the pooled
+    image, exactly as in the original.
+    """
+
+    def __init__(self, rate: float = 1.0, max_px: float = 2.5):
+        self.rate, self.max_px = rate, max_px
+
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
+        w = self.rate * t * self.max_px
         if abs(w) < 1e-3:
             return ink
-        k = 2 * int(math.ceil(abs(w))) + 1      # odd kernel covering the growth
-        a = abs(w) / (k // 2)                   # fractional blend weight
-        x = ink.unsqueeze(0)
-        pooled = (F.max_pool2d(x, k, 1, k // 2) if w > 0
-                  else -F.max_pool2d(-x, k, 1, k // 2))
-        return ((1 - a) * x + a * pooled).squeeze(0)
+        k = 2 * int(math.ceil(abs(w))) + 1
+        a = abs(w) / (k // 2)
+        se = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+        pooled = cv2.dilate(ink, se) if w > 0 else cv2.erode(ink, se)
+        return (1.0 - a) * ink + a * pooled
 
 class Slant:
-    """t -> increasing shear. Positive = leaning right."""
-    def __init__(self, rate=1.0, max_deg=30.0):
+    """t -> increasing shear. Positive = leaning right.
+
+    grid_sample shear x' = x + tan(ang)*y in the normalised box; in pixels the
+    coefficient picks up a W/H factor, applied about the vertical centre.
+    """
+
+    def __init__(self, rate: float = 1.0, max_deg: float = 30.0):
         self.rate, self.max_deg = rate, max_deg
 
-    def __call__(self, ink, t):
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
         ang = math.radians(self.rate * t * self.max_deg)
-        theta = torch.tensor([[1.0, math.tan(ang), 0.0],
-                              [0.0, 1.0,           0.0]])
-        return _warp_affine(ink, theta)
+        H, W = ink.shape[:2]
+        cy = (H - 1) / 2.0
+        s = math.tan(ang) * (W / H)          # aspect-corrected shear
+        M = np.array([[1.0, s, -s * cy],
+                      [0.0, 1.0, 0.0]], dtype=np.float32)
+        return _affine_inv(ink, M)
 
 class SizeDrift:
-    """t -> handwriting grows or shrinks; can be anisotropic (taller/narrower)."""
-    def __init__(self, rate_x=0.0, rate_y=0.0, max_frac=2):
+    """t -> handwriting grows or shrinks; can be anisotropic (taller/narrower).
+
+    Inverse (output->input) scale about the centre: sample = centre + (px-centre)/s.
+    """
+
+    def __init__(self, rate_x: float = 0.0, rate_y: float = 0.0, max_frac: float = 2):
         self.rx, self.ry, self.m = rate_x, rate_y, max_frac
 
-    def __call__(self, ink, t):
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
         sx = 1.0 + self.rx * t * self.m
         sy = 1.0 + self.ry * t * self.m
-        theta = torch.tensor([[1 / sx, 0.0, 0.0],
-                              [0.0, 1 / sy, 0.0]])   # inverse: grid maps out->in
-        return _warp_affine(ink, theta)
+        # Guard against a zero / negative-collapse blow-up (the original 1/sx
+        # would also misbehave here); keep the sign, clamp the magnitude.
+        sx = math.copysign(max(abs(sx), 1e-2), sx or 1.0)
+        sy = math.copysign(max(abs(sy), 1e-2), sy or 1.0)
+        H, W = ink.shape[:2]
+        cx, cy = (W - 1) / 2.0, (H - 1) / 2.0
+        M = np.array([[1.0 / sx, 0.0, cx * (1.0 - 1.0 / sx)],
+                      [0.0, 1.0 / sy, cy * (1.0 - 1.0 / sy)]], dtype=np.float32)
+        return _affine_inv(ink, M)
 
 class BaselineWave:
     """t -> the writing line stops being straight; low-frequency vertical wobble."""
-    def __init__(self, rate=1.0, max_amp=0.1, cycles=1.5):
-        self.rate, self.max_amp, self.cycles = rate, max_amp, cycles
 
-    def __call__(self, ink, t):
-        C, H, W = ink.shape
+    def __init__(self, rate: float = 1.0, max_amp: float = 0.1,
+                 cycles: float = 1.5, rng=None):
+        self.rate, self.max_amp, self.cycles = rate, max_amp, cycles
+        self.rng = rng if rng is not None else _RNG
+
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
         amp = self.rate * t * self.max_amp
         if amp < 1e-4:
             return ink
-        phase = random.uniform(0, 2 * math.pi)
-        xs = torch.linspace(-1, 1, W)
-        dy = amp * torch.sin(self.cycles * math.pi * xs + phase)  # (W,)
-        gy, gx = torch.meshgrid(torch.linspace(-1, 1, H),
-                                torch.linspace(-1, 1, W), indexing="ij")
-        grid = torch.stack([gx, gy + dy[None, :]], dim=-1)[None]
-        return F.grid_sample(ink[None], grid, mode="bilinear",
-                             padding_mode="zeros", align_corners=False).squeeze(0)
+        H, W = ink.shape[:2]
+        xs, ys = _identity_grid(H, W)
+        phase = self.rng.uniform(0.0, 2 * math.pi)
+        u = np.linspace(-1.0, 1.0, W, dtype=np.float32)           # wave coord
+        # normalised amp -> pixels via H/2
+        dy = (amp * (H / 2.0)) * np.sin(self.cycles * math.pi * u + phase)
+        map_y = np.ascontiguousarray(ys + dy[None, :].astype(np.float32))
+        return cv2.remap(ink, xs, map_y, cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_CONSTANT, borderValue=0)
 
 class Tremor:
-    """t -> shaky hand: smooth random displacement field, amplitude grows with t."""
-    def __init__(self, rate=1.0, max_amp=0.1, smooth=8):
-        self.rate, self.max_amp, self.smooth = rate, max_amp, smooth
+    """t -> shaky hand: smooth random displacement field, amplitude grows with t.
 
-    def __call__(self, ink, t):
-        C, H, W = ink.shape
+    Two box filters reproduce the original's two avg_pool2d passes (avg pool of
+    stride 1 == mean/box filter).
+    """
+
+    def __init__(self, rate: float = 1.0, max_amp: float = 0.1,
+                 smooth: int = 8, rng=None):
+        self.rate, self.max_amp, self.smooth = rate, max_amp, smooth
+        self.rng = rng if rng is not None else _RNG
+
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
         amp = self.rate * t * self.max_amp
         if amp < 1e-4:
             return ink
-        d = torch.randn(1, 2, H, W)
+        H, W = ink.shape[:2]
+        xs, ys = _identity_grid(H, W)
         k = self.smooth | 1
-        d = F.avg_pool2d(d, k, 1, k // 2)
-        d = F.avg_pool2d(d, k, 1, k // 2)          # two passes ≈ gaussian
-        d = d / d.abs().amax().clamp(min=1e-6) * amp
-        gy, gx = torch.meshgrid(torch.linspace(-1, 1, H),
-                                torch.linspace(-1, 1, W), indexing="ij")
-        grid = torch.stack([gx + d[0, 0], gy + d[0, 1]], dim=-1)[None]
-        return F.grid_sample(ink[None], grid, mode="bilinear",
-                             padding_mode="zeros", align_corners=False).squeeze(0)
+        d = self.rng.standard_normal((H, W, 2)).astype(np.float32)
+        d = cv2.boxFilter(d, -1, (k, k), normalize=True)
+        d = cv2.boxFilter(d, -1, (k, k), normalize=True)         # ~ gaussian
+        m = float(np.abs(d).max())
+        d *= amp / (m if m > 1e-6 else 1e-6)
+        map_x = np.ascontiguousarray(xs + d[:, :, 0] * (W / 2.0))
+        map_y = np.ascontiguousarray(ys + d[:, :, 1] * (H / 2.0))
+        return cv2.remap(ink, map_x, map_y, cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_CONSTANT, borderValue=0)
 
 class InkDensity:
     """t -> pen runs dry (fading, patchy) or presses harder (darker, blotchy)."""
-    def __init__(self, rate=-1.0, max_gamma=8):
+
+    def __init__(self, rate: float = -1.0, max_gamma: float = 8):
         self.rate, self.max_gamma = rate, max_gamma
 
-    def __call__(self, ink, t):
-        g = 1.0 + self.rate * t * self.max_gamma   # >1 fades ink, <1 darkens it
-        return ink.clamp(0, 1) ** max(g, 0.02)
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
+        g = 1.0 + self.rate * t * self.max_gamma     # >1 fades, <1 darkens
+        g = max(g, 0.02)
+        return np.clip(ink, 0.0, 1.0) ** np.float32(g)
 
-def _warp_affine(ink, theta):
-    grid = F.affine_grid(theta[None], (1, *ink.shape), align_corners=False) #if the image size after transform is bigger -> cut it ->
-    #preserves original dimensions
-    return F.grid_sample(ink[None], grid, mode="bilinear",
-                         padding_mode="zeros", align_corners=False).squeeze(0)
+def to_ink(pil_img: Image.Image) -> np.ndarray:
+    """PIL (0-255, black-on-white) -> float32 array in [0,1], ink=1.
 
-def to_ink(pil_img):
-    """PIL (0-255, black-on-white) -> float tensor (C,H,W) in [0,1], ink=1."""
-    x = TF.to_tensor(pil_img)          # handles L / RGB, divides by 255 for you
-    return 1.0 - x
+    Shape is (H,W) for 'L' or (H,W,C) for multi-channel; every transform is
+    channel-agnostic, so both work.
+    """
+    arr = np.asarray(pil_img, dtype=np.float32) / 255.0
+    return 1.0 - arr
 
-def to_img(ink):
-    """float tensor ink -> PIL (0-255, black-on-white)."""
-    return TF.to_pil_image((1.0 - ink).clamp(0, 1))
+def to_img(ink: np.ndarray) -> Image.Image:
+    """float32 ink -> PIL (0-255, black-on-white)."""
+    arr = np.clip(1.0 - ink, 0.0, 1.0)
+    arr = (arr * 255.0 + 0.5).astype(np.uint8)
+    return Image.fromarray(np.ascontiguousarray(arr))
 
 class SyntheticTransform:
-    def __init__(self, exp_params,subject_id,train_df, persona_seed, n_steps=10, jitter=0.15):
+    def __init__(self, exp_params, subject_id, train_df, persona_seed,
+                 n_steps=10, jitter=0.15):
         synthetic_transform_names = exp_params['synthetic']
-        class_value = train_df.loc[train_df['unique_id'] == subject_id, 'synth_label'].values[0]
+        class_value = train_df.loc[
+            train_df['unique_id'] == subject_id, 'synth_label'
+        ].values[0]
         selected_transform = synthetic_transform_names[class_value]
+
         rng = random.Random(persona_seed)
-        u = lambda: rng.uniform(-1, 1)   # drift direction+rate for this persona
+        u = lambda: rng.uniform(-1, 1)          # drift direction+rate per persona
+        nrng = np.random.default_rng(persona_seed)   # per-persona field/phase RNG
         self.n_steps, self.jitter = n_steps, jitter
+
         if selected_transform == 'original':
             self.transform = None
         elif selected_transform == 'progressive_thickening':
@@ -321,25 +401,25 @@ class SyntheticTransform:
         elif selected_transform == 'progressive_size_drift':
             self.transform = SizeDrift(rate_x=u(), rate_y=u())
         elif selected_transform == 'progressive_size_drift_x':
-            self.transform = SizeDrift(rate_x=u(), rate_y=u()*0.1)
+            self.transform = SizeDrift(rate_x=u(), rate_y=u() * 0.1)
         elif selected_transform == 'progressive_size_drift_y':
-            self.transform = SizeDrift(rate_x=u()*0.1, rate_y=u())
+            self.transform = SizeDrift(rate_x=u() * 0.1, rate_y=u())
         elif selected_transform == 'progressive_baseline_wave':
-            self.transform = BaselineWave(rate=abs(u()))
+            self.transform = BaselineWave(rate=abs(u()), rng=nrng)
         elif selected_transform == 'progressive_tremor':
-            self.transform = Tremor(rate=abs(u()))
+            self.transform = Tremor(rate=abs(u()), rng=nrng)
         elif selected_transform == 'progressive_ink_density':
             self.transform = InkDensity(rate=u())
+        else:
+            raise ValueError(f"unknown transform: {selected_transform!r}")
 
-    def __call__(self, img, step):
+    def __call__(self, img: Image.Image, step: int) -> Image.Image:
         if self.transform is None:
             return img
         t = step / max(self.n_steps - 1, 1)
         ink = to_ink(img)
-        
         tt = max(0.0, t * (1.0 + random.uniform(-self.jitter, self.jitter)))
         ink = self.transform(ink, tt)
-
         return to_img(ink)
 
 #---------- Load transforms ---------------

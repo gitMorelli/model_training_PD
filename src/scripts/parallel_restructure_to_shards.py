@@ -26,7 +26,7 @@ CONVERT_TO_JPG = False
 RESIZE = None #'half' #224, None
 PADDED = False
 CONVERT_TO_WHITE = True
-GROUPED = True #true if i have to keep the cases and controls together during training
+GROUPED = False #true if i have to keep the cases and controls together during training
 SCALE_TOLERANCE = 0.1 # Tolerance for detecting if an image needs rescaling based on template dimensions
 
 # --- CONFIGURATION ---
@@ -69,8 +69,6 @@ if CONVERT_TO_WHITE:
 
 if GROUPED:
     OUTPUT_PATH += "_grouped"
-
-OUTPUT_PATH += "_shuffled"
 
 MAX_SHARD_SIZE = 1e9 # 1e9 ~1 GB per shard
 MAX_SHARD_COUNT = 1000 # Max items per shard
@@ -378,15 +376,6 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                 for questionnaire, files in sequences.items():
                     files.sort(key=lambda x: x.name) 
                     questionnaire_info[questionnaire] = {}
-
-                    '''#forget all questionnaires after censoring 
-                    if int(questionnaire) > int(last_q):
-                        #print(f"Skipping questionnaire {questionnaire} for subject {subject_id} because it is after the last_q ({last_q})")
-                        continue'''
-                    #ignore questionnaires that are missing in the case grid pattern
-                    if case_grid_pattern[int(questionnaire)-1]=='0':
-                        #print(f"Skipping questionnaire {questionnaire} for subject {subject_id} because it is missing in the case grid pattern")
-                        continue
 
                     #open the corresponding json file
                     to_rescale,rescale_factor = False, (1.0,1.0)
