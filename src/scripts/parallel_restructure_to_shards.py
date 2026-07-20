@@ -35,7 +35,7 @@ hd5_FILE_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggreg
 questionnaire_templates_PATH="/home/a_morelli/datasets/others/template_sizes.json"
 
 LIST_OF_IDS_PD_TEST_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/progress.csv"
-LIST_OF_IDS_PD_PATH = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
+LIST_OF_IDS_PD_PATH = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
 LIST_OF_IDS_PD_PRE_MATCHING_PATH = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
 QUESTIONNAIRES = [str(i) for i in range(1,14)] # q1 to q12, inclusive. Adjust as needed.
 
@@ -43,7 +43,7 @@ QUESTIONNAIRES = [str(i) for i in range(1,14)] # q1 to q12, inclusive. Adjust as
 LIST_OF_IDS_HANDEDNESS_PATH = "/home/a_morelli/datasets/id_lists/handedness_model_ids_all_qs_w_sentences.csv"
 QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(i) for i in range(1,14)] # q1 to q12, inclusive. Adjust as needed.
 
-MODALITIES_TO_INCLUDE = ["hand_sentences_full","hand", "number_random", "number", "X"] # ["hand", "number_random", "X","sentence"] # Adjust as needed based on which modalities you want to include in the WDS samples
+ALL_MODALITIES_TO_INCLUDE = ["hand_sentences_full","hand", "number_random", "number", "X"] # ["hand", "number_random", "X","sentence"] # Adjust as needed based on which modalities you want to include in the WDS samples
 
 
 CODE_TO_RUN = "for_PD" #"for_handedness" #for_PD or for_handedness or for_PD_test, "for_PDpretraining"
@@ -299,7 +299,7 @@ def process_chunk_handedness(output_path,worker_id, id_chunk,data=None):
     print(f"[Worker {worker_id}] Complete!")
 
 #these two functions share most of the code -> you should refactor them to avoid code duplication. 
-def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
+def process_chunk_PD(output_path,worker_id, id_chunk,modalities_to_shard,data=None):
 
     """
     Worker function executed by individual CPU cores.
@@ -370,6 +370,7 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                 case_grid_pattern = id_row['case_grid_pattern']
                 label = id_row['diag_park_final1_quest'].item()
                 at_least_warning = id_row['at_least_warning'].item()
+                rempli_seulq12 = id_row['rempli_seulq12'].item() 
                 
                 questionnaire_info = {}
                 # 3. Add images
@@ -396,7 +397,7 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                     for m in files: #iterate on the data modalities
                         #get the basename without extensions
                         clean_name = os.path.basename(m.name).split('.')[0]
-                        if not clean_name in MODALITIES_TO_INCLUDE: 
+                        if not clean_name in modalities_to_shard: 
                             continue
 
                         file_bytes = old_tar.extractfile(m).read()
@@ -451,7 +452,8 @@ def process_chunk_PD(output_path,worker_id, id_chunk,data=None):
                     'case_grid_pattern': case_grid_pattern,
                     "questionnaire_info": questionnaire_info,
                     'shard_name' : current_shard_name,
-                    'last_q': last_q
+                    'last_q': last_q,
+                    'rempli_seulq12': rempli_seulq12
                 }
                 
                 # 4. Serialize and encode exactly once
@@ -646,7 +648,7 @@ def process_chunk_PD_grouped(output_path,worker_id, id_chunk,data=None):
             #-> it may happen that the group is saved in the next (-> the shard_name in the json will be wrong for the subjects in the group)
 
     print(f"[Worker {worker_id}] Complete!")
-def process_chunk_PD_pretraining(output_path,worker_id, id_chunk,data=None):
+def process_chunk_PD_pretraining(output_path,worker_id, id_chunk,modalities_to_shard,data=None):
 
     """
     Worker function executed by individual CPU cores.
@@ -724,9 +726,9 @@ def process_chunk_PD_pretraining(output_path,worker_id, id_chunk,data=None):
                     questionnaire_info[questionnaire]['rescale_factor'] = rescale_factor
                     
                     for m in files: #iterate on the data modalities
-                        if not os.path.basename(m.name) in ["hand.png", "number_random.png", "X.png"]: 
-                            continue
                         clean_name = os.path.basename(m.name).split('.')[0]
+                        if not clean_name in modalities_to_shard: 
+                            continue
 
                         file_bytes = old_tar.extractfile(m).read()
                         np_arr = np.frombuffer(file_bytes, np.uint8)
@@ -815,7 +817,7 @@ def get_images_to_rescale(data,questionnaire, template_data, scale_tolerance=0.1
         return False, (1.0,1.0)
 
 
-def convert_to_wds_parallel(output_path,id_list,function,num_test_ids=None,data=None):
+def convert_to_wds_parallel(output_path,id_list,function,modalities_to_shard,num_test_ids=None,data=None):
     # Ensure output directory exists (safe for multiple workers vs recreate_dir)
     os.makedirs(output_path, exist_ok=True)
     
@@ -860,7 +862,7 @@ def convert_to_wds_parallel(output_path,id_list,function,num_test_ids=None,data=
     # 5. Execute in parallel using ProcessPoolExecutor
     with concurrent.futures.ProcessPoolExecutor(max_workers=cpus_per_task) as executor:
         futures = [
-            executor.submit(function, output_path, worker_id, chunk, data) 
+            executor.submit(function, output_path, worker_id, chunk, modalities_to_shard,data) 
             for worker_id, chunk in chunks_for_pool
         ]
         
@@ -934,6 +936,7 @@ if __name__ == "__main__":
             if int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)) == 0:
                 run_checks(output_path)
     if CODE_TO_RUN == "for_PD":
+        modalities_to_shard = ALL_MODALITIES_TO_INCLUDE
         #read from parquet file 
         data = pd.read_parquet(LIST_OF_IDS_PD_PATH)
         print(data.head())
@@ -951,25 +954,28 @@ if __name__ == "__main__":
             else:
                 #randomly shuffle the id_list to avoid patterns in the shard reading order
                 random.shuffle(id_list)
-                convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD,num_test_ids=None,data=split_data) 
+                convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD,modalities_to_shard=modalities_to_shard,
+                                        num_test_ids=None,data=split_data) 
             # Run checks only on Task 0 to avoid messy logs
             if int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)) == 0:
                 run_checks(output_path)
     if CODE_TO_RUN == "for_PDpretraining":
         #read from parquet file 
+        modalities_to_shard = ["hand", "number_random", "X"]
         data_selected = pd.read_parquet(LIST_OF_IDS_PD_PATH) #has the ids selected for training
         
         data = pd.read_csv(LIST_OF_IDS_PD_PRE_MATCHING_PATH) #has all the ids
         data = prepare_pre_training(data, data_selected) #remove all the ids selected for training and prepare grid_pattern and avail_pattern
 
         print(data.head())
-        for train_split in ['train','val','test']:
+        for train_split in ['train','val']:
             split_data = data[data['split'] == train_split]
             id_list = split_data['unique_id'].tolist()[:] #unique_id is in the form XXXXX_YY with YY the matching group, 
             output_path = os.path.join(OUTPUT_PATH,train_split)
             #randomly shuffle the id_list to avoid patterns in the shard reading order
             random.shuffle(id_list)
-            convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD_pretraining,num_test_ids=None,data=split_data) 
+            convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD_pretraining,modalities_to_shard=modalities_to_shard,
+                                    num_test_ids=None,data=split_data) 
             # Run checks only on Task 0 to avoid messy logs
             if int(os.environ.get("SLURM_ARRAY_TASK_ID", 0)) == 0:
                 run_checks(output_path)

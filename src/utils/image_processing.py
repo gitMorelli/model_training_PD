@@ -543,6 +543,11 @@ def get_mu_std(exp_params,verbose=False):
             std = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
     if verbose:
         print(f"Using normalization mean: {mu} and std: {std}")
+    
+    if exp_params['num_channels']==1: #to manage the grayscale case
+        mu = [mu[0]]
+        std = [std[0]]
+        
     return mu, std
 
 

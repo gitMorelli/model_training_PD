@@ -907,7 +907,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
 
         return list_of_views, list_of_modality_names, rescale_factor
 
-    def build_subject_sequence(subject_id, last_q, questionnaire_info, subject_images, case_grid_pattern):
+    def build_subject_sequence(subject_id, last_q, questionnaire_info, subject_images, case_grid_pattern, rempli_seulq12):
         """Loop questionnaires 1..13 and build the sequence for one subject.
 
         Returns (sequence, questionnaires, modalities, resized_list) or None
@@ -926,7 +926,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         resized_list = []
         modalities = []
 
-        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id, subject_images, case_grid_pattern)
+        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id, subject_images, case_grid_pattern, rempli_seulq12)
 
         for X in range(1, 14):
             if X not in q_to_keep:  # questionnaire not to keep based on censoring
@@ -970,7 +970,7 @@ def keep_questionnaire(last_q,censor_time, questionnaire_info, questionnaire_num
         return questionnaire_dt <= -censor_time #eg if censor time=1 -> i keep
         #all questionnaires that are at least 1 year before the case date, so dt_q<=-1
 
-def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id,subject_images, case_grid_pattern):
+def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id,subject_images, case_grid_pattern, rempli_seulq12):
     '''take case_grid_pattern, the case_dt_q for each questionnaire, the training_df and the filtering modality to decide
     which questionnaires to sample for training
     case_grid_pattern is between 1 and 13
@@ -1031,6 +1031,10 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
             list_questionnaires = [q for q in range(1,14)]
         else:
             list_questionnaires = []
+    
+    if rempli_seulq12==0: 
+        #remove questionnaires>=12 if present and q12 was not filled alone
+        list_questionnaires = [q for q in list_questionnaires if q<12]
     #print(f"List {subject_id}: ",list_questionnaires)
     return list_questionnaires
 
@@ -1069,6 +1073,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
             questionnaire_info = json_data.get("questionnaire_info", {})
             last_q = json_data.get("last_q", None)
             case_grid_pattern = json_data.get("case_grid_pattern", None)
+            rempli_seulq12 = json_data.get("rempli_seulq12", 1)
 
             if label.item() == -1:
                 continue
@@ -1077,7 +1082,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
 
             image_pool = _index_images(sample, grouped=False)
 
-            result = build_sequence(subject_id, last_q, questionnaire_info, image_pool,case_grid_pattern)
+            result = build_sequence(subject_id, last_q, questionnaire_info, image_pool,case_grid_pattern, rempli_seulq12)
             if result is None:
                 continue
 

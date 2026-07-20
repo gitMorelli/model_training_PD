@@ -295,11 +295,16 @@ def inspect_00000():
 
 
 if __name__ == "__main__":
-    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
-    csv_data = pd.read_csv(load_path)
+    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
+    csv_data = pd.read_parquet(load_path)
     columns = csv_data.columns
     for col in columns:
         print(f"Column: {col}")
+    # show unique values of the column rempli_seulq12 including nans, print numerosities of unique values
+    unique_values = csv_data['rempli_seulq12'].value_counts(dropna=False)
+    print("Unique values and their counts for 'rempli_seulq12':")
+    print(unique_values)
+    
 
     
     

@@ -26,10 +26,10 @@ ENV_PYTHON="/home/a_morelli/.conda/envs/torch_gpu/bin/python"
 # Add this line to resolve the libiomp5 conflict
 export KMP_DUPLICATE_LIB_OK=TRUE
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export OMP_NUM_THREADS = 1
-export MKL_NUM_THREADS = 1
-export OPENBLAS_NUM_THREADS = 1
-export NUMEXPR_NUM_THREADS = 1
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 # --- Execution ---
 # You can run the script from any location using its full path

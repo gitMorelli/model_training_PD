@@ -1,56 +1,26 @@
-Column: ident_projet
+Column: unique_id
+Column: split
+Column: case_control
+Column: last_avail_q
+Column: rempli_pattern
+Column: case_pattern
+Column: grid_pattern
+Column: case_grid_pattern
 Column: diag_park_final1_quest
-Column: date_suivi_diag1_quest
-Column: birth_month
-Column: birth_year
-Column: aexclure
-Column: dateq1
-Column: dateq2
-Column: dateq3
-Column: dateq4
-Column: dateq5
-Column: dateq6
-Column: dateq7
-Column: dateq8
-Column: dateq9
-Column: dateq10
-Column: dateq11
-Column: dateq12
-Column: dateq13
-Column: q_1_avail
-Column: q_2_avail
-Column: q_3_avail
-Column: q_4_avail
-Column: q_5_avail
-Column: q_6_avail
-Column: q_7_avail
-Column: q_8_avail
-Column: q_9_avail
-Column: q_10_avail
-Column: q_11_avail
-Column: q_12_avail
-Column: q_13_avail
-Column: q_1_grid_file_avail
-Column: q_2_grid_file_avail
-Column: q_3_grid_file_avail
-Column: q_4_grid_file_avail
-Column: q_5_grid_file_avail
-Column: q_6_grid_file_avail
-Column: q_7_grid_file_avail
-Column: q_8_grid_file_avail
-Column: q_9_grid_file_avail
-Column: q_10_grid_file_avail
-Column: q_11_grid_file_avail
-Column: q_12_grid_file_avail
-Column: q_13_grid_file_avail
-Column: age_suivi_diag1_quest
-Column: cas_prev_dg1
-Column: lateralite
-Column: etudegp
-Column: actprofq2
-Column: profq2
-Column: rempli_seulq11
-Column: rempli_seulq12
+Column: at_least_warning
+Column: case_dt_dateq1
+Column: case_dt_dateq2
+Column: case_dt_dateq3
+Column: case_dt_dateq4
+Column: case_dt_dateq5
+Column: case_dt_dateq6
+Column: case_dt_dateq7
+Column: case_dt_dateq8
+Column: case_dt_dateq9
+Column: case_dt_dateq10
+Column: case_dt_dateq11
+Column: case_dt_dateq12
+Column: case_dt_dateq13
 Column: q_1_num_X
 Column: q_2_num_X
 Column: q_3_num_X
@@ -90,24 +60,33 @@ Column: q_10_num_digit
 Column: q_11_num_digit
 Column: q_12_num_digit
 Column: q_13_num_digit
+Column: etudegp
+Column: profq2
+Column: lateralite
+Column: relative_age
 Column: birth_date
-Column: years_diff
-Column: years_int
-Column: split
+Column: follow_up_time
+Column: rempli_seulq12
+Unique values and their counts for 'rempli_seulq12':
+rempli_seulq12
+1.0    7791
+NaN    3883
+0.0     369
+Name: count, dtype: int64
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4981255
+Job ID: 5054421
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n06
+Nodelist: n14
 Nodes: 1
 Cores per node: 10
-Job started at: 2026-07-17 13:44:22
-Job ended at:   2026-07-17 13:44:32
+Job started at: 2026-07-20 17:16:02
+Job ended at:   2026-07-20 17:16:12
 Job Wall-clock time: 00:00:10
-CPU Utilized: 00:00:08
-CPU Efficiency: 8.00% of 00:01:40 core-walltime
-Memory Utilized: 44.09 MB
-Memory Efficiency: 1.08% of 4.00 GB
+CPU Utilized: 00:00:05
+CPU Efficiency: 5.00% of 00:01:40 core-walltime
+Memory Utilized: 1.98 MB
+Memory Efficiency: 0.05% of 4.00 GB

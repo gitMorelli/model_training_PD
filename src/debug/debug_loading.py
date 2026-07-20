@@ -107,7 +107,7 @@ elif params['selected_problem'] == "PD":
     CSV_LOAD_PATH = ""
 
     #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
+    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
     params['full_dataset'] = "/home/a_morelli/datasets/id_lists/final_table_with_all_info_8_7_26.csv"
 
     #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 

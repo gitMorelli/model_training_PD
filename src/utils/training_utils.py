@@ -900,20 +900,32 @@ class ModelPDBase(L.LightningModule):
         WHITE = "\033[97m"
         RED = "\033[91m"
         RESET = "\033[0m"
- 
+
+        # 0. Map each parameter to its optimizer group's current lr (and name)
+        param_lr = {}
+        optimizer = self.optimizers()
+        # self.optimizers() may return a single optimizer or a list
+        optimizers = optimizer if isinstance(optimizer, (list, tuple)) else [optimizer]
+        for opt in optimizers:
+            for group in opt.param_groups:
+                for p in group["params"]:
+                    param_lr[id(p)] = (group["lr"], group.get("lr_name", "?"))
+
+        # 1. Walk every parameter in model order
         all_layers_info = []
         total_trainable_params = 0
         total_non_trainable_params = 0
- 
         for name, param in self.model.named_parameters():
             layer_str = f"  - {name} | Shape: {list(param.shape)} | Parameters: {param.numel():,}"
             if param.requires_grad:
-                all_layers_info.append(f"{WHITE}{layer_str}{RESET}")
+                lr, lr_name = param_lr.get(id(param), (None, None))
+                lr_str = f" | LR: {lr:.3e} ({lr_name})" if lr is not None else " | LR: NOT IN OPTIMIZER"
+                all_layers_info.append(f"{WHITE}{layer_str}{lr_str}{RESET}")
                 total_trainable_params += param.numel()
             else:
                 all_layers_info.append(f"{RED}{layer_str}{RESET}")
                 total_non_trainable_params += param.numel()
- 
+        
         total_params = total_trainable_params + total_non_trainable_params
  
         self.write_log(
@@ -940,6 +952,8 @@ class ModelPDBase(L.LightningModule):
  
         n0, n1 = self.train_class_0_count, self.train_class_1_count
         self.log("train_class_ratio", n0 / n1 if n1 > 0 else float("inf"), prog_bar=False)
+        self.log("train_class_0_count", n0, prog_bar=False)
+        self.log("train_class_1_count", n1, prog_bar=False)
         self.train_class_0_count = 0
         self.train_class_1_count = 0
  
@@ -953,6 +967,7 @@ class ModelPDBase(L.LightningModule):
     def configure_optimizers(self):
  
         def split_decay(named_params):
+            """(decay, no_decay): exclude bias and 1-D (BatchNorm/LayerNorm) params from weight decay."""
             decay, no_decay = [], []
             for name, p in named_params:
                 if not p.requires_grad:
@@ -962,33 +977,57 @@ class ModelPDBase(L.LightningModule):
                 else:
                     decay.append(p)
             return decay, no_decay
- 
+
         def add_group(named, lr, lr_name):
             decay, no_decay = split_decay(named)
             if decay:
                 param_groups.append({'params': decay,    'lr': lr, 'weight_decay': self.weight_decay, 'lr_name': lr_name})
             if no_decay:
                 param_groups.append({'params': no_decay, 'lr': lr, 'weight_decay': 0.0, 'lr_name': lr_name})
- 
+
         param_groups = []
- 
         if self.opt_groups:
+            assigned = {}  # param name -> lr_name of the group that claimed it (first match wins)
             for group in self.opt_groups:
-                named = [(name, param) for name, param in self.model.named_parameters()
-                         if any(key in name.lower() for key in group['names']) and param.requires_grad]
+                matched = [(name, param) for name, param in self.model.named_parameters()
+                        if any(key in name.lower() for key in group['names'])
+                        and param.requires_grad]
+
+                # Split into new claims vs. names already claimed by an earlier group
+                named = [(name, param) for name, param in matched if name not in assigned]
+                duplicates = [name for name, _ in matched if name in assigned]
+                if duplicates:
+                    for name in duplicates:
+                        self.write_log(
+                            f"[configure_optimizers] WARNING: parameter '{name}' matches "
+                            f"group '{group['lr_name']}' but was already assigned to "
+                            f"group '{assigned[name]}' (first group in order wins).\n"
+                        )
+
+                assigned.update({name: group['lr_name'] for name, _ in named})
                 add_group(named, group['lr'], group['lr_name'])
+
+            # Leftover check: every trainable parameter must belong to some group.
+            leftover = [name for name, param in self.model.named_parameters()
+                        if param.requires_grad and name not in assigned]
+            if leftover:
+                raise ValueError(
+                    f"configure_optimizers: {len(leftover)} trainable parameters "
+                    f"matched no optimization group and would silently not be "
+                    f"trained: {leftover}"
+                )
         else:
             backbone, head = [], []
             for name, param in self.model.named_parameters():
                 if not param.requires_grad:
                     continue
-                if 'classifier' in name.lower():
+                if any(key in name.lower() for key in ['classifier']):
                     head.append((name, param))
                 else:
                     backbone.append((name, param))
             add_group(backbone, self.lr_backbone, 'lr_backbone')
             add_group(head, self.lr_classifier_head, 'lr_head')
- 
+
         optimizer = optim.AdamW(param_groups)
  
         if self.lr_scheduling == 'cosine':
@@ -1333,6 +1372,30 @@ class TimeLoader(Callback):
             print(f"batch {self.n} mean={self.tot/self.n:.4f} "
                   f"last100={sum(self.win)/100:.4f} max={max(self.win):.4f}")
             self.win = []
+
+#optimization groups utils
+def get_optimization_groups(model_name,exp_params):
+    if exp_params['use_opt_groups'] == False:
+        return None
+    if 'resnet' in model_name:
+        define_optimization_groups = [
+            {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': 1e-5, 'lr_name': 'lr_1'},
+            {'names': ['layer2'],'lr': 3e-5, 'lr_name': 'lr_2'},
+            {'names': ['layer3'],'lr': 1e-4, 'lr_name': 'lr_3'},
+            {'names': ['layer4'],'lr': 1e-7, 'lr_name': 'lr_4'},
+            {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
+        ] # or None or other configurations fo other models
+    elif 'FiveStageResidualStridedConvNet' in model_name:
+        define_optimization_groups = [
+            {'names': ['stem', 'stages.0'], 'lr': 1e-5, 'lr_name': 'lr_1'},   # ~ conv1/bn1/layer1
+            {'names': ['stages.1'],         'lr': 3e-5, 'lr_name': 'lr_2'},   # ~ layer2
+            {'names': ['stages.2'],         'lr': 1e-4, 'lr_name': 'lr_3'},   # ~ layer3
+            {'names': ['stages.3', 'stages.4'], 'lr': 5e-4, 'lr_name': 'lr_4'},  # ~ layer4
+            {'names': ['head', 'projector'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
+            {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_classifier'},
+        ]
+    return define_optimization_groups
+
 
 #-------- others ----------------
 def group_max(scores, group_ids, n_groups=None):

@@ -114,6 +114,7 @@ class FiveStageResidualStridedConvNet(nn.Module): #can get any input size -> con
         dropout: float = 0.1,
         ssl_projection: bool = False,
         proj_dim: int = 128,
+        **kwargs
     ):
         super().__init__()
         w1 = widths[0]
