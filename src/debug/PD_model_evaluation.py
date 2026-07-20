@@ -45,87 +45,24 @@ from src.utils.visualization import debug_images_dataset
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std
 from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
+from src.scripts.train_PD_model import model_initialization
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
-exp_params = {
-    'list_of_ids_paths': "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet",
-    'data_folder': "final_png_whitebg",
-    'grid_dict_path': "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl",
-    'predict_on_train': False, #if True the model will be evaluated on the training set as well
+CHECKPOINT_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints"
+version='19'
+params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
+checkpoint_to_load=f"v_{version}/best-epoch=26-val_loss=0.65.ckpt"
+#open and save as exp_params dict
+with open(params_path, 'rb') as f:
+    exp_params = pd.read_pickle(f)
 
-    #experiment parameters
-    'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)],# 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
-    #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
-    'num_tiles': 3,
-    'use_grid': True,
-    'use_balanced_weights': True,
-    'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': True, #note that this and balace_validation are independent
-    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
-    'majority_class_id': 0, 
-    'threshold_num': 1,
-    'num_classes': 1, #1 for BCE loss, 2 for crossentropy
-    'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
-    #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'successive', #0, -1 (if keep all) or a positive value
-    'filter_modality': 'digit', #None, 'digit', 'text', 'X' (if None keep all)
-
-    #model definition
-    'model':"resnet18", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
-#clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': None, #None, see options below
-    'model_structure': 'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
-    'model_parameters': {
-        'd_model': 128, 
-        'n_heads': 4,
-        'n_layers':1,
-        'ff_mult':2,
-        'dropout': 0.4,
-    },
-
-    #Transforms definitions
-    'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-    'norm_mu': 'imagenet', #imagenet,handedness,mnist
-    'norm_std': 'imagenet',
-    'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
-    #in the code based on the view name
-    'invert_color':True,
-    
-    #Training params definition
-    'lr_backbone': 1e-4,
-    'lr_classifier_head': 1e-3,
-    'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 4,
-    'num_epochs': 100,
-    'patience': 50,
-    'eta_min_cosine': 1e-6,
-    'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
-    'warmup_fraction': 0.05,   # ~5% of total steps as warmup
-    'input_size': 224,
-    'layers_to_unfreeze': ['all','classifier'], #Update it for every model
-    'seed': 42,
-
-    #training modality
-    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': None, #['original','progressive_thickening','progressive_slant','progressive_size_drift', 
-    #'progressive_baseline_wave', 'progressive_tremor', 'progressive_ink_density'], #or None
-    'synthetic_proportions': [0.5, 0.2, 0.2, 0.1], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
-
-}
-if isinstance(exp_params['data_modality'],list):
-    exp_params['num_tiles'] = len(exp_params['data_modality'])
-huggingface_transform=True if exp_params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
-exp_params['huggingface_transform'] = huggingface_transform
+exp_params['predict_on_train'] = False
+exp_params['balance_validation'] = False
 
 #PATHS
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,exp_params['data_folder'])
 SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
 SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
-#Checkpoint paths
-RESULTS_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
-CHECKPOINT_PATH = os.path.join(RESULTS_PATH, "checkpoints")
-checkpoint_to_load='v_15/best-epoch=31-val_loss=1.22.ckpt'
 
 VERBOSE = False
 CLASS_COL = 'diag_park_final1_quest'
@@ -145,7 +82,8 @@ def main(exp_params):
     #load grid_files for selecting chunks from the images during the dataloading
     grid_dict = load_grid_dict(exp_params)
 
-    csv_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+    csv_data = pd.read_parquet(exp_params['list_of_ids_paths']) #if dataset is synthetic the list_of_ids_paths
+    #is 
 
     exp_params['norm_mu'],exp_params['norm_std'] = get_mu_std(exp_params, verbose=VERBOSE)
 
@@ -154,7 +92,7 @@ def main(exp_params):
 
     #_,transform = get_model(name=exp_params['model'], pretrained=True)
     #transform = get_transforms(exp_params, transform)
-    model, transform = model_initialization(exp_params,verbose=VERBOSE, **exp_params['model_parameters'])
+    model, transform = model_initialization(None,exp_params,verbose=VERBOSE,val=True, **exp_params['model_parameters'])
     
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict, transform, 
                                                     SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val)
@@ -162,7 +100,8 @@ def main(exp_params):
     # 1. Gather predictions using the best checkpoint saved during training
     # Setting ckpt_path="best" tells Lightning to automatically find your top model
     ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
-    lit_model = ModelPDClassification.load_from_checkpoint(ckpt_path, write_log=False, model=model)
+    lit_model = litmodel_initialization(model, ckpt_path, exp_params)
+
     tb_logger=False
     # 4. Initialize Trainer and Fit
     trainer = L.Trainer(
@@ -248,38 +187,13 @@ def store_results(csv_data, results_df, ckpt_path,params):
     with open(os.path.join(os.path.dirname(ckpt_path), f"predictions_metadata.json"), 'w') as f:
         json.dump(params, f, indent=4)
 
-#temporary
-def model_initialization(exp_params, verbose=True, **kwargs):
-    backbone,transform = get_model(name=exp_params['model'], pretrained=True, 
-                                   custom_pre_trained_weights=exp_params['custom_pre_trained_weights'])
-    print("############# Model backbone loaded! #############")
-    transform = get_transforms(exp_params, transform)
-    out=test_output(exp_params['input_size'], backbone)
-    in_features = out.shape[1]  
-    
-    if exp_params['model_structure'] == 'SequenceQuestionnaireModel':
-        n_slots = 13  # This is a fixed value based on your description
-        d_model = kwargs.get('d_model', 128)
-        n_heads  = kwargs.get('n_heads', 4)
-        n_layers = kwargs.get('n_layers', 2)
-        ff_mult = kwargs.get('ff_mult', 2)
-        dropout = kwargs.get('dropout', 0.4)
-        model = SequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, 
-                                           d_model=d_model, n_heads=n_heads, n_layers=n_layers, ff_mult=ff_mult, view_agg='attention', dropout=dropout)
-    elif exp_params['model_structure'] == 'SetQuestionnaireModel':
-        d_model = kwargs.get('d_model', 128)
-        ff_mult = kwargs.get('ff_mult', 2)
-        dropout = kwargs.get('dropout', 0.4)
-        model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'],  
-                                           d_model=d_model, ff_mult=ff_mult, view_agg='attention', dropout=dropout,
-                                           use_spread=True, use_count_feature=True,count_norm=2)
+def litmodel_initialization(model, ckpt_path, exp_params):
+    if exp_params['grouped']:
+        model_class=ModelPDGrouped
     else:
-        raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
-    
-    #unfreeze_layers(model,layer_names=exp_params['layers_to_unfreeze'])
-
-    return model, transform
-
+        model_class=ModelPDClassification
+    lit_model = model_class.load_from_checkpoint(ckpt_path, write_log=False, model=model)
+    return lit_model
 # ======================================================================
 # score helpers
 # ======================================================================
