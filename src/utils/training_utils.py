@@ -1379,10 +1379,10 @@ def get_optimization_groups(model_name,exp_params):
         return None
     if 'resnet' in model_name:
         define_optimization_groups = [
-            {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': 1e-5, 'lr_name': 'lr_1'},
-            {'names': ['layer2'],'lr': 3e-5, 'lr_name': 'lr_2'},
-            {'names': ['layer3'],'lr': 1e-4, 'lr_name': 'lr_3'},
-            {'names': ['layer4'],'lr': 1e-7, 'lr_name': 'lr_4'},
+            {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': exp_params['lr_backbone']*0.002, 'lr_name': 'lr_1'},
+            {'names': ['layer2'],'lr': exp_params['lr_backbone']*0.01, 'lr_name': 'lr_2'},
+            {'names': ['layer3'],'lr': exp_params['lr_backbone']*0.1, 'lr_name': 'lr_3'},
+            {'names': ['layer4'],'lr': exp_params['lr_backbone'], 'lr_name': 'lr_4'},
             {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
         ] # or None or other configurations fo other models
     elif 'FiveStageResidualStridedConvNet' in model_name:

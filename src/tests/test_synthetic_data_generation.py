@@ -31,22 +31,9 @@ import torch
 from PIL import Image, ImageDraw, ImageFont
 
 # If your module is named differently, change this import.
-from src.utils.image_processing import SyntheticTransform
+from src.utils.image_processing import SyntheticTransform, ALL_SYNTHETIC_TRANSFORMS
 
-# Order defines the synth_label -> name mapping used to drive the class.
-ALL_TRANSFORMS = [
-    "original",
-    "progressive_thickening",
-    "progressive_thinning",
-    "progressive_slant",
-    "progressive_size_drift",
-    "progressive_baseline_wave",
-    "progressive_tremor",
-    "progressive_ink_density",
-    'progressive_size_drift_x',
-    'progressive_size_drift_y',
-]
-
+ALL_TRANSFORMS = ALL_SYNTHETIC_TRANSFORMS  # convenience alias
 
 def make_sample_image(size=(320, 110), text="handwriting"):
     """A black-on-white text image, which is what to_ink() expects."""

@@ -182,9 +182,13 @@ ALL_SYNTHETIC_TRANSFORMS = [
     "progressive_size_drift",
     "progressive_baseline_wave",
     "progressive_tremor",
-    "progressive_ink_density",
+    #"progressive_ink_density",
+    "progressive_noise",
+    "progressive_blur",
     'progressive_size_drift_x',
     'progressive_size_drift_y',
+    #"progressive_sharpen",
+    "progressive_rotation",
 ]
 
 class RandomMorphology:
@@ -236,6 +240,53 @@ def _affine_inv(ink: np.ndarray, M: np.ndarray) -> np.ndarray:
         flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
         borderMode=cv2.BORDER_CONSTANT, borderValue=0,
     )
+
+class InkNoise:
+    """t -> grain: additive gaussian noise, amplitude grows with t.
+
+    `ink_bias` in [0,1] mixes between uniform paper grain (0) and noise that
+    only shows up where there is already ink (1), i.e. a pen that starts
+    sputtering rather than paper that gets dirty.
+    """
+
+    def __init__(self, rate: float = 1.0, max_sigma: float = 0.35,
+                 ink_bias: float = 0.5, rng=None):
+        self.rate, self.max_sigma, self.ink_bias = rate, max_sigma, ink_bias
+        self.rng = rng if rng is not None else _RNG
+
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
+        sigma = abs(self.rate) * t * self.max_sigma
+        if sigma < 1e-4:
+            return ink
+        n = self.rng.standard_normal(ink.shape).astype(np.float32) * sigma
+        b = float(np.clip(self.ink_bias, 0.0, 1.0))
+        mask = (1.0 - b) + b * np.clip(ink, 0.0, 1.0)   # gate noise by ink
+        return np.clip(ink + n * mask, 0.0, 1.0)
+
+
+class Blur:
+    """t -> the pen bleeds / the scan goes soft (rate>0), or sharpens (rate<0).
+
+    Positive rate is a growing gaussian blur; negative rate is the mirror
+    operation (unsharp mask against the same kernel), matching the
+    thicken/thin symmetry of StrokeWeight.
+    """
+
+    def __init__(self, rate: float = 1.0, max_sigma: float = 3.0):
+        self.rate, self.max_sigma = rate, max_sigma
+
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
+        s = self.rate * t * self.max_sigma
+        if abs(s) < 1e-3:
+            return ink
+        sigma = abs(s)
+        k = 2 * int(math.ceil(3.0 * sigma)) + 1
+        blurred = cv2.GaussianBlur(ink, (k, k), sigma,
+                                   borderType=cv2.BORDER_CONSTANT)
+        if s > 0:
+            return blurred
+        # unsharp: push away from the blurred version, amount ~ sigma
+        return np.clip(ink + sigma * (ink - blurred), 0.0, 1.0)
 
 class StrokeWeight:
     """t -> stroke gets thicker (w>0) or thinner (w<0). Fractional via blending.
@@ -361,6 +412,30 @@ class InkDensity:
         g = max(g, 0.02)
         return np.clip(ink, 0.0, 1.0) ** np.float32(g)
 
+class Rotate:
+    """t -> the page turns. At t=1 with |rate|=1 and max_deg=180 the image is
+    upside down (a 180 rotation, i.e. flipped).
+
+    Positive rate rotates clockwise on screen (image y-axis points down).
+    Content that leaves the frame is lost to the constant border; at 180 the
+    frame maps onto itself exactly, so only intermediate angles clip corners.
+    """
+
+    def __init__(self, rate: float = 1.0, max_deg: float = 180.0,
+                 clamp: bool = True):
+        self.rate, self.max_deg, self.clamp = rate, max_deg, clamp
+
+    def __call__(self, ink: np.ndarray, t: float) -> np.ndarray:
+        if self.clamp:
+            t = min(t, 1.0)
+        deg = self.rate * t * self.max_deg
+        if abs(deg) < 1e-3:
+            return ink
+        H, W = ink.shape[:2]
+        c = ((W - 1) / 2.0, (H - 1) / 2.0)
+        M = cv2.getRotationMatrix2D(c, deg, 1.0).astype(np.float32)
+        return _affine_inv(ink, M)
+
 def to_ink(pil_img: Image.Image) -> np.ndarray:
     """PIL (0-255, black-on-white) -> float32 array in [0,1], ink=1.
 
@@ -401,15 +476,24 @@ class SyntheticTransform:
         elif selected_transform == 'progressive_size_drift':
             self.transform = SizeDrift(rate_x=u(), rate_y=u())
         elif selected_transform == 'progressive_size_drift_x':
-            self.transform = SizeDrift(rate_x=u(), rate_y=u() * 0.1)
+            self.transform = SizeDrift(rate_x=u(), rate_y=0)
         elif selected_transform == 'progressive_size_drift_y':
-            self.transform = SizeDrift(rate_x=u() * 0.1, rate_y=u())
+            self.transform = SizeDrift(rate_x=0, rate_y=u())
         elif selected_transform == 'progressive_baseline_wave':
             self.transform = BaselineWave(rate=abs(u()), rng=nrng)
         elif selected_transform == 'progressive_tremor':
             self.transform = Tremor(rate=abs(u()), rng=nrng)
         elif selected_transform == 'progressive_ink_density':
             self.transform = InkDensity(rate=u())
+        elif selected_transform == 'progressive_noise':
+            self.transform = InkNoise(rate=abs(u()), rng=nrng)
+        elif selected_transform == 'progressive_blur':
+            self.transform = Blur(rate=abs(u()))
+        elif selected_transform == 'progressive_sharpen':
+            self.transform = Blur(rate=-abs(u()))
+        elif selected_transform == 'progressive_rotation':
+            # sign from the persona, magnitude pinned so t=1 lands on 180
+            self.transform = Rotate(rate=math.copysign(1.0, u()))
         else:
             raise ValueError(f"unknown transform: {selected_transform!r}")
 

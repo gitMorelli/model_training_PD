@@ -1689,11 +1689,11 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
         print("-" * 50)
 
     #exclude the subjects for which grid_pattern or case_grid_pattern has a certain pattern (eg all 0 or 0 before last avail q or ...)
-    csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1].astype(int)
     if exp_params['filter_missing'] == 'all':
         csv_data['last_avail_q'] = 13 #set last avail q to 13 for all subjects to reuse the same code
     print(f"Initial number of samples in {split} set: {len(csv_data)}")
-    print(f"Initial number of unique subjects with case_control==1 in {split} set: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
+    if 'case_control' in csv_data.columns:
+        print(f"Initial number of unique subjects with case_control==1 in {split} set: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
     def prefix_has_one(pattern, n):
         return '1' in pattern[:int(n)]
     mask = csv_data.apply(
@@ -1704,10 +1704,12 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
     #subjects_with_no_pre_avail_q_data = csv_data[~mask]['unique_id'].unique()
     csv_data = csv_data[mask]
     print(f"Number of samples in {split} set after filtering for 000.. string: {len(csv_data)}")
-    print(f"Number of unique subjects with case_control==1 in {split} set after filtering for 000.. string: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
+    if 'case_control' in csv_data.columns:
+        print(f"Number of unique subjects with case_control==1 in {split} set after filtering for 000.. string: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
 
     if (split=='train' and exp_params['balanced_data']) or (split=='val' and exp_params['balance_validation']):
-        print(f"Balancing the dataset for {split} set with balancing factor {exp_params['balancing_factor']}")
+        csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1].astype(int)
+        print(f"Balancing the dataset for {split} set with balancing factor {exp_params['balancing_factor']})")
         #keep only the controls
         csv_data_controls = csv_data[csv_data['case_control'] == 0]
         csv_data_cases = csv_data[csv_data['case_control'] == 1]
@@ -1854,6 +1856,7 @@ def synthetic_data_override(exp_params, verbose=True):
 
     return exp_params
 
+
 #Loading the grid_file data
 def pre_load_grid_data(h5_filepath,csv_data):
     '''
@@ -1933,7 +1936,7 @@ def prepare_pre_training(df, data_selected_source):
         return df
     df = combine_avail_columns(df)
     df = combine_grid_columns(df)
-    df = df['grid_pattern', 'avail_pattern', 'ident_projet', 'split']
+    df = df[['grid_pattern', 'avail_pattern', 'ident_projet', 'split','rempli_seulq11','rempli_seulq12']]
 
     #create a ident_projet column from the unique_id column of data_selected; unique_id is in the form XXXX_YYYYY with XXXX the ident_projet
     data_selected['ident_projet'] = data_selected['unique_id'].str.split('_').str[0]
@@ -1945,3 +1948,16 @@ def prepare_pre_training(df, data_selected_source):
     df = df.rename(columns={'ident_projet': 'unique_id'})
 
     return df
+
+
+# Path selection
+def return_file_paths(problem,grouped,pre_training):
+    if problem == 'PD' and not grouped and not pre_training:
+        list_of_ids_paths = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
+        data_folder = "/home/a_morelli/datasets/shards/PD/final_png_whitebg_21_07_26"
+        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl"
+    elif problem == 'PD' and pre_training:
+        list_of_ids_paths = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet"
+        data_folder = "/home/a_morelli/datasets/shards/PDpretraining/final_png_whitebg_21_07_26"
+        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26.pkl"
+    return list_of_ids_paths, data_folder, grid_dict_path

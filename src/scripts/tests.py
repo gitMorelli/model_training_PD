@@ -13,7 +13,7 @@ import pickle
 import time
 
 
-from src.utils.data_loading_utils import pre_load_grid_data
+from src.utils.data_loading_utils import pre_load_grid_data,prepare_pre_training
 
 def test_read_json(tar_path="/mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A0C5I2D5.tar"):
 
@@ -294,9 +294,21 @@ def inspect_00000():
         print(csv_data)'''
 
 
-if __name__ == "__main__":
-    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
-    csv_data = pd.read_parquet(load_path)
+def prepare_pre_training_data():
+    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
+    csv_data = pd.read_csv(load_path)
+    selected = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
+    pre_training_df = prepare_pre_training(csv_data, selected)
+    pre_training_df['case_grid_pattern'] = pre_training_df['grid_pattern']
+    #save the pre_training_df to a parquet file
+    save_path = load_path.replace(".csv", "_pre_training.parquet")
+    pre_training_df.to_parquet(save_path, index=False)
+    print(f"Pre-training data saved to {save_path}")
+
+def inspect_columns():
+    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
+    csv_data = pd.read_csv(load_path)
+    selected = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
     columns = csv_data.columns
     for col in columns:
         print(f"Column: {col}")
@@ -304,7 +316,15 @@ if __name__ == "__main__":
     unique_values = csv_data['rempli_seulq12'].value_counts(dropna=False)
     print("Unique values and their counts for 'rempli_seulq12':")
     print(unique_values)
-    
 
-    
+def view_params():
+    load_path = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints/v_21/exp_params.pkl"
+    with open(load_path, "rb") as f:
+        exp_params = pickle.load(f)
+    print("Experiment Parameters:")
+    for key, value in exp_params.items():
+        print(f"{key}: {value}")
+
+if __name__ == "__main__":
+    view_params()
     

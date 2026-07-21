@@ -1,6 +1,8 @@
+from hashlib import new
 import tarfile
 import time
 import io
+from xxlimited import new
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
@@ -301,9 +303,25 @@ def get_resnet(name,mode, pretrained, **kwargs):
             print("Missing keys:", result.missing_keys)    # in model but not in checkpoint
             print("Unexpected keys:", result.unexpected_keys)  # in checkpoint but not in model
         return full_model
-    
+    def grayscale_version(model):
+        old = model.conv1
+        new = nn.Conv2d(1, old.out_channels,
+                        kernel_size=old.kernel_size,
+                        stride=old.stride,
+                        padding=old.padding,
+                        bias=old.bias is not None)
+
+        with torch.no_grad():
+            new.weight.copy_(old.weight.sum(dim=1, keepdim=True))   # [64,3,7,7] -> [64,1,7,7]
+            if old.bias is not None:
+                new.bias.copy_(old.bias)
+
+        model.conv1 = new
+        return model
     from torchvision.models import resnet50, ResNet50_Weights, resnet18, ResNet18_Weights, resnet34, ResNet34_Weights, resnet101, ResNet101_Weights
+    
     custom_pre_trained_weights = kwargs.get('custom_pre_trained_weights', None)
+    grayscale = kwargs.get('grayscale', False)
     if custom_pre_trained_weights:
         checkpoint = torch.load(custom_pre_trained_weights)
         pretrained = False
@@ -370,6 +388,8 @@ def get_resnet(name,mode, pretrained, **kwargs):
         if custom_pre_trained_weights:
             model = load_ln_checkpoint_for_resnet(model,checkpoint, custom_pre_trained_weights)
         model.fc = torch.nn.Identity()
+        if grayscale:
+            model = grayscale_version(model)
     else:
         raise ValueError(f"Model {name} is not supported. Choose from ['resnet50', 'resnet18']")
     return model

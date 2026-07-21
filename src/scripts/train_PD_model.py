@@ -30,7 +30,7 @@ import pickle
 import numpy as np
 
 from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict, synthetic_data_override
-from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD
+from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
@@ -40,37 +40,44 @@ from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped,
 #set variables
 #torch.set_num_threads(2)  # Set the number of threads cores for the main process (eg 2+workers=num physical cores)
 
-SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
+SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
+#"/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 
 exp_params = {
-    'list_of_ids_paths': "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet",
-    'data_folder': "final_png_whitebg" ,#"final_png_whitebg_grouped", final_png_whitebg
-    'grid_dict_path': "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl",
+    'problem': 'PD', #handedness, PD, pre_training
     'class_col': 'diag_park_final1_quest',
 
+    #training modality
+    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
+    'pre_training': True,
+    'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
+    'synthetic': ALL_SYNTHETIC_TRANSFORMS, #or None
+    'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
+
+
     #experiment parameters
-    'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)],
+    'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(2)]+['text_full','text_crop']+ ['text' for _ in range(2)],
     #['X_crop','X']+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
-    'use_balanced_weights': True,
+    'use_balanced_weights': False,
     'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': True, #note that this and balace_validation are independent
+    'balanced_data': False, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
-    'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
+    'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'successive',#'last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all',#'last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':'FiveStageResidualStridedConvNet',#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':'resnet18',#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': None, #None, see options below
-    'model_structure': 'SetQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+    'model_structure': 'SequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'model_parameters': {
         'd_model': 128, 
         'n_heads': 4,
@@ -79,12 +86,6 @@ exp_params = {
         'dropout': 0.4,
     },
 
-    #training modality
-    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': None,#ALL_SYNTHETIC_TRANSFORMS, #or None
-    'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
-
     #Transforms definitions
     'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
     'norm_mu': 'handedness', #imagenet,handedness,mnist
@@ -92,36 +93,28 @@ exp_params = {
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
-    'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
+    'to_grayscale': False, #if True converts the images to grayscale (1 channel) before feeding them to the model
     
     #Training params definition
-    'use_opt_groups': False,
-    'lr_backbone': 1e-3,
-    'lr_classifier_head': 1e-3,
+    'use_opt_groups': True,
+    'lr_backbone': 5e-5,
+    'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 2,
-    'num_epochs': 50,
-    'patience': 10,
-    'eta_min_cosine': 5e-5,
+    'batch_size': 4,
+    'num_epochs': 60,
+    'patience': 50,
+    'eta_min_cosine': 1e-8,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
     'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     'seed': 42,
-    'accumulate_grad_batches': 4,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 2,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "16-mixed", #None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
     'gradient_clip_val': 1.0, #1.0, None
 
-    'prefetch_factor': 2,
+    'prefetch_factor': 1,
 }
-if exp_params['grouped']:
-    exp_params['balance_validation'] = False
-    exp_params['balanced_data'] = False
-    exp_params['use_balanced_weights'] = False
-exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
-
-if isinstance(exp_params['data_modality'],list):
-    exp_params['num_tiles'] = len(exp_params['data_modality'])
 #options for custom_pre_trained_weights:
 '''os.path.join(
     '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
@@ -130,14 +123,25 @@ if isinstance(exp_params['data_modality'],list):
 #resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
 #resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
 
-SOURCE_PATTERN = os.path.join(SOURCE_PATH,exp_params['data_folder'])
-SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
-SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
-SAVE_DEBUG_PATH = "/home/a_morelli/vscode_projects/model_training/data/debug_training"
-
-
+# Authomatic settings
+exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
+if exp_params['grouped'] or exp_params['pre_training']:
+    exp_params['balance_validation'] = False
+    exp_params['balanced_data'] = False
+    exp_params['use_balanced_weights'] = False
+if exp_params['pre_training']:
+    exp_params['filter_missing'] = 'all'
+    exp_params['censor_time'] = 'all'
+exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
+if isinstance(exp_params['data_modality'],list):
+    exp_params['num_tiles'] = len(exp_params['data_modality'])
 huggingface_transform=True if exp_params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
 exp_params['huggingface_transform'] = huggingface_transform
+
+
+SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shard-*.tar")
+SHARD_PATTERN_val = os.path.join(exp_params['data_folder'],"val/worker*_shard-*.tar")
+SAVE_DEBUG_PATH = "/home/a_morelli/vscode_projects/model_training/data/debug_training"
 
 define_optimization_groups = get_optimization_groups(model_name=exp_params['model'],exp_params=exp_params)
 
@@ -331,7 +335,7 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
 #model loading
 def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs):
     backbone,transform = get_model(name=exp_params['model'], pretrained=True, 
-                                   custom_pre_trained_weights=exp_params['custom_pre_trained_weights'])
+                                   custom_pre_trained_weights=exp_params['custom_pre_trained_weights'],grayscale=exp_params['to_grayscale'])
     print("############# Model backbone loaded! #############")
     transform = get_transforms(exp_params, transform)
     out=test_output(exp_params['input_size'], backbone, channels=exp_params['num_channels']) #test the output of the backbone to determine the number of features for the classification head

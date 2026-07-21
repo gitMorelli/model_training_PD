@@ -33,7 +33,7 @@ try:
 except ImportError:  # pandas only needed if reading IDs from a CSV
     pd = None
 
-EXPERIMENT = 'PD' #'handedness'
+EXPERIMENT = 'pre_training' #'PD' #'handedness'
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -194,7 +194,12 @@ def main():
         save_path = f"/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl"
     elif EXPERIMENT == 'PD':
         csv_data = pd.read_parquet('/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet')
-        save_path = f"/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl"
+        date = time.strftime("%d_%m_%y")
+        save_path = f"/home/a_morelli/datasets/id_lists/h5/PD_data_h5_{date}.pkl"
+    elif EXPERIMENT == 'pre_training':
+        csv_data = pd.read_parquet('/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet')
+        date = time.strftime("%d_%m_%y")
+        save_path = f"/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_{date}.pkl"
     
     data = pre_load_grid_data(
         "/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5", 

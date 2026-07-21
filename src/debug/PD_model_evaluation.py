@@ -51,12 +51,15 @@ from src.scripts.train_PD_model import model_initialization
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 CHECKPOINT_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints"
-version='19'
+version='21'
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-epoch=26-val_loss=0.65.ckpt"
+checkpoint_to_load=f"v_{version}/best-epoch=24-val_loss=0.69.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)
+
+#exp_params['filter_missing']='all'
+#exp_params['censor_time']='all'
 
 exp_params['predict_on_train'] = False
 exp_params['balance_validation'] = False

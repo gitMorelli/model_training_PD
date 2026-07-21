@@ -1,13 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=par_restructure_to_shards
-#SBATCH --array=0-3
+#SBATCH --job-name=prepare_csv
 #SBATCH --nodes=1                     # 1 Node per array task
-#SBATCH --cpus-per-task=12           
-#SBATCH --mem=64G                     # Request enough RAM for 16 parallel processes
-#SBATCH --time=05:00:00               # Estimated time for 500 images
+#SBATCH --cpus-per-task=10          
+#SBATCH --mem=4G                     # Request enough RAM for 16 parallel processes
+#SBATCH --time=00:10:00               # Estimated time for 500 images
 #SBATCH --partition=shortq
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/parallel_restructure/job_%A_%a.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/parallel_restructure/job_%A_%a.err
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/prepare_csv.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/prepare_csv.err
 
 # 1. Load necessary modules (this varies by cluster)
 # module load python/3.10
@@ -19,7 +18,6 @@
 PROJECT_ROOT="/home/a_morelli/vscode_projects/model_training"
 ENV_PYTHON="/home/a_morelli/.conda/envs/torch_gpu/bin/python"
 
-export SLURM_ARRAY_COUNT=4
 # Add this line to resolve the libiomp5 conflict
 export KMP_DUPLICATE_LIB_OK=TRUE
 #export OMP_NUM_THREADS=1
@@ -31,6 +29,5 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 # 1. Move into the project root directory
 cd $PROJECT_ROOT
 
-echo "Starting array task $SLURM_ARRAY_TASK_ID on $(hostname) with $SLURM_CPUS_PER_TASK CPUs"
 # 2. Run using the -m flag (No .py extension, use dots for path)
-$ENV_PYTHON -m src.scripts.parallel_restructure_to_shards
+$ENV_PYTHON -u -m src.scripts.prepare_csv_for_sharding
