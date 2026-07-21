@@ -33,12 +33,19 @@ import cProfile, pstats
 
 from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD, merge_properties_from_full_dataset_PD, synthetic_data_override
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
+from src.utils.data_loading_utils import return_file_paths
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD
 from src.utils.visualization import SubjectViewer, launch_interactive_PD
+from src.utils.training_utils import set_automatic_hyperparameters
+from src.debug.create_statistics_on_images import read_loader
 
 params = {
     'selected_problem': "PD",#"PD", # "handedness"
+    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
+    'pre_training': True,
+    'debug': True,
+
     'pre_filter_csv': False,
     'integrate_csv': False,
     'columns_to_add': ['rempli_seulq12'],
@@ -51,7 +58,7 @@ params = {
 
     "data_modality": ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     "num_tiles": 3,
-    'synthetic': ALL_SYNTHETIC_TRANSFORMS, #or None
+    'synthetic': None,#ALL_SYNTHETIC_TRANSFORMS, #or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
 
@@ -71,11 +78,11 @@ params = {
     "majority_class_id": 0,
     "threshold_num": 1,
     "invert_color": True,
+    "to_grayscale": False,
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
     'censor_time': 'all', #long (keep only long sequences)
     'filter_modality': 'digit', #None, 'X', 'text', 'digit' (if None keep all modalities)
-    'grouped':False,
 
     #dataloader params
     "batch_size": 4,
@@ -85,10 +92,11 @@ params = {
     "split_workers": True,
 
 }
-if isinstance(params['data_modality'],list):
-    params['num_tiles'] = len(params['data_modality'])
-huggingface_transform=True if params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
-params['huggingface_transform'] = huggingface_transform
+
+params['list_of_ids_paths'], params['data_folder'], params["h5_data_path"] = return_file_paths(params['selected_problem'], 
+                                                                                                 params['grouped'], params['pre_training'])
+params = set_automatic_hyperparameters(params)
+
 
 if params['selected_problem'] == "handedness":
     SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
@@ -104,27 +112,20 @@ if params['selected_problem'] == "handedness":
     params["h5_data_path"] = "/mnt/beegfs02/scratch/a_morelli/datasets/rr_data_h5.pkl"
 elif params['selected_problem'] == "PD":
     SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
-    CSV_LOAD_PATH = ""
 
-    #LIST_OF_IDS_HANDEDNESS_PATH = os.path.join(SOURCE_PATH,"handedness_model_ids.csv")
-    params['list_of_ids_paths'] = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
     params['full_dataset'] = "/home/a_morelli/datasets/id_lists/final_table_with_all_info_8_7_26.csv"
 
-    #data_folder = "png_resized_padded_whitebg", "all_png_resized_padded", "all_png_whitebg" , "all_no_grids_png_whitebg" 
-    data_folder = "final_png_whitebg" #"all_no_grids_png_resized_half_whitebg"
     SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/dataset_info_PD"
 
-    params["h5_data_path"] = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl"
 
-SOURCE_PATTERN = os.path.join(SOURCE_PATH,data_folder)
-SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
-SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
+SHARD_PATTERN_train = os.path.join(params['data_folder'],"train/worker*_shard-*.tar")
+SHARD_PATTERN_val = os.path.join(params['data_folder'],"val/worker*_shard-*.tar")
 VERBOSE = True
 
 
 def main(params,run_random_samples_from_loader=False, 
-         run_study_loader = False, show_grids=False, 
-         run_compute_time=True, run_debug_from_shards=False,
+         run_study_loader = True, show_grids=False, 
+         run_compute_time= False, run_debug_from_shards=False,
          run_explore_files=False):
     args = get_args()
     random.seed(params['seed'])
@@ -153,13 +154,15 @@ def main(params,run_random_samples_from_loader=False,
     
     if run_compute_time:
         compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=pre_filtered_csv)
+    
+    if run_study_loader:
+        df = study_dataloader(args, params, max_batches=10)
+        print(df.head())
 
     ### From here they work only for the handedness case #####
     if show_grids:
         grids_of_random_samples(args, out_folder=os.path.join(SAVE_PATH, "grids"), batches_to_show=3, mean=mean, std=std)
         
-    if run_study_loader:
-        study_dataloader(args)
     
     if run_debug_from_shards:
         augmentation_transform = T.Compose([
@@ -437,6 +440,8 @@ def get_dataloader(args,params,pre_filtered_csv):
         exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest',
                                                                                    pre_computed_csv=pre_filtered_csv)
         train_df = pd.read_parquet(params['list_of_ids_paths'])
+        if params['synthetic'] is None and params['pre_training']:
+            train_df['fake_label'] = 1 
         train_loader,_,_,_= prepare_loaders_PD(worker,params['prefetch_factor'],params, exclusion_set, val_exclusion_set,
                                                          grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=train_df)
         expected_shape = torch.randn(params['num_tiles'], 3, 224, 224)
@@ -507,11 +512,37 @@ def handedness_dataloading(worker,params, transform, augmentation_transform, gri
     return train_loader, expected_shape
 
 ######## MAIN FUNCTIONS ###################
-def study_dataloader(args):
-    train_loader, expected_shape = get_dataloader(args)
-    train_loader_un_normalized, _ = get_dataloader(args,normalized=False)
-    compute_per_modality_norm(train_loader_un_normalized, num_modalities=expected_shape[1], max_batches=None)
-    dataset_overview(train_loader, num_modalities=expected_shape[1], num_classes=2, max_batches=50)
+def study_dataloader(args, params, pre_filtered_csv=None, max_batches=None):
+    train_loader, expected_shape = get_dataloader(args, params, pre_filtered_csv)
+
+    def create_row(qs,sid, smodalities, smeta):
+        rows = []
+        def map_modality(modality):
+            if 'digit' in modality:
+                return 'digit'
+            elif 'text' in modality:
+                return 'text'
+            elif 'X' in modality:
+                return 'X'
+            else:
+                return modality 
+        for i, q in enumerate(qs):
+            for modality, meta in zip(smodalities[i], smeta[i]):
+                if 'original' in modality:
+                    row = {}
+                    row['subject_id'] = sid
+                    row['q'] = q
+                    row['modality'] = map_modality(modality)
+                    row['memory'] = meta['memory_size_bytes']
+                    row['pixel_sum'] = meta['pixel_sum']
+                    row['pixel_sq_sum'] = meta['pixel_sq_sum']
+                    row['num_pixels'] = meta['num_pixels']
+                    rows.append(row)
+        return rows
+    df = read_loader(train_loader, create_row, max_batches=max_batches)
+    return df
+    
+    
 def compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=None, per_batch=True):
     import time
     start = time.time()
@@ -678,7 +709,7 @@ def debug_from_shards(params,args,out_folder, augmentation_transform, transform,
             shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
     else:
         os.makedirs(out_folder, exist_ok=True)
-    shard_path = os.path.join(SOURCE_PATTERN,"train")
+    shard_path = os.path.join(params['data_folder'],"train")
     csv_data = pd.read_csv(CSV_LOAD_PATH)
     csv_data = csv_data[csv_data['split'] == 'train']
     #for the rows in which modality_type==x map it to X
@@ -859,7 +890,7 @@ def debug_from_shards(params,args,out_folder, augmentation_transform, transform,
 
 def explore_files(filename='worker94_shard-000000/D3I3J0N6.q1.hand.png'):
     #this function explores the files in the shards and prints some properties of them
-    shard_path = os.path.join(SOURCE_PATTERN,"train",filename.split('/')[0]+".tar")
+    shard_path = os.path.join(params['data_folder'],"train",filename.split('/')[0]+".tar")
     subject=filename.split('/')[1].split('.')[0]
     with tarfile.open(shard_path) as tar:
         print("Elements for subject ",subject)

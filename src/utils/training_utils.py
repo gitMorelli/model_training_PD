@@ -1396,6 +1396,23 @@ def get_optimization_groups(model_name,exp_params):
         ]
     return define_optimization_groups
 
+#Set hyperparameters / metadata
+def set_automatic_hyperparameters(exp_params):
+    if exp_params['grouped'] or exp_params['pre_training']:
+        exp_params['balance_validation'] = False
+        exp_params['balanced_data'] = False
+        exp_params['use_balanced_weights'] = False
+    if exp_params['pre_training']:
+        exp_params['filter_missing'] = 'all'
+        exp_params['censor_time'] = 'all'
+    exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
+    if isinstance(exp_params['data_modality'],list):
+        exp_params['num_tiles'] = len(exp_params['data_modality'])
+    huggingface_transform=True if exp_params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
+    exp_params['huggingface_transform'] = huggingface_transform
+    if exp_params['debug']:
+        exp_params['custom_transform'] = 'pad_resize_pil'
+    return exp_params
 
 #-------- others ----------------
 def group_max(scores, group_ids, n_groups=None):

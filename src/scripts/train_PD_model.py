@@ -36,7 +36,7 @@ from src.utils.model_utils import get_model, test_output, get_classification_hea
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader, get_optimization_groups
-
+from src.utils.training_utils import set_automatic_hyperparameters
 #set variables
 #torch.set_num_threads(2)  # Set the number of threads cores for the main process (eg 2+workers=num physical cores)
 
@@ -125,18 +125,7 @@ exp_params = {
 
 # Authomatic settings
 exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
-if exp_params['grouped'] or exp_params['pre_training']:
-    exp_params['balance_validation'] = False
-    exp_params['balanced_data'] = False
-    exp_params['use_balanced_weights'] = False
-if exp_params['pre_training']:
-    exp_params['filter_missing'] = 'all'
-    exp_params['censor_time'] = 'all'
-exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
-if isinstance(exp_params['data_modality'],list):
-    exp_params['num_tiles'] = len(exp_params['data_modality'])
-huggingface_transform=True if exp_params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
-exp_params['huggingface_transform'] = huggingface_transform
+exp_params = set_automatic_hyperparameters(exp_params)
 
 
 SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shard-*.tar")

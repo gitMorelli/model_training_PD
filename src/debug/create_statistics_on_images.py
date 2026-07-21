@@ -241,7 +241,7 @@ def create_row(qs,sid, smodalities, smeta):
             #row[f'q_{q}_sharpness_{map_modality(modality)}'] = meta['sharpness']
             #row[f'q_{q}_imputed_{modality}'] = meta['imputed'] #never imputed for any questionnaire -> irrelevant
     return row
-def read_loader(loader, subject_ids=None, slot_to_q=None, max_batches=None):
+def read_loader(loader, create_row,subject_ids=None, slot_to_q=None, max_batches=None):
     list_of_rows = []
     n_batch = 0
     for batch in loader:
@@ -282,7 +282,11 @@ def read_loader(loader, subject_ids=None, slot_to_q=None, max_batches=None):
             smodalities = [modalities[s] for s in sel.tolist()]
             smeta = [frames[s] for s in sel.tolist()]
             row = create_row(qs,sid, smodalities, smeta)
-            list_of_rows.append(row)
+            #row can also be a list of rows if i want to have one row per modality instead of one row per subject
+            if isinstance(row, list):
+                list_of_rows.extend(row)
+            else:
+                list_of_rows.append(row)
         
         n_batch += 1
         if max_batches is not None and n_batch >= max_batches:

@@ -1068,6 +1068,9 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                 synth_label = train_df.loc[train_df['unique_id']==subject_id,'synth_label'].values
                 label = torch.tensor(synth_label[0], dtype=torch.long) if len(synth_label)>0 else torch.tensor(-1, dtype=torch.long)
                 #print("synthetic label for subject", subject_id, "is", label.item(),flush=True)
+            elif train_df is not None and 'fake_label' in train_df.columns:
+                fake_label = train_df.loc[train_df['unique_id']==subject_id,'fake_label'].values
+                label = torch.tensor(fake_label[0], dtype=torch.long) if len(fake_label)>0 else torch.tensor(-1, dtype=torch.long)
             else:
                 label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
             questionnaire_info = json_data.get("questionnaire_info", {})
@@ -1498,6 +1501,9 @@ def debug_image_properties(img_source):
     
     #compute ink density
     threshold = 128                                # pixels darker than this = ink
+
+    # cast once, in float64, to avoid uint8 overflow in the squared sum
+    arr_f = arr.astype(np.float64) / 255.0   # drop the /255.0 if you want 0-255 stats
     
 
     img_properties = {
@@ -1507,11 +1513,17 @@ def debug_image_properties(img_source):
         'size': img.size, #width, height
         'width': img.size[0],
         'height': img.size[1],
+        'memory_size_bytes': arr.nbytes,
         #'area': img.size[0] * img.size[1],
         #'ratio': img.size[0] / img.size[1] if img.size[1] != 0 else None, #aspect ratio
         'ink_density': ink_density(arr,threshold), #fraction of pixels that are ink (binary threshold)
         #'sharpness': sharpness(arr), #sharpness of the image
-        'is_uniform': is_uniform_image(img_source, tol=3)
+        'is_uniform': is_uniform_image(img_source, tol=3),
+
+        # accumulators for dataset-level mean/std
+        'pixel_sum': float(arr_f.sum()),
+        'pixel_sq_sum': float((arr_f ** 2).sum()),
+        'num_pixels': int(arr_f.size),
     }
     return img_properties
 
@@ -1748,7 +1760,7 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
     exclusion_set = set()
     val_exclusion_set = set()
     
-    if pre_computed_csv:
+    if pre_computed_csv is not None:
         original_data = pd.read_parquet(exp_params['list_of_ids_paths'])
         csv_data = pre_computed_csv.copy()
     else:
@@ -1763,9 +1775,10 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
         print("Unique subjects in training set:", csv_data[csv_data['split'] == 'train']['unique_id'].nunique())
         print("Unique subjects in validation set:", csv_data[csv_data['split'] == 'val']['unique_id'].nunique())
         print('#' * 50)
-        print("Class distribution in the entire dataset:\n", csv_data[class_col].value_counts())
-        print("Class distribution in the training set:\n", csv_data[csv_data['split'] == 'train'][class_col].value_counts())
-        print('#' * 50)
+        if class_col in csv_data.columns:
+            print("Class distribution in the entire dataset:\n", csv_data[class_col].value_counts())
+            print("Class distribution in the training set:\n", csv_data[csv_data['split'] == 'train'][class_col].value_counts())
+            print('#' * 50)
 
     
     exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train',original_data=original_data) 
@@ -1778,12 +1791,15 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
     filtered_csv_data_train = csv_data[~csv_data['unique_id'].isin(exclusion_set)]
     train = filtered_csv_data_train[filtered_csv_data_train['split'] == 'train']
     #compute the number of samples for each class in the training set
-    counts = (
-        train[class_col]
-        .value_counts()
-        .reindex(range(train[class_col].max() + 1), fill_value=0)
-        .sort_index()
-    )
+    if class_col in train.columns:
+        counts = (
+            train[class_col]
+            .value_counts()
+            .reindex(range(train[class_col].max() + 1), fill_value=0)
+            .sort_index()
+        )
+    else:
+        counts = [0,0]  # Default counts if class_col is not present (eg when i iterate in debug mode on pre_training dataset)
 
     if verbose:
         print("After applying the exclusion set, the training set has:")
