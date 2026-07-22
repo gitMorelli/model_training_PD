@@ -27,7 +27,9 @@ import re
 import signal
 import sys
 import pickle
+from pympler import asizeof
 import numpy as np
+import psutil
 
 from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict, synthetic_data_override
 from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
@@ -35,8 +37,8 @@ from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireMo
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
-from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader, get_optimization_groups
-from src.utils.training_utils import set_automatic_hyperparameters
+from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader, get_optimization_groups
+from src.utils.training_utils import set_automatic_hyperparameters, MemMonitor, BatchTimer, ThroughputMonitor
 #set variables
 #torch.set_num_threads(2)  # Set the number of threads cores for the main process (eg 2+workers=num physical cores)
 
@@ -46,6 +48,10 @@ SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models
 exp_params = {
     'problem': 'PD', #handedness, PD, pre_training
     'class_col': 'diag_park_final1_quest',
+    'debug': False,
+
+    #debugging
+    'debugging_callbacks':True,
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
@@ -93,27 +99,29 @@ exp_params = {
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
-    'to_grayscale': False, #if True converts the images to grayscale (1 channel) before feeding them to the model
+    'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
     
     #Training params definition
     'use_opt_groups': True,
     'lr_backbone': 5e-5,
     'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 4,
-    'num_epochs': 60,
-    'patience': 50,
+    'batch_size': 8,
+    'num_epochs': 1,
+    'patience': 1,
+    'val_check_interval': 1.0, #if integers the number of steps after which 
+    #to perform validation, if float the fraction of the epoch after which to perform validation, 1.0 is the default value for doing at epoch end
     'eta_min_cosine': 1e-8,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
     'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     'seed': 42,
-    'accumulate_grad_batches': 2,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': None,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "16-mixed", #None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
     'gradient_clip_val': 1.0, #1.0, None
 
-    'prefetch_factor': 1,
+    'prefetch_factor': 2,
 }
 #options for custom_pre_trained_weights:
 '''os.path.join(
@@ -149,6 +157,8 @@ def main(exp_params):
     worker = args.num_workers
     prefetch_factor = exp_params['prefetch_factor'] if worker > 0 else None
 
+    print(f"baseline: {rss_gb():.2f}") #0.81
+
     validity_checks(exp_params)
 
     #set seed with lightning for reproducibility
@@ -160,6 +170,9 @@ def main(exp_params):
     
     #load grid_files for selecting chunks from the images during the dataloading
     grid_dict = load_grid_dict(exp_params)
+    
+
+    print(f"after grid_dict : {rss_gb():.2f}", flush=True) #8.10
 
     #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
     exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=exp_params['class_col'])
@@ -167,12 +180,25 @@ def main(exp_params):
     write_log, current_version = logging_initialization() 
 
     model, transform = model_initialization(write_log,exp_params,verbose=VERBOSE, **exp_params['model_parameters'])
-    
+
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
+
+    #get_memory_usage(grid_dict, train_df, exclusion_set)
+
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
                                                                        grid_dict, transform, 
                                                                        SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
                                                                        train_df=train_df)
+    
+    
+    '''p = psutil.Process(os.getpid())
+    for i, batch in enumerate(train_loader):
+        del batch
+        if i % 200 == 0:
+            print(f"batch {i}: rss={p.memory_info().rss/1e9:.2f} GB", flush=True)
+        if i == 300: break'''
+    
+
     
     if DEBUG_IMGS:
         debug(train_loader,val_loader,exp_params)
@@ -180,7 +206,6 @@ def main(exp_params):
     
     lit_model = litmodel_initialization(model,counts,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
 
-    
     trainer, metrics_tracker = trainer_definition(current_version, exp_params)
     
     exp_params['timestamp'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -195,6 +220,7 @@ def main(exp_params):
     t = time.time()
     for _ in range(300): next(it)
     print("pre-fit time per dataloader:", (time.time() - t) / 300)'''
+
     trainer.fit(lit_model, train_dataloaders=train_loader, val_dataloaders=val_loader)
     
     # If it finishes successfully, update the metrics dictionary with the real values
@@ -218,7 +244,39 @@ def main(exp_params):
 
 
 
-#### HELPER FUCNTIONS ####    
+#### HELPER FUCNTIONS #### 
+def get_memory_usage(grid_dict, train_df, exclusion_set):
+    def sizeof_grid_dict(d):
+        """Sum numpy buffer sizes + rough python overhead for a (possibly nested) dict."""
+        total = 0
+        n_objects = 0
+        stack = [d]
+        while stack:
+            obj = stack.pop()
+            n_objects += 1
+            if isinstance(obj, np.ndarray):
+                total += obj.nbytes
+            elif isinstance(obj, dict):
+                total += sys.getsizeof(obj)
+                stack.extend(obj.keys())
+                stack.extend(obj.values())
+            elif isinstance(obj, (list, tuple, set)):
+                total += sys.getsizeof(obj)
+                stack.extend(obj)
+            else:
+                total += sys.getsizeof(obj)
+        return total, n_objects
+
+    nbytes, nobjs = sizeof_grid_dict(grid_dict)
+    print(f"grid_dict: {nbytes/1e9:.2f} GB across {nobjs:,} python objects")
+
+    print(f"train_df: {train_df.memory_usage(deep=True).sum()/1e9:.2f} GB, "
+        f"dtypes:\n{train_df.dtypes.value_counts()}")
+
+    print(f"exclusion_set: {sys.getsizeof(exclusion_set)/1e9:.3f} GB, "
+        f"{len(exclusion_set):,} items", flush=True)
+
+def rss_gb(): return psutil.Process(os.getpid()).memory_info().rss / 1e9
 
 def validity_checks(exp_params):
     if exp_params['grouped']==False and 'group' in exp_params['data_folder']:
@@ -276,11 +334,13 @@ def trainer_definition(current_version, exp_params):
     extra_kwargs = {k: exp_params[k] for k in optional if exp_params.get(k) is not None}
 
     # 4. Initialize Trainer and Fit
+    extra_callbacks = [ClearCache(),ThroughputMonitor(), MemMonitor()] if exp_params['debugging_callbacks'] else []
     trainer = L.Trainer(
+        #limit_train_batches=500, limit_val_batches=0,
         max_epochs=exp_params['num_epochs'],
         logger = tb_logger,
         accelerator="auto",                # Automatically selects GPU/CPU/MPS
-        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker, periodic_ckpt, ClearCache(),TimeLoader()],
+        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker, periodic_ckpt]+extra_callbacks,
         profiler="simple",  # Add this line to get a performance summary
         enable_progress_bar=False,  # Remove this CPU overhead
         **extra_kwargs

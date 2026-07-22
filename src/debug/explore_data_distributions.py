@@ -70,7 +70,7 @@ if metadata["experiment"] == "handedness":
 elif metadata["experiment"] == "PD":
     metadata['training_set'] = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
     metadata['full_dataset'] = "/home/a_morelli/datasets/id_lists/final_table_with_all_info_8_7_26.csv"
-    metadata['statistics_path'] = "/home/a_morelli/datasets/id_lists/statistics/statistics_PD_15072026.csv"
+    metadata['statistics_path'] = "/home/a_morelli/datasets/id_lists/statistics/statistics_PD_17072026.csv"
     metadata['un_matched_path'] = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
     OUT_PATH = "/home/a_morelli/vscode_projects/model_training/data/inspect_statistics/pd"
     #MODEL_SPECIFIC_OUT_PATH = os.path.dirname(metadata['predictions_path'])

@@ -1,74 +1,27 @@
-Experiment Parameters:
-list_of_ids_paths: /mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints/v_21/PD_training_set_20_07_26.parquet
-data_folder: final_png_whitebg
-grid_dict_path: /home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl
-class_col: diag_park_final1_quest
-data_modality: ['X_crop', 'digit_full', 'digit_crop', 'digit', 'digit', 'digit', 'text_full', 'text_crop', 'text', 'text', 'text']
-num_tiles: 11
-use_grid: True
-use_balanced_weights: True
-balancing_factor: 3
-balanced_data: True
-balance_validation: False
-majority_class_id: 0
-threshold_num: 1
-num_classes: 1
-filter_missing: last_q
-censor_time: successive
-filter_modality: digit
-model: resnet18
-custom_pre_trained_weights: /mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist/resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
-model_structure: SetQuestionnaireModel
-model_parameters: {'d_model': 128, 'n_heads': 4, 'n_layers': 1, 'ff_mult': 2, 'dropout': 0.4}
-grouped: False
-bce_aux_weight: 0.3
-synthetic: None
-synthetic_proportions: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
-custom_transform: pad_resize_normalize
-norm_mu: [0.06040578708052635, 0.06040578708052635, 0.06040578708052635]
-norm_std: [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
-apply_augmentation: None
-invert_color: True
-to_grayscale: False
-lr_backbone: 0.0001
-lr_classifier_head: 0.0001
-lr_scheduling: cosine
-batch_size: 2
-num_epochs: 30
-patience: 10
-eta_min_cosine: 1e-08
-weight_decay: 0.05
-warmup_fraction: 0.05
-input_size: 224
-layers_to_unfreeze: ['classifier', 'layer4']
-seed: 42
-accumulate_grad_batches: 4
-precision: 16-mixed
-gradient_clip_val: 1.0
-prefetch_factor: 2
-num_channels: 3
-huggingface_transform: False
-timestamp: 2026-07-20 20:03:53
-best_epoch: 24
-best_val_loss: 0.6933560371398926
-best_val_acc: 0.8810888528823853
-best_train_acc: 0.6937553286552429
-current_version: 21
-optimization_groups: [{'names': ['layer1', 'vision_model.conv1', 'vision_model.bn1'], 'lr': 1e-05, 'lr_name': 'lr_1'}, {'names': ['layer2'], 'lr': 3e-05, 'lr_name': 'lr_2'}, {'names': ['layer3'], 'lr': 0.0001, 'lr_name': 'lr_3'}, {'names': ['layer4'], 'lr': 1e-07, 'lr_name': 'lr_4'}, {'names': ['classifier'], 'lr': 0.0001, 'lr_name': 'lr_head'}]
+Grid dictionary loaded successfully. Number of entries: 86808
+value range: 18 20309
+entries: 5,755,519
+data: shape=(2, 29881390), dtype=int64, 0.48 GB
+scalars: dtype=int64
+vocab sizes: ids=86,808  q_names=13  class_keys=7
+n_codes (dense table size): 7,899,528  -> int32 table = 0.03 GB
+absent codes: 2,144,009 (correctly marked -1)
+verification passed on 5,000 random entries + structural checks
+saved to /home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26: grid_data.npy, grid_offsets.npy, grid_scalars.npy, grid_entry_of_code.npy, grid_vocabs.pkl
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5060100
+Job ID: 5075330
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n03
+Nodelist: n10
 Nodes: 1
-Cores per node: 10
-Job started at: 2026-07-21 11:54:44
-Job ended at:   2026-07-21 11:54:54
-Job Wall-clock time: 00:00:10
-CPU Utilized: 00:00:06
-CPU Efficiency: 6.00% of 00:01:40 core-walltime
-Memory Utilized: 2.96 MB
-Memory Efficiency: 0.07% of 4.00 GB
+Cores per node: 4
+Job started at: 2026-07-22 17:03:34
+Job ended at:   2026-07-22 17:04:48
+Job Wall-clock time: 00:01:14
+CPU Utilized: 00:01:08
+CPU Efficiency: 22.97% of 00:04:56 core-walltime
+Memory Utilized: 8.55 GB
+Memory Efficiency: 53.45% of 16.00 GB

@@ -20,6 +20,9 @@ import random
 import shutil
 #from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks import Callback
+import psutil
+import time
+from collections import deque
 
 
 # --- 5. Training & Validation Loop ---
@@ -402,393 +405,6 @@ class LitModel(L.LightningModule):
                             self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
             self.write_log("-------------------------------------\n")
 
-#------- PD classes --------------
-class ModelPD(L.LightningModule):
-    def __init__(self, write_log,model,num_0, num_1,num_classes=2, lr_backbone=1e-4,
-                 lr_classifier_head=1e-3,example_input_array=torch.randn(1, 3, 224, 224),
-                 opt_groups=None,num_epochs=10,lr_scheduling='cosine',
-                 balancing_factor=1.0, balanced_data=False, use_balanced_weights=True, weight_decay=1e-4, warmup_fraction=0.1, 
-                 eta_min_cosine=1e-6, batch_size=32):
-        super().__init__()
-        self.save_hyperparameters()
-        self.opt_groups = opt_groups
-
-        self.num_1 = num_1
-        self.num_0 = num_0
-        self.total = self.num_0 + self.num_1
-
-        #cross entropy
-        weight_0 = self.total / (2 * self.num_0)
-        weight_1 = self.total / (2 * self.num_1)
-        # For BCE loss, the weight is applied to the positive class (Left-handed / Class 1)
-        # Formula: pos_weight = majority_class_count / minority_class_count
-        pos_weight_val = self.num_0 / self.num_1 if self.num_1 > 0 else 1.0
-
-        # Array matching [weight_for_class_0, weight_for_class_1]
-        class_weights = torch.tensor([weight_0, weight_1], dtype=torch.float32)
-        self.register_buffer("class_weights", class_weights)
-        #BCE loss
-        pos_weight = torch.tensor([pos_weight_val], dtype=torch.float32)
-        self.register_buffer("pos_weight", pos_weight)
-        '''
-        Watch out for device mismatches: A common mistake is doing self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([weight])) without using register_buffer. 
-        If you do that, the weight tensor stays on the CPU, and the moment your model moves to a GPU, your code will crash with a runtime device mismatch error. 
-        Using self.register_buffer binds the tensor to the module's lifetime and device state seamlessly
-        '''
-
-        self.model = model
-
-        if num_classes == 2:
-            if use_balanced_weights:
-                self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
-            else:
-                self.criterion = nn.CrossEntropyLoss()
-        elif num_classes == 1:
-            if use_balanced_weights:
-                self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
-            else:
-                self.criterion = nn.BCEWithLogitsLoss()
-        
-        self.num_classes = num_classes
-        self.lr_backbone = lr_backbone
-        self.lr_classifier_head = lr_classifier_head
-        # Initialize attributes to store sample counts
-        self.train_sample_count = 0
-        self.write_log = write_log
-        self.example_input_array = example_input_array
-        self.lr_scheduling = lr_scheduling
-        self.num_epochs = num_epochs
-        self.total_steps = int(self.num_epochs * (self.total//batch_size))
-
-        n = 2 if self.num_classes == 1 else self.num_classes
-        self.val_balanced_acc = MulticlassRecall(num_classes=n, average="macro")
-
-        self.balancing_factor = balancing_factor
-        self.balanced_data = balanced_data
-        self.use_balanced_weights = use_balanced_weights
-        self.weight_decay = weight_decay
-        self.warmup_fraction = warmup_fraction
-        self.eta_min_cosine = eta_min_cosine
-        self.batch_size= batch_size
-
-        self.train_class_0_count = 0
-        self.train_class_1_count = 0
-        self.val_class_0_count = 0
-        self.val_class_1_count = 0
-
-    def forward(self, frames, seq_ids, slot_ids, lengths):
-        return self.model(frames, seq_ids, slot_ids, lengths)
-    
-    @staticmethod
-    def make_example_input(k, n_slots, n_views_frames=2, C=3, H=224, W=224):
-        T = min(n_views_frames, n_slots)
-        frames   = torch.randn(T, k, C, H, W)
-        seq_ids  = torch.zeros(T, dtype=torch.long)           # all one subject
-        slot_ids = torch.arange(T, dtype=torch.long)          # first T slots present
-        lengths  = torch.tensor([T])
-        return (frames, seq_ids, slot_ids, lengths)
-
-    # --- Epoch Start Hooks ---
-    def on_train_epoch_start(self):
-        if self.current_epoch == 0:
-            self.write_log(f"Device of model at start of training: {next(self.model.parameters()).device}")
-
-        # Reset the counter at the beginning of every training epoch
-        self.train_sample_count = 0
-
-    def training_step(self, batch, batch_idx):
-        frames, seq_ids, slot_ids, lengths, labels, *_ = batch
-        bsz = labels.size(0)                      # subjects in batch, NOT frames
-
-        if self.num_classes == 1:
-            labels = labels.float().unsqueeze(1)
-        outputs = self(frames, seq_ids, slot_ids, lengths)
-
-        if not torch.isfinite(outputs).all():
-            self.write_log(f"Warning: NaN/inf in outputs at step {self.trainer.global_step}.")
-            return None
-
-        self.train_sample_count += bsz            # was inputs.size(0)
-        loss = self.criterion(outputs, labels)
-
-        if not torch.isfinite(loss):
-            self.write_log(f"Warning: NaN/inf in loss at step {self.trainer.global_step}. Skipping.")
-            return None
-
-        if self.num_classes == 1:
-            preds = (outputs > 0.0).float()
-        else:
-            _, preds = torch.max(outputs, 1)
-        acc = torch.sum(preds == labels.data).float() / bsz   # was / inputs.size(0)
-
-        self.log("train_loss", loss, on_epoch=True, prog_bar=True, batch_size=bsz)
-        self.log("train_acc",  acc,  on_epoch=True, prog_bar=True, batch_size=bsz)
-        '''
-        The batch_size=bsz on self.log calls matters here: Lightning infers batch size from the first tensor in the batch to weight epoch averages, 
-        and it would otherwise pick up frames (size N), skewing your epoch-mean loss/acc toward batches that happen to have more frames. 
-        Passing batch_size explicitly fixes the weighting
-        '''
-
-        opt = self.optimizers()
-        if self.opt_groups:
-            logged = set()
-            for g in opt.param_groups:
-                name = g.get('lr_name')
-                if name and name not in logged:
-                    self.log(name, g['lr'], on_step=False, on_epoch=True)
-                    logged.add(name)
-        else:
-            self.log("lr_backbone",        opt.param_groups[0]['lr'], on_step=False, on_epoch=True)
-            self.log("lr_classifier_head", opt.param_groups[1]['lr'], on_step=False, on_epoch=True)
-        
-        # Accumulate class counts
-        targets_int = labels.long().view(-1)
-        self.train_class_0_count += (targets_int == 0).sum().item()
-        self.train_class_1_count += (targets_int == 1).sum().item()
-
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        frames, seq_ids, slot_ids, lengths, labels, *_ = batch
-        bsz = labels.size(0)
-
-        if self.num_classes == 1:
-            labels = labels.float().unsqueeze(1)
-        outputs = self(frames, seq_ids, slot_ids, lengths)
-        loss = self.criterion(outputs, labels)
-
-        if self.num_classes == 1:
-            preds = (outputs > 0.0).float()
-        else:
-            _, preds = torch.max(outputs, 1)
-        acc = torch.sum(preds == labels.data).float() / bsz
-
-        preds_int   = preds.long().view(-1)
-        targets_int = labels.long().view(-1)
-        self.val_balanced_acc.update(preds_int, targets_int)
-
-        # Accumulate class counts
-        targets_int = labels.long().view(-1)
-        self.val_class_0_count += (targets_int == 0).sum().item()
-        self.val_class_1_count += (targets_int == 1).sum().item()
-
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True, batch_size=bsz)
-        self.log("val_acc",  acc,  on_epoch=True, prog_bar=True, batch_size=bsz)
-        self.log("val_balanced_acc", self.val_balanced_acc, on_epoch=True, prog_bar=True, batch_size=bsz)
-    
-    # --- Epoch End Hooks ---
-    def on_train_epoch_end(self):
-        WHITE = "\033[97m"
-        RED = "\033[91m"
-        RESET = "\033[0m"
-
-        # 0. Map each parameter to its optimizer group's current lr (and name)
-        param_lr = {}
-        optimizer = self.optimizers()
-        # self.optimizers() may return a single optimizer or a list
-        optimizers = optimizer if isinstance(optimizer, (list, tuple)) else [optimizer]
-        for opt in optimizers:
-            for group in opt.param_groups:
-                for p in group["params"]:
-                    param_lr[id(p)] = (group["lr"], group.get("lr_name", "?"))
-
-        # 1. Walk every parameter in model order
-        all_layers_info = []
-        total_trainable_params = 0
-        total_non_trainable_params = 0
-        for name, param in self.model.named_parameters():
-            layer_str = f"  - {name} | Shape: {list(param.shape)} | Parameters: {param.numel():,}"
-            if param.requires_grad:
-                lr, lr_name = param_lr.get(id(param), (None, None))
-                lr_str = f" | LR: {lr:.3e} ({lr_name})" if lr is not None else " | LR: NOT IN OPTIMIZER"
-                all_layers_info.append(f"{WHITE}{layer_str}{lr_str}{RESET}")
-                total_trainable_params += param.numel()
-            else:
-                all_layers_info.append(f"{RED}{layer_str}{RESET}")
-                total_non_trainable_params += param.numel()
-
-        total_params = total_trainable_params + total_non_trainable_params
-
-        # Log the counts
-        self.write_log(
-            f"\n[Epoch {self.current_epoch + 1}] "
-            f"Total Parameters: {total_params:,} | "
-            f"{WHITE}Trainable: {total_trainable_params:,}{RESET} | "
-            f"{RED}Non-trainable: {total_non_trainable_params:,}{RESET}"
-        )
-
-        # 2. On the first epochs, write the full summary to the log file
-        if self.current_epoch in [0, 5]:
-            self.write_log(f"\n--- Epoch {self.current_epoch + 1} Summary ---")
-            self.write_log(f"Expected number of stepping batches: {self.trainer.estimated_stepping_batches}")
-            # Your existing tracking metadata
-            self.write_log(f"Epoch {self.current_epoch + 1}: Total Training Samples Processed: {self.train_sample_count}\n")
-            self.write_log(f"Expected total is: {self.total}\n")
-            self.write_log(f"Class 0 samples: {self.num_0}, Class 1 samples: {self.num_1}\n")
-            self.write_log(f"Balancing Factor: {self.balancing_factor}\n")
-            self.write_log(f"Balanced Data: {self.balanced_data}, Use Balanced Weights: {self.use_balanced_weights}\n")
-            self.write_log(f"Weights for Loss Function: {self.class_weights.tolist()}\n")
-
-            # Model architecture specifics
-            self.write_log("\n--- Model Architecture Summary ---\n")
-            self.write_log(f"Total Parameters Count: {total_params:,}\n")
-            self.write_log(f"Total Trainable Parameters Count: {total_trainable_params:,}\n")
-            self.write_log(f"Total Non-trainable Parameters Count: {total_non_trainable_params:,}\n")
-
-            self.write_log("Model Layers Structure (white = trainable, red = frozen):\n")
-            for layer_info in all_layers_info:
-                self.write_log(f"{layer_info}\n")
-        
-        #class counts
-        n0 = self.train_class_0_count
-        n1 = self.train_class_1_count
-        ratio = n0 / n1 if n1 > 0 else float("inf")
-        self.log("train_class_ratio", ratio, prog_bar=False)
-
-        # Reset for next epoch
-        self.train_class_0_count = 0
-        self.train_class_1_count = 0
-
-    def on_validation_epoch_end(self):
-        n0 = self.val_class_0_count
-        n1 = self.val_class_1_count
-        ratio = n0 / n1 if n1 > 0 else float("inf")
-
-        #print(f"\n[Epoch {self.current_epoch}] Val class ratio  →  class0: {n0}  |  class1: {n1}  |  0/1 ratio: {ratio:.3f}")
-        self.log("val_class_ratio", ratio, prog_bar=False)
-
-        # Reset for next epoch
-        self.val_class_0_count = 0
-        self.val_class_1_count = 0
-
-    def configure_optimizers(self):
-
-        def split_decay(named_params):
-            """(decay, no_decay): exclude bias and 1-D (BatchNorm/LayerNorm) params from weight decay."""
-            decay, no_decay = [], []
-            for name, p in named_params:
-                if not p.requires_grad:
-                    continue
-                if p.ndim <= 1 or name.endswith(".bias"):
-                    no_decay.append(p)
-                else:
-                    decay.append(p)
-            return decay, no_decay
-
-        def add_group(named, lr, lr_name):
-            decay, no_decay = split_decay(named)
-            if decay:
-                param_groups.append({'params': decay,    'lr': lr, 'weight_decay': self.weight_decay, 'lr_name': lr_name})
-            if no_decay:
-                param_groups.append({'params': no_decay, 'lr': lr, 'weight_decay': 0.0, 'lr_name': lr_name})
-
-        param_groups = []
-        if self.opt_groups:
-            assigned = set()  # parameter names already claimed by an earlier group
-            for group in self.opt_groups:
-                named = [(name, param) for name, param in self.model.named_parameters()
-                        if name not in assigned
-                        and any(key in name.lower() for key in group['names'])
-                        and param.requires_grad]
-                assigned.update(name for name, _ in named)
-                add_group(named, group['lr'], group['lr_name'])
-
-            # Leftover check: every trainable parameter must belong to some group.
-            leftover = [name for name, param in self.model.named_parameters()
-                        if param.requires_grad and name not in assigned]
-            if leftover:
-                raise ValueError(
-                    f"configure_optimizers: {len(leftover)} trainable parameters "
-                    f"matched no optimization group and would silently not be "
-                    f"trained: {leftover}"
-                )
-        else:
-            backbone, head = [], []
-            for name, param in self.model.named_parameters():
-                if not param.requires_grad:
-                    continue
-                if any(key in name.lower() for key in ['classifier']):
-                    head.append((name, param))
-                else:
-                    backbone.append((name, param))
-            add_group(backbone, self.lr_backbone, 'lr_backbone')
-            add_group(head, self.lr_classifier_head, 'lr_head')
-
-        optimizer = optim.AdamW(param_groups)
-
-        if self.lr_scheduling == 'cosine':
-            # total optimizer steps for the whole run; accounts for grad accumulation & devices
-            #total_steps = int(self.trainer.estimated_stepping_batches)
-            total_steps = self.total_steps
-            warmup_steps = max(1, int(self.warmup_fraction * total_steps))
-
-            warmup = torch.optim.lr_scheduler.LinearLR(
-                optimizer,
-                start_factor=1e-2,        # start each group at 1% of its base LR
-                end_factor=1.0,
-                total_iters=warmup_steps,
-            )
-            cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=max(1, total_steps - warmup_steps),
-                eta_min=self.eta_min_cosine,
-            )
-            scheduler = torch.optim.lr_scheduler.SequentialLR(
-                optimizer,
-                schedulers=[warmup, cosine],
-                milestones=[warmup_steps],
-            )
-            return {
-                "optimizer": optimizer,
-                "lr_scheduler": {
-                    "scheduler": scheduler,
-                    "interval": "step",      # was "epoch"; warmup/cosine now advance per step
-                    "frequency": 1,
-                },
-            }
-        else:
-            return {"optimizer": optimizer}
-
-    def predict_step(self, batch, batch_idx):
-
-        frames, seq_ids, slot_ids, lengths, labels, \
-            resizing_factors, subject_ids, modalities = batch
-        
-
-        outputs = self(frames, seq_ids, slot_ids, lengths)
-
-        if self.num_classes == 1:
-            p1 = torch.sigmoid(outputs).flatten()
-            probs = torch.stack([1 - p1, p1], dim=1)
-            preds = (outputs > 0.0).long().flatten()
-        else:
-            _, preds = torch.max(outputs, 1)
-            probs = torch.softmax(outputs, dim=1)
-
-        return {
-            "probs": probs.detach().cpu(),
-            "preds": preds.detach().cpu(),
-            "labels": labels.detach().cpu().flatten(),
-            "subject_ids": subject_ids,
-        }
-    
-    def on_after_backward(self):
-        # This hook is called after loss.backward() and before optimizer.step()
-        # We check gradients only on the first batch of the first training epoch
-        if self.trainer.global_step == 0:
-            self.write_log("\n--- Gradient Check (First Batch) ---")
-            for name, param in self.model.named_parameters():
-                if param.requires_grad and param.grad is not None:
-                    # Print the mean absolute gradient for key layers
-                    if 'layer4' in name or 'classifier' in name:
-                        grad_abs_mean = param.grad.abs().mean().item()
-                        self.write_log(f"Layer '{name}': Mean Abs Gradient = {grad_abs_mean:.2e}")
-                        if grad_abs_mean < 1e-8:
-                            self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
-            self.write_log("-------------------------------------\n")
-
-
-# Base class: everything shared between the two training regimes
 class ModelPDBase(L.LightningModule):
     """Shared machinery: forward, optimizers/schedulers, epoch logging,
     gradient checks, class-ratio bookkeeping. Subclasses implement
@@ -827,10 +443,11 @@ class ModelPDBase(L.LightningModule):
  
         # bookkeeping shared by both regimes
         self.train_sample_count = 0
-        self.train_class_0_count = 0
-        self.train_class_1_count = 0
-        self.val_class_0_count = 0
-        self.val_class_1_count = 0
+ 
+        # CHANGED: class counts + per-class hit counts live in one dict per stage.
+        # correct_k = number of samples with true label k that were predicted k
+        # -> recall_k = correct_k / n_k, balanced_acc = mean(recall_k)
+        self._stats = {"train": self._empty_stats(), "val": self._empty_stats()}  # NEW
  
     # ---- forward ------------------------------------------------------------
     def forward(self, frames, seq_ids, slot_ids, lengths):
@@ -877,14 +494,80 @@ class ModelPDBase(L.LightningModule):
             self.log("lr_backbone",        opt.param_groups[0]['lr'], on_step=False, on_epoch=True)
             self.log("lr_classifier_head", opt.param_groups[1]['lr'], on_step=False, on_epoch=True)
  
-    def _update_class_counts(self, labels, stage):
-        t = labels.long().view(-1)
-        if stage == "train":
-            self.train_class_0_count += (t == 0).sum().item()
-            self.train_class_1_count += (t == 1).sum().item()
+    # ---------- NEW: metric bookkeeping ---------------------------------------
+    @staticmethod
+    def _empty_stats():
+        return {"n0": 0, "n1": 0, "correct_0": 0, "correct_1": 0}
+ 
+    def _logits_to_preds(self, logits):
+        """Binary (1 logit / no class dim) -> sigmoid threshold; else argmax."""
+        logits = logits.detach()
+        if self.num_classes <= 1 or logits.ndim == 1 or logits.shape[-1] == 1:
+            return (torch.sigmoid(logits.reshape(-1)) > 0.5).long()
+        return logits.argmax(dim=-1).reshape(-1)
+ 
+    def _update_class_counts(self, labels, stage, preds=None):
+        """CHANGED: same signature as before (so existing subclass calls keep
+        working) + optional `preds` to also accumulate balanced-accuracy stats."""
+        t = labels.detach().long().view(-1)
+        s = self._stats[stage]
+        m0, m1 = (t == 0), (t == 1)
+        s["n0"] += int(m0.sum().item())
+        s["n1"] += int(m1.sum().item())
+        if preds is not None:
+            p = preds.detach().long().view(-1)
+            s["correct_0"] += int(((p == 0) & m0).sum().item())
+            s["correct_1"] += int(((p == 1) & m1).sum().item())
+ 
+    def _update_metrics(self, logits, labels, stage):
+        """NEW: convenience wrapper — call this from `compute_loss_and_metrics`
+        instead of `_update_class_counts` and you get balanced accuracy for free."""
+        self._update_class_counts(labels, stage, preds=self._logits_to_preds(logits))
+ 
+    # ---------- NEW: TensorBoard helpers --------------------------------------
+    def _sum_across_ranks(self, value):
+        """Sum a python int over DDP ranks (no-op on a single process)."""
+        try:
+            world = self.trainer.world_size
+        except RuntimeError:
+            return int(value)
+        if world <= 1:
+            return int(value)
+        t = torch.tensor(float(value), device=self.device)
+        return int(self.all_gather(t).sum().item())
+ 
+    def _log_class_metrics(self, stage):
+        """NEW: class counts, ratio, per-class recall, balanced accuracy.
+        Every value goes through self.log() as its own scalar tag."""
+        s = self._stats[stage]
+        n0 = self._sum_across_ranks(s["n0"])
+        n1 = self._sum_across_ranks(s["n1"])
+        c0 = self._sum_across_ranks(s["correct_0"])
+        c1 = self._sum_across_ranks(s["correct_1"])
+ 
+        recall_0 = c0 / n0 if n0 > 0 else float("nan")
+        recall_1 = c1 / n1 if n1 > 0 else float("nan")
+ 
+        # individual scalars (each its own TB chart, grouped under the stage tag)
+        self.log(f"{stage}_class_0_count", float(n0), prog_bar=False, rank_zero_only=True)
+        self.log(f"{stage}_class_1_count", float(n1), prog_bar=False, rank_zero_only=True)
+        self.log(f"{stage}_class_ratio", n0 / n1 if n1 > 0 else float("inf"),
+                 prog_bar=False, rank_zero_only=True)
+ 
+        if n0 > 0 and n1 > 0:
+            balanced_acc = 0.5 * (recall_0 + recall_1)
+            self.log(f"{stage}_recall_class_0", recall_0, prog_bar=False, rank_zero_only=True)
+            self.log(f"{stage}_recall_class_1", recall_1, prog_bar=False, rank_zero_only=True)
+            self.log(f"{stage}_balanced_accuracy", balanced_acc,
+                     prog_bar=(stage == "val"), rank_zero_only=True)
         else:
-            self.val_class_0_count += (t == 0).sum().item()
-            self.val_class_1_count += (t == 1).sum().item()
+            balanced_acc = float("nan")
+ 
+        self.write_log(
+            f"[Epoch {self.current_epoch + 1}] {stage}: n0={n0} n1={n1} "
+            f"recall0={recall_0:.4f} recall1={recall_1:.4f} balanced_acc={balanced_acc:.4f}\n"
+        )
+        self._stats[stage] = self._empty_stats()
  
     # ---- epoch hooks ------------------------------------------------------------
     def on_train_epoch_start(self):
@@ -900,7 +583,7 @@ class ModelPDBase(L.LightningModule):
         WHITE = "\033[97m"
         RED = "\033[91m"
         RESET = "\033[0m"
-
+ 
         # 0. Map each parameter to its optimizer group's current lr (and name)
         param_lr = {}
         optimizer = self.optimizers()
@@ -910,7 +593,7 @@ class ModelPDBase(L.LightningModule):
             for group in opt.param_groups:
                 for p in group["params"]:
                     param_lr[id(p)] = (group["lr"], group.get("lr_name", "?"))
-
+ 
         # 1. Walk every parameter in model order
         all_layers_info = []
         total_trainable_params = 0
@@ -925,7 +608,7 @@ class ModelPDBase(L.LightningModule):
             else:
                 all_layers_info.append(f"{RED}{layer_str}{RESET}")
                 total_non_trainable_params += param.numel()
-        
+ 
         total_params = total_trainable_params + total_non_trainable_params
  
         self.write_log(
@@ -950,18 +633,10 @@ class ModelPDBase(L.LightningModule):
             for layer_info in all_layers_info:
                 self.write_log(f"{layer_info}\n")
  
-        n0, n1 = self.train_class_0_count, self.train_class_1_count
-        self.log("train_class_ratio", n0 / n1 if n1 > 0 else float("inf"), prog_bar=False)
-        self.log("train_class_0_count", n0, prog_bar=False)
-        self.log("train_class_1_count", n1, prog_bar=False)
-        self.train_class_0_count = 0
-        self.train_class_1_count = 0
+        self._log_class_metrics("train")   # CHANGED: replaces the manual ratio block
  
     def on_validation_epoch_end(self):
-        n0, n1 = self.val_class_0_count, self.val_class_1_count
-        self.log("val_class_ratio", n0 / n1 if n1 > 0 else float("inf"), prog_bar=False)
-        self.val_class_0_count = 0
-        self.val_class_1_count = 0
+        self._log_class_metrics("val")     # CHANGED
  
     # ---- optimizers ---------------------------------------------------------------
     def configure_optimizers(self):
@@ -977,22 +652,22 @@ class ModelPDBase(L.LightningModule):
                 else:
                     decay.append(p)
             return decay, no_decay
-
+ 
         def add_group(named, lr, lr_name):
             decay, no_decay = split_decay(named)
             if decay:
                 param_groups.append({'params': decay,    'lr': lr, 'weight_decay': self.weight_decay, 'lr_name': lr_name})
             if no_decay:
                 param_groups.append({'params': no_decay, 'lr': lr, 'weight_decay': 0.0, 'lr_name': lr_name})
-
+ 
         param_groups = []
         if self.opt_groups:
             assigned = {}  # param name -> lr_name of the group that claimed it (first match wins)
             for group in self.opt_groups:
                 matched = [(name, param) for name, param in self.model.named_parameters()
-                        if any(key in name.lower() for key in group['names'])
-                        and param.requires_grad]
-
+                           if any(key in name.lower() for key in group['names'])
+                           and param.requires_grad]
+ 
                 # Split into new claims vs. names already claimed by an earlier group
                 named = [(name, param) for name, param in matched if name not in assigned]
                 duplicates = [name for name, _ in matched if name in assigned]
@@ -1003,10 +678,10 @@ class ModelPDBase(L.LightningModule):
                             f"group '{group['lr_name']}' but was already assigned to "
                             f"group '{assigned[name]}' (first group in order wins).\n"
                         )
-
+ 
                 assigned.update({name: group['lr_name'] for name, _ in named})
                 add_group(named, group['lr'], group['lr_name'])
-
+ 
             # Leftover check: every trainable parameter must belong to some group.
             leftover = [name for name, param in self.model.named_parameters()
                         if param.requires_grad and name not in assigned]
@@ -1027,7 +702,7 @@ class ModelPDBase(L.LightningModule):
                     backbone.append((name, param))
             add_group(backbone, self.lr_backbone, 'lr_backbone')
             add_group(head, self.lr_classifier_head, 'lr_head')
-
+ 
         optimizer = optim.AdamW(param_groups)
  
         if self.lr_scheduling == 'cosine':
@@ -1057,8 +732,8 @@ class ModelPDBase(L.LightningModule):
                         self.write_log(f"Layer '{name}': Mean Abs Gradient = {grad_abs_mean:.2e}")
                         if grad_abs_mean < 1e-8:
                             self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
-            self.write_log("-------------------------------------\n") 
-
+            self.write_log("-------------------------------------\n")
+ 
 # Flat regime: standard BCE / CE training (original ModelPD behaviour)
 class ModelPDClassification(ModelPDBase):
     """Per-subject classification supporting an arbitrary number of classes.
@@ -1372,6 +1047,288 @@ class TimeLoader(Callback):
             print(f"batch {self.n} mean={self.tot/self.n:.4f} "
                   f"last100={sum(self.win)/100:.4f} max={max(self.win):.4f}")
             self.win = []
+
+class BatchTimer(Callback):
+    """Times each training batch and pushes it to TensorBoard.
+ 
+    Measures three things:
+      * time/data_wait_s  -- how long the loop waited on the dataloader
+                             (read from the profiler; needs Trainer(profiler="simple"))
+      * time/batch_compute_s -- forward + backward + optimizer step
+      * time/epoch_s      -- wall clock per epoch
+ 
+    `sync_cuda=True` inserts torch.cuda.synchronize() so the compute number is
+    real; without it CUDA calls are async and you mostly time the Python loop.
+    """
+ 
+    DATA_KEY = "[_TrainingEpochLoop].train_dataloader_next"
+ 
+    def __init__(self, window=100, print_every=100, sync_cuda=False, verbose=False):
+        self.window = window
+        self.print_every = print_every
+        self.sync_cuda = sync_cuda and torch.cuda.is_available()
+        self.verbose = verbose
+ 
+        self.n = 0
+        self.tot_data = 0.0
+        self.tot_compute = 0.0
+        self.win_data = []
+        self.win_compute = []
+        self._t0 = None
+        self._epoch_t0 = None
+ 
+    # -- helpers --------------------------------------------------------------
+    def _sync(self):
+        if self.sync_cuda:
+            torch.cuda.synchronize()
+ 
+    def _data_wait(self, trainer):
+        rec = getattr(trainer.profiler, "recorded_durations", None)
+        if rec:
+            durations = rec.get(self.DATA_KEY)
+            if durations:
+                return durations[-1]
+        return float("nan")   # no profiler attached -> silently skip
+ 
+    # -- hooks ----------------------------------------------------------------
+    def on_train_epoch_start(self, trainer, pl_module):
+        self._epoch_t0 = time.perf_counter()
+ 
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        self._sync()
+        self._t0 = time.perf_counter()
+ 
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        self._sync()
+        compute = time.perf_counter() - self._t0
+        data = self._data_wait(trainer)
+ 
+        pl_module.log("time/batch_compute_s", compute,
+                      on_step=True, on_epoch=True, prog_bar=False, batch_size=1)
+        if data == data:  # not NaN
+            pl_module.log("time/data_wait_s", data,
+                          on_step=True, on_epoch=True, prog_bar=False, batch_size=1)
+            frac = data / (data + compute) if (data + compute) > 0 else 0.0
+            pl_module.log("time/data_wait_fraction", frac,
+                          on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
+            self.tot_data += data
+            self.win_data.append(data)
+ 
+        self.n += 1
+        self.tot_compute += compute
+        self.win_compute.append(compute)
+ 
+        if self.verbose and self.n % self.print_every == 0:
+            def stats(win, tot):
+                if not win:
+                    return "n/a"
+                return (f"mean={tot / self.n:.4f} "
+                        f"last{len(win)}={sum(win) / len(win):.4f} "
+                        f"max={max(win):.4f}")
+            print(f"batch {self.n} | data  {stats(self.win_data, self.tot_data)}")
+            print(f"batch {self.n} | compute {stats(self.win_compute, self.tot_compute)}")
+            self.win_data, self.win_compute = [], []
+ 
+        # keep SimpleProfiler's recorded_durations from growing without bound
+        rec = getattr(trainer.profiler, "recorded_durations", None)
+        if rec and self.DATA_KEY in rec and len(rec[self.DATA_KEY]) > 10_000:
+            rec[self.DATA_KEY] = rec[self.DATA_KEY][-100:]
+ 
+    def on_train_epoch_end(self, trainer, pl_module):
+        if self._epoch_t0 is not None:
+            pl_module.log("time/epoch_s", time.perf_counter() - self._epoch_t0,
+                          on_step=False, on_epoch=True, batch_size=1)
+
+class ThroughputMonitor(Callback):
+    """Rolling-window training speed monitor.
+
+    Logged every `window` batches:
+      time/samples_per_s    -- wall-clock throughput. The number that matters.
+      time/batches_per_s    -- same, per batch.
+      time/gpu_busy_s       -- mean GPU time per batch, measured with CUDA events.
+      time/gpu_utilization  -- gpu_busy / wall_clock. ~1.0 = GPU-bound,
+                               < ~0.85 = the GPU is idling and you are losing time.
+      time/data_wait_s      -- mean host-side wait on the dataloader. Only a
+                               problem if utilization is also low; a wait that
+                               overlaps with GPU work is free.
+
+    Dataloader wait is read from the profiler when one is attached
+    (Trainer(profiler="simple")); otherwise it falls back to the gap between
+    consecutive batch hooks, which also includes callback/logging overhead.
+
+    Notes / limits:
+      * CUDA events time the current stream. Work issued on side streams
+        (some DDP comm, custom prefetchers) is not counted, so utilization can
+        read low on a run that is actually saturated.
+      * Under DDP every rank logs its own numbers; these are rank-local by
+        design, since stragglers are exactly what you want to see.
+      * Utilization can drift slightly above 1.0 from event/wall-clock skew.
+    """
+
+    DATA_KEY = "[_TrainingEpochLoop].train_dataloader_next"
+
+    def __init__(self, window=50, event_lag=16, samples_per_batch=None,
+                 verbose=False):
+        self.window = window
+        self.event_lag = event_lag          # batches to wait before reading events
+        self.samples_per_batch = samples_per_batch   # override if inference fails
+        self.verbose = verbose
+        self.cuda = torch.cuda.is_available()
+
+        self._pending = deque()
+        self._last_batch_end = None
+        self._epoch_t0 = None
+        self._reset_window()
+
+    # -- internals ------------------------------------------------------------
+    def _reset_window(self):
+        self._wall_t0 = time.perf_counter()
+        self._n_batches = 0
+        self._n_samples = 0
+        self._gpu_ms = 0.0
+        self._gpu_n = 0
+        self._data_s = 0.0
+        self._data_n = 0
+
+    @staticmethod
+    def _infer_batch_size(batch):
+        if isinstance(batch, torch.Tensor):
+            return batch.shape[0]
+        if isinstance(batch, (list, tuple)):
+            for item in batch:
+                if isinstance(item, torch.Tensor):
+                    return item.shape[0]
+        if isinstance(batch, dict):
+            for value in batch.values():
+                if isinstance(value, torch.Tensor):
+                    return value.shape[0]
+        return None
+
+    def _data_wait(self, trainer):
+        """Host-side dataloader wait. Profiler if available, hook gap otherwise."""
+        rec = getattr(trainer.profiler, "recorded_durations", None)
+        if rec:
+            durations = rec.get(self.DATA_KEY)
+            if durations:
+                # trim so SimpleProfiler does not grow without bound
+                if len(durations) > 10_000:
+                    rec[self.DATA_KEY] = durations[-100:]
+                return durations[-1]
+        if self._last_batch_end is not None:
+            return time.perf_counter() - self._last_batch_end
+        return None
+
+    def _drain(self, force=False):
+        """Read back completed CUDA events. Never blocks unless force=True."""
+        while self._pending:
+            if not force and len(self._pending) <= self.event_lag:
+                break
+            start_ev, end_ev = self._pending[0]
+            if not force and not end_ev.query():
+                break                      # GPU still behind, try again later
+            self._pending.popleft()
+            end_ev.synchronize()           # no-op if query() already passed
+            self._gpu_ms += start_ev.elapsed_time(end_ev)
+            self._gpu_n += 1
+
+    def _flush(self, pl_module):
+        if self._n_batches == 0:
+            return
+        wall = time.perf_counter() - self._wall_t0
+        if wall <= 0:
+            return
+
+        logs = {"time/batches_per_s": self._n_batches / wall}
+        if self._n_samples:
+            logs["time/samples_per_s"] = self._n_samples / wall
+        if self._data_n:
+            logs["time/data_wait_s"] = self._data_s / self._data_n
+        if self._gpu_n:
+            gpu_per_batch = self._gpu_ms / self._gpu_n / 1000.0
+            logs["time/gpu_busy_s"] = gpu_per_batch
+            # scale by batches in the window, since event readback lags
+            logs["time/gpu_utilization"] = gpu_per_batch * self._n_batches / wall
+
+        pl_module.log_dict(logs, on_step=True, on_epoch=False,
+                           prog_bar=False, batch_size=1)
+
+        if self.verbose:
+            parts = [f"{logs.get('time/samples_per_s', float('nan')):8.1f} samp/s"]
+            if "time/gpu_utilization" in logs:
+                parts.append(f"gpu_util {logs['time/gpu_utilization']:5.1%}")
+                parts.append(f"gpu {logs['time/gpu_busy_s'] * 1000:6.1f} ms")
+            if "time/data_wait_s" in logs:
+                parts.append(f"data {logs['time/data_wait_s'] * 1000:6.1f} ms")
+            print("  ".join(parts))
+
+        self._reset_window()
+
+    # -- hooks ----------------------------------------------------------------
+    def on_train_epoch_start(self, trainer, pl_module):
+        self._epoch_t0 = time.perf_counter()
+        self._last_batch_end = None
+        self._reset_window()
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        wait = self._data_wait(trainer)
+        if wait is not None:
+            self._data_s += wait
+            self._data_n += 1
+
+        if self.cuda:
+            start_ev = torch.cuda.Event(enable_timing=True)
+            start_ev.record()
+            self._start_ev = start_ev
+
+        n = self.samples_per_batch or self._infer_batch_size(batch)
+        self._pending_samples = n or 0
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if self.cuda:
+            end_ev = torch.cuda.Event(enable_timing=True)
+            end_ev.record()
+            self._pending.append((self._start_ev, end_ev))
+            self._drain()
+
+        self._n_batches += 1
+        self._n_samples += self._pending_samples
+        self._last_batch_end = time.perf_counter()
+
+        if self._n_batches >= self.window:
+            self._flush(pl_module)
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if self.cuda:
+            self._drain(force=True)
+        self._flush(pl_module)
+        if self._epoch_t0 is not None:
+            pl_module.log("time/epoch_s", time.perf_counter() - self._epoch_t0,
+                          on_step=False, on_epoch=True, batch_size=1)
+
+import psutil, os
+
+class MemMonitor(L.Callback):
+    def __init__(self, every_n_steps=1000):
+        self.every_n_steps = every_n_steps
+
+    def on_train_batch_end(self, trainer, *args, **kwargs):
+        if trainer.global_step % self.every_n_steps != 0:
+            return
+
+        p = psutil.Process(os.getpid())
+        main = p.memory_full_info().pss / 1e9
+
+        kids = []
+        for c in p.children(recursive=True):
+            try:
+                kids.append((c.pid, c.memory_full_info().pss / 1e9))
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass  # worker died/respawned between listing and reading
+
+        total = main + sum(m for _, m in kids)
+        print(f"step {trainer.global_step}: main={main:.2f}GB "
+              f"workers={[f'{m:.2f}' for _, m in kids]} "
+              f"total={total:.2f}GB (PSS)")
 
 #optimization groups utils
 def get_optimization_groups(model_name,exp_params):

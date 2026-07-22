@@ -1,8 +1,10 @@
+from __future__ import annotations
 import tarfile
 import glob
 import os
 import json
 import pandas as pd
+import psutil
 from PIL import Image
 import io
 import math
@@ -305,17 +307,12 @@ def prepare_pre_training_data():
     pre_training_df.to_parquet(save_path, index=False)
     print(f"Pre-training data saved to {save_path}")
 
-def inspect_columns():
-    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
-    csv_data = pd.read_csv(load_path)
-    selected = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
+def inspect_columns(): 
+    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
+    csv_data = pd.read_parquet(load_path)
     columns = csv_data.columns
     for col in columns:
         print(f"Column: {col}")
-    # show unique values of the column rempli_seulq12 including nans, print numerosities of unique values
-    unique_values = csv_data['rempli_seulq12'].value_counts(dropna=False)
-    print("Unique values and their counts for 'rempli_seulq12':")
-    print(unique_values)
 
 def view_params():
     load_path = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints/v_21/exp_params.pkl"
@@ -325,6 +322,274 @@ def view_params():
     for key, value in exp_params.items():
         print(f"{key}: {value}")
 
+
+def copy_folder(src, dst, overwrite=False):
+    import shutil
+    import sys
+    from pathlib import Path
+    src, dst = Path(src), Path(dst)
+
+    if not src.is_dir():
+        sys.exit(f"Source is not a directory: {src}")
+    if dst.exists() and not overwrite:
+        sys.exit(f"Destination already exists: {dst} (pass overwrite=True to merge)")
+
+    # copytree with dirs_exist_ok lets a re-run fill in missing files
+    shutil.copytree(src, dst, dirs_exist_ok=overwrite, symlinks=False)
+
+    # verify: compare file counts and total bytes
+    def stats(root):
+        files = [p for p in Path(root).rglob("*") if p.is_file()]
+        return len(files), sum(p.stat().st_size for p in files)
+
+    n_src, sz_src = stats(src)
+    n_dst, sz_dst = stats(dst)
+
+    print(f"source:      {n_src} files, {sz_src / 1e9:.2f} GB")
+    print(f"destination: {n_dst} files, {sz_dst / 1e9:.2f} GB")
+
+    if n_src == n_dst and sz_src == sz_dst:
+        print("OK — counts and sizes match")
+    else:
+        sys.exit("MISMATCH — copy is incomplete or corrupted")
+
+def check_wds_signature():
+    import inspect
+    import webdataset as wds
+    print(inspect.signature(wds.WebDataset.__init__))
+
+def check_n_subjects_exclusion_criteria():
+    N_Q = 13
+    
+    
+    def combined_pattern(grid: str, case_grid: str) -> str:
+        """Elementwise logical AND of two '0'/'1' strings."""
+        return "".join(
+            "1" if a == "1" and b == "1" else "0" for a, b in zip(grid, case_grid)
+        )
+    
+    
+    def _row_has_future_signal(row, start_offset: int) -> bool:
+        combo = combined_pattern(row["grid_pattern"], row["case_grid_pattern"])
+        start = max(int(row["last_avail_q"]) + start_offset, 0)
+        return "1" in combo[start:N_Q]
+    
+    
+    def summarize_splits(
+        df: pd.DataFrame,
+        start_offset: int = 0,
+        id_col: str = "unique_id",
+        splits=("train", "val"),
+        verbose: bool = True,
+        group_col='case_control'
+    ) -> pd.DataFrame:
+        """Print and return unique-id counts before/after filtering.
+    
+        An id is kept if ANY of its rows satisfies the rule (relevant only if
+        the same unique_id appears on multiple rows; harmless otherwise).
+        """
+        d = df.copy()
+        d["_keep_row"] = d.apply(_row_has_future_signal, axis=1, start_offset=start_offset)
+    
+        kept_ids = set(d.loc[d["_keep_row"], id_col].unique())
+    
+        records = []
+        for split in splits:
+            sub = d[d["split"] == split]
+            for cc in sorted(sub[group_col].unique()):
+                g = sub[sub[group_col] == cc]
+                ids = set(g[id_col].unique())
+                before = len(ids)
+                after = len(ids & kept_ids)
+                records.append(
+                    {
+                        "split": split,
+                        "case_control": cc,
+                        "n_before": before,
+                        "n_after": after,
+                        "n_removed": before - after,
+                        "pct_kept": 100 * after / before if before else float("nan"),
+                    }
+                )
+    
+        summary = pd.DataFrame.from_records(records)
+    
+        if verbose:
+            for split in splits:
+                print(f"=== split: {split} ===")
+                block = summary[summary["split"] == split]
+                if block.empty:
+                    print("  (no rows)")
+                    continue
+                for _, r in block.iterrows():
+                    print(
+                        f"  {group_col}={r.case_control}: "
+                        f"{r.n_before:>8,} unique ids  ->  {r.n_after:>8,} after filtering "
+                        f"({r.pct_kept:5.1f}% kept, {r.n_removed:,} removed)"
+                    )
+                print(
+                    f"  total       : {block.n_before.sum():>8,} unique ids  ->  "
+                    f"{block.n_after.sum():>8,} after filtering"
+                )
+                print()
+    
+        return summary
+
+    load_path = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints/v_21/PD_training_set_20_07_26.parquet"
+    data = pd.read_parquet(load_path)
+
+    summarize_splits(data, group_col="diag_park_final1_quest")
+
+    columns = data.columns
+    for col in columns:
+        print(f"Column: {col}")
+
+def repack_grid_dict():
+    """Run once to convert the grid_dict pickle into packed numpy arrays."""
+    import numpy as np
+    import pickle
+    import random
+
+    exp_params = {}
+    exp_params['use_grid'] = True
+    exp_params['grid_dict_path'] = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26.pkl"
+    save_dir = os.path.dirname(exp_params['grid_dict_path'])
+    save_dir = os.path.join(save_dir, os.path.basename(exp_params['grid_dict_path']).replace(".pkl", ""))
+
+    def load_grid_dict_local(exp_params):
+        if exp_params['use_grid']:
+            with open(exp_params['grid_dict_path'], "rb") as f:
+                grid_dict = pickle.load(f)
+            print("Grid dictionary loaded successfully. Number of entries:", len(grid_dict))
+            return grid_dict
+        else:
+            print("Grid usage is disabled. No grid dictionary will be loaded.")
+            return None
+
+    grid_dict = load_grid_dict_local(exp_params)
+
+    # ---------------------------------------------------------------- pack data
+    keys = []        # (id, q_name, class_key) triples
+    scalars = []
+    arrays = []
+
+    for id_, q_dicts in grid_dict.items():
+        for q_name, class_dicts in q_dicts.items():
+            for class_key, (scalar, arr) in class_dicts.items():
+                keys.append((id_, q_name, class_key))
+                scalars.append(scalar)
+                arrays.append(np.asarray(arr))
+
+    lengths = np.array([a.shape[1] for a in arrays], dtype=np.int64)   # number of columns
+    offsets = np.zeros(len(arrays) + 1, dtype=np.int64)
+    np.cumsum(lengths, out=offsets[1:])
+    data = np.concatenate(arrays, axis=1)     # shape (2, total_columns)
+
+    print("value range:", data.min() if data.size else "empty",
+          data.max() if data.size else "")
+
+    scalars_arr = np.asarray(scalars)
+
+    print(f"entries: {len(keys):,}")
+    print(f"data: shape={data.shape}, dtype={data.dtype}, {data.nbytes/1e9:.2f} GB")
+    print(f"scalars: dtype={scalars_arr.dtype}")
+
+    # downcast BEFORE verification so the check validates exactly what gets saved
+    data = data.astype(np.int32)          # verified: value range fits int32
+    scalars_arr = scalars_arr.astype(np.int32)
+
+    # ---------------------------------------------------------------- build integer-coded index
+    ids     = sorted({k[0] for k in keys})
+    q_names = sorted({k[1] for k in keys})
+    c_keys  = sorted({k[2] for k in keys})
+    id_code = {v: i for i, v in enumerate(ids)}
+    q_code  = {v: i for i, v in enumerate(q_names)}
+    c_code  = {v: i for i, v in enumerate(c_keys)}
+
+    NQ, NC = len(q_names), len(c_keys)
+    n_codes = len(ids) * NQ * NC
+    print(f"vocab sizes: ids={len(ids):,}  q_names={NQ}  class_keys={NC}")
+    print(f"n_codes (dense table size): {n_codes:,}  "
+          f"-> int32 table = {n_codes * 4 / 1e9:.2f} GB")
+
+    assert n_codes < 200_000_000, (
+        f"n_codes={n_codes:,} too large for a dense table; "
+        "switch to the sorted-codes + searchsorted variant instead")
+
+    codes = np.array(
+        [(id_code[a] * NQ + q_code[b]) * NC + c_code[c] for a, b, c in keys],
+        dtype=np.int64)
+    assert len(np.unique(codes)) == len(codes), "duplicate (id, q_name, class_key) triples!"
+
+    # dense code -> entry index table, -1 = absent
+    entry_of_code = np.full(n_codes, -1, dtype=np.int32)
+    entry_of_code[codes] = np.arange(len(codes), dtype=np.int32)
+
+    vocabs = {"id": id_code, "q": q_code, "c": c_code, "NQ": NQ, "NC": NC}
+
+    # ---------------------------------------------------------------- verify
+    def grid_lookup(id_, q_name, class_key):
+        code = (vocabs["id"][id_] * vocabs["NQ"] + vocabs["q"][q_name]) * vocabs["NC"] \
+               + vocabs["c"][class_key]
+        i = entry_of_code[code]
+        if i < 0:
+            raise KeyError((id_, q_name, class_key))
+        lo, hi = offsets[i], offsets[i + 1]
+        return scalars_arr[i], data[:, lo:hi]   # shape (2, N_i), zero-copy view
+
+    # 1. structural checks (exhaustive)
+    n_orig = sum(len(cd) for qd in grid_dict.values() for cd in qd.values())
+    assert n_orig == len(keys), f"entry count mismatch: {n_orig} vs {len(keys)}"
+    assert offsets[-1] == data.shape[1], "offsets don't cover data"
+    assert (entry_of_code >= 0).sum() == len(keys), "dense table entry count mismatch"
+
+    # 2. value check on a random sample (set n_check = len(keys) for a full pass)
+    n_check = 5000
+    rng = random.Random(0)
+    for id_, q_name, class_key in rng.sample(keys, min(n_check, len(keys))):
+        orig_scalar, orig_arr = grid_dict[id_][q_name][class_key]
+        new_scalar, new_arr = grid_lookup(id_, q_name, class_key)
+
+        assert np.isclose(new_scalar, orig_scalar), \
+            f"scalar mismatch at {(id_, q_name, class_key)}: {orig_scalar} vs {new_scalar}"
+        orig_arr = np.asarray(orig_arr)
+        assert new_arr.shape == orig_arr.shape, \
+            f"shape mismatch at {(id_, q_name, class_key)}: {orig_arr.shape} vs {new_arr.shape}"
+        assert np.allclose(new_arr, orig_arr), \
+            f"array values mismatch at {(id_, q_name, class_key)}"
+
+    # 3. absence check: a code with no entry must raise KeyError / return -1
+    absent = np.flatnonzero(entry_of_code < 0)
+    if len(absent):
+        assert entry_of_code[absent[0]] == -1
+        print(f"absent codes: {len(absent):,} (correctly marked -1)")
+
+    print(f"verification passed on {min(n_check, len(keys)):,} random entries "
+          f"+ structural checks")
+
+    # ---------------------------------------------------------------- save
+    os.makedirs(save_dir, exist_ok=True)
+    np.save(os.path.join(save_dir, "grid_data.npy"), data)
+    np.save(os.path.join(save_dir, "grid_offsets.npy"), offsets)
+    np.save(os.path.join(save_dir, "grid_scalars.npy"), scalars_arr)
+    np.save(os.path.join(save_dir, "grid_entry_of_code.npy"), entry_of_code)
+    with open(os.path.join(save_dir, "grid_vocabs.pkl"), "wb") as f:
+        pickle.dump(vocabs, f)
+    print(f"saved to {save_dir}: grid_data.npy, grid_offsets.npy, "
+          f"grid_scalars.npy, grid_entry_of_code.npy, grid_vocabs.pkl")
+
 if __name__ == "__main__":
-    view_params()
+    #check_n_subjects_exclusion_criteria()
+    repack_grid_dict()
+    '''import psutil, os
+    def rss_gb(): return psutil.Process(os.getpid()).memory_info().rss / 1e9
+    base = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26"
+    print(f"before: {rss_gb():.2f}")
+    data = np.load(f"{base}/grid_data.npy", mmap_mode='r')
+    offsets = np.load(f"{base}/grid_offsets.npy")
+    scalars = np.load(f"{base}/grid_scalars.npy")
+    print(f"after arrays: {rss_gb():.2f}")
+    with open(f"{base}/grid_index.pkl", "rb") as f:
+        key_to_idx = pickle.load(f)
+    print(f"after index: {rss_gb():.2f}  |  len(key_to_idx) = {len(key_to_idx):,}")'''
     

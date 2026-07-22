@@ -22,6 +22,7 @@ import sys
 from functools import partial
 import pickle
 import cv2
+import gc
 
 from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform
 
@@ -553,7 +554,7 @@ def create_flattener_handedness_grid(transform_func,augmentation_transform, n_vi
                                 else:
                                     img = value # Fallback in case it somehow got decoded
                                 
-                                num,grid = grid_dict[subject_id][questionnaire][modality_type]
+                                num,grid = grid_lookup(grid_dict, subject_id, questionnaire, modality_type)
                                 x_coords = [0]+sorted(list(grid[0, :]))+[img.width]
                                 n_x = len(x_coords) -1
                                 y_coords = [0]+sorted(list(grid[1, :]))+[img.height]
@@ -824,7 +825,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         rescale_factor = questionnaire_info[str(X)]['rescale_factor']
 
         for current_mode in ALL_MODALITIES:
-            num, grid = grid_dict[original_id]['q' + str(X)][current_mode]
+            num, grid = grid_lookup(grid_dict, original_id, 'q' + str(X), current_mode)
 
             # indexes of modality_string_list matching the current mode
             mask = [j for j, m in enumerate(modality_string_list) if m == current_mode]
@@ -934,7 +935,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             if X not in subject_images:  # questionnaire not in the shard file
                 continue
 
-            num_filter_modality, _ = grid_dict[original_id]['q' + str(X)][filter_modality]
+            num_filter_modality, _ = grid_lookup(grid_dict, original_id, 'q' + str(X), filter_modality)
             if num_filter_modality <= 0:
                 # filter modality missing -> skip questionnaire
                 # (other missing modalities are imputed instead)
@@ -975,9 +976,8 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
     which questionnaires to sample for training
     case_grid_pattern is between 1 and 13
     case_dt can be missing (NaN) or numeric (remember is for the case only)'''
-    if train_df is None:
-        #print("IMPORTANT: Forcing censor_time to 'pre_diagnosis' because train_df is None")
-        censor_time = 'pre_diagnosis'
+    if train_df is None and censor_time != 'pre_diagnosis':
+        raise ValueError("train_df must be provided for censor_time other than 'pre_diagnosis' ")
     else:
         grid_pattern = train_df.loc[train_df['unique_id']==subject_id,'grid_pattern'].values[0]
 
@@ -1194,7 +1194,7 @@ def create_sequence_flattener_PD_grid(transform_func, augmentation_transform, n_
                     continue
                 #i skip the subject if the modality is not present (0 chunks)
                 original_id = subject_id.split('_')[0] #the original subject id is the first part of the subject_id
-                num, grid = grid_dict[original_id]['q'+str(X)][modality_string]
+                num, grid = grid_lookup(grid_dict, original_id, 'q' + str(X), modality_string)
                 if num <=0:
                     continue
                 raw_image_data = image_pool[X].get(modality_string)
@@ -1398,12 +1398,20 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     shard_files.sort()
         
     # 3. Build the WebDataset Pipeline
-    dataset = wds.WebDataset(shard_files, shardshuffle=100) #shuffle the shards, but not the samples inside the shards 
-
-    if split_workers:
-        dataset = dataset.select(wds.split_by_worker)
+    dataset = wds.WebDataset(shard_files, shardshuffle=100, 
+                             workersplitter=wds.split_by_worker if split_workers else None) #shuffle the shards, but not the samples inside the shards 
     
-    shuffle_buffer = exp_params.get('shuffle_buffer', 1000) if exp_params else 1000
+    
+    #measure the size of the first 50 samples in the dataset to estimate the mean and max sample size (before decoding)
+    #and determine the impact of retaining samples for shuffling
+    sizes = []
+    for i, sample in enumerate(dataset):   # raw wds dataset, before .shuffle/.compose
+        sizes.append(sum(len(v) for v in sample.values() if isinstance(v, bytes)))
+        if i == 50: break
+    print(f"MEMORY TEST --------------> mean sample: {np.mean(sizes)/1e6:.1f} MB, max: {np.max(sizes)/1e6:.1f} MB")
+    
+
+    shuffle_buffer = exp_params.get('shuffle_buffer', 100) if exp_params else 100
     if shuffle_buffer: 
         dataset = dataset.shuffle(shuffle_buffer) #shuffle the samples
 
@@ -1445,6 +1453,8 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
     def worker_init_fn(worker_id):
         # Force OpenCV to use a single thread per DataLoader worker process
         cv2.setNumThreads(0)
+        gc.collect()
+        gc.freeze()   # move inherited objects to permanent generation; GC won't touch them
 
     print(f"Reading from {SHARD_PATTERN_train} and {SHARD_PATTERN_val}..")
     augmentation_transform = get_augmentation_transform(exp_params)
@@ -1482,7 +1492,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
     ) #add collate_fn=lambda x: x,  if you want to bypass thedefault converter (default converter converts numpy to tensors)
     val_loader = DataLoader(
         val_dataset, 
-        num_workers=max(2, worker // 2), 
+        num_workers=2, 
         batch_size=None, 
         prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
         pin_memory=False, #creates a stall when true and variable size batches (eg custom collate)
@@ -1926,7 +1936,7 @@ def get_ids_data_from_h5_file_list(file_path, target_ids):
                 print(f"Total memory used until now: {total_size:.2f} MB", flush=True)
 
     return results
-def load_grid_dict(exp_params):
+def load_grid_dict_old(exp_params):
     if exp_params['use_grid']:
         """Load the grid dictionary from a pickle file."""
         with open(exp_params['grid_dict_path'], "rb") as f:
@@ -1936,6 +1946,29 @@ def load_grid_dict(exp_params):
     else:
         print("Grid usage is disabled. No grid dictionary will be loaded.")
         return None
+def load_grid_dict(exp_params):
+    if exp_params['use_grid']:
+        base = exp_params['grid_dict_path']  # wherever you saved step 1
+        packed = {
+            "data":          np.load(os.path.join(base, "grid_data.npy"), mmap_mode='r'),
+            "offsets":       np.load(os.path.join(base, "grid_offsets.npy")),
+            "scalars":       np.load(os.path.join(base, "grid_scalars.npy")),
+            "entry_of_code": np.load(os.path.join(base, "grid_entry_of_code.npy"), mmap_mode='r'),
+        }
+        with open(os.path.join(base, "grid_vocabs.pkl"), "rb") as f:
+            packed["vocabs"] = pickle.load(f)
+        return packed
+    else:
+        print("Grid usage is disabled. No grid dictionary will be loaded.")
+        return None
+def grid_lookup(packed, id_, q_name, class_key):
+    v = packed["vocabs"]
+    code = (v["id"][id_] * v["NQ"] + v["q"][q_name]) * v["NC"] + v["c"][class_key]
+    i = packed["entry_of_code"][code]
+    if i < 0:
+        raise KeyError((id_, q_name, class_key))
+    lo, hi = packed["offsets"][i], packed["offsets"][i + 1]
+    return packed["scalars"][i], packed["data"][:, lo:hi]
 
 #preparing the pre-training dataset (csv)
 def prepare_pre_training(df, data_selected_source):
@@ -1969,11 +2002,14 @@ def prepare_pre_training(df, data_selected_source):
 # Path selection
 def return_file_paths(problem,grouped,pre_training):
     if problem == 'PD' and not grouped and not pre_training:
-        list_of_ids_paths = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
-        data_folder = "/home/a_morelli/datasets/shards/PD/final_png_whitebg_21_07_26"
+        list_of_ids_paths = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet" 
+        #"/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
+        data_folder = '/mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26'
+        #"/mnt/beegfs02/scratch/a_morelli/model_training/PD/final_png_whitebg"
+        #"/home/a_morelli/datasets/shards/PD/final_png_whitebg_21_07_26"
         grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl"
     elif problem == 'PD' and pre_training:
         list_of_ids_paths = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet"
-        data_folder = "/home/a_morelli/datasets/shards/PDpretraining/final_png_whitebg_21_07_26"
-        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26.pkl"
+        data_folder = "/mnt/beegfs02/scratch/a_morelli/model_training/shards/PDpretraining/final_png_whitebg_21_07_26"
+        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26"
     return list_of_ids_paths, data_folder, grid_dict_path

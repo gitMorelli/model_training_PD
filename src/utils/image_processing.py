@@ -220,16 +220,11 @@ _GRID_CACHE: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
 
 
 def _identity_grid(H: int, W: int) -> tuple[np.ndarray, np.ndarray]:
-    key = (H, W)
-    g = _GRID_CACHE.get(key)
-    if g is None:
-        xs, ys = np.meshgrid(
-            np.arange(W, dtype=np.float32),
-            np.arange(H, dtype=np.float32),
-        )
-        g = (np.ascontiguousarray(xs), np.ascontiguousarray(ys))
-        _GRID_CACHE[key] = g
-    return g
+    xs, ys = np.meshgrid(
+        np.arange(W, dtype=np.float32),
+        np.arange(H, dtype=np.float32),
+    )
+    return np.ascontiguousarray(xs), np.ascontiguousarray(ys)
 
 
 def _affine_inv(ink: np.ndarray, M: np.ndarray) -> np.ndarray:

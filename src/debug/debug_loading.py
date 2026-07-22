@@ -43,8 +43,8 @@ from src.debug.create_statistics_on_images import read_loader
 params = {
     'selected_problem': "PD",#"PD", # "handedness"
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'pre_training': True,
-    'debug': True,
+    'pre_training': False,
+    'debug': False,
 
     'pre_filter_csv': False,
     'integrate_csv': False,
@@ -124,8 +124,8 @@ VERBOSE = True
 
 
 def main(params,run_random_samples_from_loader=False, 
-         run_study_loader = True, show_grids=False, 
-         run_compute_time= False, run_debug_from_shards=False,
+         run_study_loader = False, show_grids=False, 
+         run_compute_time= True, run_debug_from_shards=False,
          run_explore_files=False):
     args = get_args()
     random.seed(params['seed'])
@@ -153,11 +153,13 @@ def main(params,run_random_samples_from_loader=False,
                                         mean=mean, std=std, no_text=False, pre_filtered_csv=pre_filtered_csv)
     
     if run_compute_time:
-        compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=pre_filtered_csv)
+        compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=pre_filtered_csv, per_batch=True)
     
     if run_study_loader:
-        df = study_dataloader(args, params, max_batches=10)
+        df = study_dataloader(args, params, max_batches=None)
         print(df.head())
+        #save the dataframe to a csv file
+        df.to_csv(os.path.join('/home/a_morelli/datasets/others', "dataset_overview.csv"), index=False)
 
     ### From here they work only for the handedness case #####
     if show_grids:

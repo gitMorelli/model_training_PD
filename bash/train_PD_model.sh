@@ -4,14 +4,14 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=22             # Number of CPU cores per task
+#SBATCH --cpus-per-task=32             # Number of CPU cores per task
 #SBATCH --mem=124G                      # Job memory request
-#SBATCH --time=12:00:00                # Time limit hrs:min:sec
+#SBATCH --time=10:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
 #--gres=gpu:1
-#SBATCH --gres=gpu:h100:1
+#SBATCH --gres=gpu:v100:1
 #--gres=gpu:v100:1
 #--gres=gpu:p40:1
 #--nodelist=gpu05
@@ -30,6 +30,9 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export PYTHONUNBUFFERED=1  
+#export MALLOC_ARENA_MAX=2
+#export LD_PRELOAD=/home/a_morelli/.conda/envs/torch_gpu/lib/libjemalloc.so
 
 # --- Execution ---
 # You can run the script from any location using its full path
@@ -41,6 +44,7 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.train_PD_model \
-    --num_workers 18
+    --num_workers 28
 echo "PYTORCH_CUDA_ALLOC_CONF=$PYTORCH_CUDA_ALLOC_CONF"
 nvidia-smi --query-gpu=name,memory.total --format=csv
+

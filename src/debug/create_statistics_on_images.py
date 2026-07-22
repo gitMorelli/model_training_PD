@@ -174,17 +174,17 @@ def main(params):
             print("No duplicates found based on subject_id, questionnaire, and modality_type.")
         #create a timestamp
     elif params['selected_problem'] == "PD":
-        max_batches=None
+        max_batches=300
         train_loader, val_loader = get_dataloader(args,params)
         print("#"*100)
         print("*"*100)
         print("#"*100)
-        result_df_train = read_loader(train_loader, max_batches=max_batches)  
+        result_df_train = read_loader(train_loader, create_row, max_batches=max_batches) 
         '''with pd.option_context('display.max_columns', None, 'display.max_colwidth', None):
             print("Train DataFrame:")
             print(result_df_train.head())'''
         result_df_train['split'] = 'train'
-        result_df_val = read_loader(val_loader, max_batches=max_batches)
+        result_df_val = read_loader(val_loader, create_row, max_batches=max_batches)
         result_df_val['split'] = 'val'
         df = pd.concat([result_df_train, result_df_val], ignore_index=True)
     timestamp = time.strftime("%d%m%Y")
@@ -212,8 +212,9 @@ def get_dataloader(args,params):
     if params['selected_problem'] == "PD":
         #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
         exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col='diag_park_final1_quest')
+        train_df = pd.read_parquet(params['list_of_ids_paths'])
         train_loader,val_loader,_,_= prepare_loaders_PD(worker,params['prefetch_factor'],params, exclusion_set, val_exclusion_set,
-                                                         grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val)
+                                                         grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=train_df)
     else:
         raise ValueError(f"Unknown selected_problem: {params['selected_problem']}")
 
@@ -241,9 +242,18 @@ def create_row(qs,sid, smodalities, smeta):
             #row[f'q_{q}_sharpness_{map_modality(modality)}'] = meta['sharpness']
             #row[f'q_{q}_imputed_{modality}'] = meta['imputed'] #never imputed for any questionnaire -> irrelevant
     return row
-def read_loader(loader, create_row,subject_ids=None, slot_to_q=None, max_batches=None):
+def read_loader(loader, create_row, slot_to_q=None, max_batches=None):
     list_of_rows = []
     n_batch = 0
+    counters = [0 for _ in range(13)] #initialize a counter for each questionnaire (0-12)
+
+    if slot_to_q is None: #slot_ids goes from 0 to 12 -> i have to add 1 to obtain the name of the questionnaire
+        slot_name = lambda s: f"{s + 1}"
+    elif callable(slot_to_q):
+        slot_name = slot_to_q
+    else:
+        slot_name = lambda s: slot_to_q.get(s, f"{s + 1}")
+
     for batch in loader:
         # unpack, tolerating the 5- or 6-element variant
         frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities = batch
@@ -253,13 +263,6 @@ def read_loader(loader, create_row,subject_ids=None, slot_to_q=None, max_batches
         lengths  = lengths.cpu()
         B = lengths.size(0)
         N = seq_ids.size(0)
-
-        if slot_to_q is None: #slot_ids goes from 0 to 12 -> i have to add 1 to obtain the name of the questionnaire
-            slot_name = lambda s: f"{s + 1}"
-        elif callable(slot_to_q):
-            slot_name = slot_to_q
-        else:
-            slot_name = lambda s: slot_to_q.get(s, f"{s + 1}")
 
         # consistency check: lengths must match the frame counts implied by seq_ids
         counts = torch.bincount(seq_ids, minlength=B)
@@ -276,6 +279,12 @@ def read_loader(loader, create_row,subject_ids=None, slot_to_q=None, max_batches
             slots = slot_ids[sel].tolist()
 
             qs    = [slot_name(s) for s in slots] #get the questionnaires for this subject
+            #add 1 to the corresponding counter for each questionnaire
+            for q in qs:
+                q_index = int(q) - 1 #convert to int and subtract 1 to get the index
+                counters[q_index] += 1
+                if q_index < 0 or q_index >= len(counters):
+                    raise ValueError(f"Questionnaire index {q_index} out of range for counters list.")
 
             sid = subject_ids[b] if subject_ids is not None else f"subject_{b}" # get the subject id
 
@@ -287,6 +296,10 @@ def read_loader(loader, create_row,subject_ids=None, slot_to_q=None, max_batches
                 list_of_rows.extend(row)
             else:
                 list_of_rows.append(row)
+        if n_batch % 10 == 0:
+            print(f"Processed {n_batch} batches, total rows collected: {len(list_of_rows)}")
+            print(f"Current counts per questionnaire: {counters}", flush=True)
+            print("#"*50)
         
         n_batch += 1
         if max_batches is not None and n_batch >= max_batches:
