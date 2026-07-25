@@ -290,19 +290,6 @@ class CustomLogreg(nn.Module):
 
 #Pretrained CNN models
 def get_resnet(name,mode, pretrained, **kwargs):
-    def load_ln_checkpoint_for_resnet(full_model,checkpoint,custom_pre_trained_weights):
-        if custom_pre_trained_weights:
-            state_dict = checkpoint['state_dict'] 
-            # Strip the "model." prefix added by LightningModule
-            stripped = {k.removeprefix('model.'): v for k, v in state_dict.items()}
-            keys_to_remove = [k for k in stripped if k.startswith('fc.')]
-            print("Removing keys:", keys_to_remove)  # sanity check
-            for k in keys_to_remove:
-                stripped.pop(k)
-            result = full_model.load_state_dict(stripped, strict=False)  # skips fc.weight / fc.bias 
-            print("Missing keys:", result.missing_keys)    # in model but not in checkpoint
-            print("Unexpected keys:", result.unexpected_keys)  # in checkpoint but not in model
-        return full_model
     def grayscale_version(model):
         old = model.conv1
         new = nn.Conv2d(1, old.out_channels,
@@ -320,16 +307,10 @@ def get_resnet(name,mode, pretrained, **kwargs):
         return model
     from torchvision.models import resnet50, ResNet50_Weights, resnet18, ResNet18_Weights, resnet34, ResNet34_Weights, resnet101, ResNet101_Weights
     
-    custom_pre_trained_weights = kwargs.get('custom_pre_trained_weights', None)
     grayscale = kwargs.get('grayscale', False)
-    if custom_pre_trained_weights:
-        checkpoint = torch.load(custom_pre_trained_weights)
-        pretrained = False
     if name in ['resnet34_layer1','resnet34_layer2','resnet34_layer3']:
         weights = ResNet34_Weights.IMAGENET1K_V1 if pretrained else None
         full_model = resnet34(weights=weights)
-        #full_model.load_state_dict(checkpoint['model_state_dict']) if custom_pre_trained_weights else None #torch
-        full_model = load_ln_checkpoint_for_resnet(full_model,checkpoint, custom_pre_trained_weights)
         if name=='resnet34_layer1':
             layers = nn.Sequential(
                 full_model.conv1,
@@ -384,9 +365,7 @@ def get_resnet(name,mode, pretrained, **kwargs):
         elif name=='resnet101':
             weights = ResNet101_Weights.DEFAULT if pretrained else None
             model = resnet101(weights=weights)
-        #model.load_state_dict(checkpoint['model_state_dict']) if custom_pre_trained_weights else None
-        if custom_pre_trained_weights:
-            model = load_ln_checkpoint_for_resnet(model,checkpoint, custom_pre_trained_weights)
+        
         model.fc = torch.nn.Identity()
         if grayscale:
             model = grayscale_version(model)
@@ -718,6 +697,32 @@ def load_backbone_from_lightning_ckpt(backbone, ckpt_path):
     
     print(f"Successfully loaded {len(backbone_state_dict)} tensors into the backbone.")
     return backbone
+
+#Load from custom checkpoint
+def load_ln_checkpoint(full_model,custom_pre_trained_weights):
+    if custom_pre_trained_weights is not None:
+        checkpoint = torch.load(custom_pre_trained_weights, map_location=torch.device('cpu'))
+        state_dict = checkpoint['state_dict'] 
+        prefix = "model."  # set to "" if there's no wrapper prefix
+        backbone_weights = {
+            k[len(prefix):]: v
+            for k, v in state_dict.items()
+            if k[len(prefix):].startswith("vision_model.")
+        }
+
+        '''keys_to_remove = [k for k in stripped if k.startswith('fc.')]
+        print("Removing keys:", keys_to_remove)  # sanity check
+        for k in keys_to_remove:
+            stripped.pop(k)'''
+        
+        missing, unexpected = full_model.load_state_dict(backbone_weights, strict=False)
+
+        assert not unexpected, f"Unexpected keys: {unexpected}"
+        assert all(not k.startswith("vision_model.") for k in missing), \
+            f"Some backbone weights didn't load: {[k for k in missing if k.startswith('vision_model.')]}"
+
+        print(f"Loaded weights into the backbone from {custom_pre_trained_weights}.")
+    return full_model
 
 #Multiple instance learning modules
 class GatedAttentionPool(nn.Module):

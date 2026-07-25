@@ -33,7 +33,7 @@ import cProfile, pstats
 
 from src.utils.data_loading_utils import melt_df, prepare_loaders_PD, prepare_exclusion_sets_PD, merge_properties_from_full_dataset_PD, synthetic_data_override
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
-from src.utils.data_loading_utils import return_file_paths
+from src.utils.data_loading_utils import return_file_paths, load_grid_dict
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.visualization import debug_images_dataset, save_img_with_info_views, save_img_with_info, tensor_debug_info, debug_images_PD
 from src.utils.visualization import SubjectViewer, launch_interactive_PD
@@ -56,7 +56,8 @@ params = {
                                'case_grid_pattern','q_5_num_X',
                                'synth_label'],
 
-    "data_modality": ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
+    "data_modality": ['X_window' for _ in range(2)]+['digit_window' for _ in range(2)]+['text_window' for _ in range(2)],
+    #['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     "num_tiles": 3,
     'synthetic': None,#ALL_SYNTHETIC_TRANSFORMS, #or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
@@ -70,15 +71,14 @@ params = {
     "apply_augmentation": 'random_crop_half',#'random_crop_half', #None, 
     "invert_color": True,
     "use_grid": True,
+    "to_grayscale": True,
 
     "seed": 42,
     "balanced_data": True,
     'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
-    "balancing_factor": 2,
+    "balancing_factor": 1,
     "majority_class_id": 0,
     "threshold_num": 1,
-    "invert_color": True,
-    "to_grayscale": False,
     'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
     'censor_time': 'all', #long (keep only long sequences)
@@ -93,7 +93,7 @@ params = {
 
 }
 
-params['list_of_ids_paths'], params['data_folder'], params["h5_data_path"] = return_file_paths(params['selected_problem'], 
+params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths(params['selected_problem'], 
                                                                                                  params['grouped'], params['pre_training'])
 params = set_automatic_hyperparameters(params)
 
@@ -125,7 +125,7 @@ VERBOSE = True
 
 def main(params,run_random_samples_from_loader=False, 
          run_study_loader = False, show_grids=False, 
-         run_compute_time= True, run_debug_from_shards=False,
+         run_compute_time = True, run_debug_from_shards=False,
          run_explore_files=False):
     args = get_args()
     random.seed(params['seed'])
@@ -149,11 +149,11 @@ def main(params,run_random_samples_from_loader=False,
         if params['interactive_visualization']:
             interactive_random_samples(args, params, batches_to_show=3,mean=mean, std=std,pre_filtered_csv=pre_filtered_csv)
         else:
-            random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=6, 
+            random_samples_from_dataloader(args,params, out_folder=os.path.join(SAVE_PATH, "random_samples"), batches_to_show=3, 
                                         mean=mean, std=std, no_text=False, pre_filtered_csv=pre_filtered_csv)
     
     if run_compute_time:
-        compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=pre_filtered_csv, per_batch=True)
+        compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=pre_filtered_csv, per_batch=False)
     
     if run_study_loader:
         df = study_dataloader(args, params, max_batches=None)
@@ -424,12 +424,8 @@ def run_pre_filtering(params, subgroup='all',verbose = True):
 def get_dataloader(args,params,pre_filtered_csv):
     worker = args.num_workers
 
-    grid_dict = None
-    if params['use_grid']:
-        with open(params['h5_data_path'], "rb") as f:
-            grid_dict = pickle.load(f)
-        print("Grid dictionary loaded successfully. Number of entries:", len(grid_dict))
-
+    grid_dict = load_grid_dict(params)
+    
     augmentation_transform = get_augmentation_transform(params) 
 
     transform = get_transforms(params, None)
@@ -568,6 +564,8 @@ def compute_time_to_iterate_on_dataloader(args, params, pre_filtered_csv=None, p
         end = time.time()
         elapsed_time = end - start
         print(f"Time taken to iterate over the dataloader: {elapsed_time:.2f} seconds")
+        print(f"Number of batches processed: {batch_idx + 1}")
+        print(f"Average time per batch: {elapsed_time / (batch_idx + 1):.4f} seconds")
     
     '''ds = iter(train_dataset)      # bypass DataLoader, single process
     for _ in range(3): next(ds)

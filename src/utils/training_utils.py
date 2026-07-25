@@ -15,7 +15,12 @@ import torchvision.utils as vutils
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger
-from torchmetrics.classification import MulticlassRecall
+from torchmetrics import MetricCollection
+from torchmetrics.classification import (
+    MulticlassRecall,
+    BinaryAveragePrecision,   BinaryF1Score,       BinaryMatthewsCorrCoef,
+    MulticlassAveragePrecision, MulticlassF1Score, MulticlassMatthewsCorrCoef,
+)
 import random
 import shutil
 #from lightning.pytorch.loggers import CSVLogger
@@ -409,7 +414,7 @@ class ModelPDBase(L.LightningModule):
     """Shared machinery: forward, optimizers/schedulers, epoch logging,
     gradient checks, class-ratio bookkeeping. Subclasses implement
     `compute_loss_and_metrics(batch, stage)`."""
- 
+
     def __init__(self, write_log, model,
                  total_units,                      # subjects (flat) or groups (grouped)
                  num_classes=1,
@@ -422,7 +427,7 @@ class ModelPDBase(L.LightningModule):
         self.write_log = write_log
         self.model = model
         self.opt_groups = opt_groups
- 
+
         self.num_classes = num_classes
         self.lr_backbone = lr_backbone
         self.lr_classifier_head = lr_classifier_head
@@ -432,27 +437,27 @@ class ModelPDBase(L.LightningModule):
         self.warmup_fraction = warmup_fraction
         self.eta_min_cosine = eta_min_cosine
         self.batch_size = batch_size
- 
+
         # NOTE: `total_units` counts *whatever the loader batches*:
         # subjects for the flat loader, groups for the grouped loader.
         self.total_units = total_units
         self.total_steps = int(self.num_epochs * (total_units // batch_size))
- 
+
         if example_input_array is not None:
             self.example_input_array = example_input_array
- 
+
         # bookkeeping shared by both regimes
         self.train_sample_count = 0
- 
-        # CHANGED: class counts + per-class hit counts live in one dict per stage.
+
+        # class counts + per-class hit counts live in one dict per stage.
         # correct_k = number of samples with true label k that were predicted k
         # -> recall_k = correct_k / n_k, balanced_acc = mean(recall_k)
-        self._stats = {"train": self._empty_stats(), "val": self._empty_stats()}  # NEW
- 
+        self._stats = {"train": self._empty_stats(), "val": self._empty_stats()}
+
     # ---- forward ------------------------------------------------------------
     def forward(self, frames, seq_ids, slot_ids, lengths):
         return self.model(frames, seq_ids, slot_ids, lengths)
- 
+
     @staticmethod
     def make_example_input(k, n_slots, n_views_frames=2, C=3, H=224, W=224):
         T = min(n_views_frames, n_slots)
@@ -461,139 +466,151 @@ class ModelPDBase(L.LightningModule):
         slot_ids = torch.arange(T, dtype=torch.long)
         lengths = torch.tensor([T])
         return (frames, seq_ids, slot_ids, lengths)
- 
+
     # ---- steps delegate to the subclass --------------------------------------
     def compute_loss_and_metrics(self, batch, stage):
         """Return the loss tensor (or None to skip the step) for stage='train';
         return value is ignored for stage='val'."""
         raise NotImplementedError
- 
+
     def training_step(self, batch, batch_idx):
         return self.compute_loss_and_metrics(batch, "train")
- 
+
     def validation_step(self, batch, batch_idx):
         self.compute_loss_and_metrics(batch, "val")
- 
+
     # ---- small shared helpers -------------------------------------------------
     def _guard_finite(self, tensor, what):
         if not torch.isfinite(tensor).all():
             self.write_log(f"Warning: NaN/inf in {what} at step {self.trainer.global_step}. Skipping.")
             return False
         return True
- 
+
     def _log_lrs(self):
         opt = self.optimizers()
-        if self.opt_groups:
-            logged = set()
-            for g in opt.param_groups:
-                name = g.get('lr_name')
-                if name and name not in logged:
-                    self.log(name, g['lr'], on_step=False, on_epoch=True)
-                    logged.add(name)
-        else:
-            self.log("lr_backbone",        opt.param_groups[0]['lr'], on_step=False, on_epoch=True)
-            self.log("lr_classifier_head", opt.param_groups[1]['lr'], on_step=False, on_epoch=True)
- 
-    # ---------- NEW: metric bookkeeping ---------------------------------------
-    @staticmethod
-    def _empty_stats():
-        return {"n0": 0, "n1": 0, "correct_0": 0, "correct_1": 0}
- 
+        logged = set()
+        for g in opt.param_groups:
+            name = g.get('lr_name')
+            if name and name not in logged:
+                self.log(f'lr/{name}', g['lr'], on_step=False, on_epoch=True)
+                logged.add(name)
+
+    # ---------- metric bookkeeping (manual counts / balanced acc) --------------
+    @property
+    def _n_stat_classes(self):
+        """2 for the BCE head (num_classes == 1), else num_classes."""
+        return 2 if self.num_classes <= 1 else self.num_classes
+
+    def _empty_stats(self):
+        k = self._n_stat_classes
+        return {"n": [0] * k, "correct": [0] * k}
+
     def _logits_to_preds(self, logits):
         """Binary (1 logit / no class dim) -> sigmoid threshold; else argmax."""
         logits = logits.detach()
         if self.num_classes <= 1 or logits.ndim == 1 or logits.shape[-1] == 1:
             return (torch.sigmoid(logits.reshape(-1)) > 0.5).long()
         return logits.argmax(dim=-1).reshape(-1)
- 
+
     def _update_class_counts(self, labels, stage, preds=None):
-        """CHANGED: same signature as before (so existing subclass calls keep
-        working) + optional `preds` to also accumulate balanced-accuracy stats."""
+        k = self._n_stat_classes
         t = labels.detach().long().view(-1)
+        if t.numel() and (t.min() < 0 or t.max() >= k):
+            raise ValueError(f"labels contain values outside [0, {k})")
         s = self._stats[stage]
-        m0, m1 = (t == 0), (t == 1)
-        s["n0"] += int(m0.sum().item())
-        s["n1"] += int(m1.sum().item())
+        n = torch.bincount(t, minlength=k).tolist()
+        for i in range(k):
+            s["n"][i] += n[i]
         if preds is not None:
             p = preds.detach().long().view(-1)
-            s["correct_0"] += int(((p == 0) & m0).sum().item())
-            s["correct_1"] += int(((p == 1) & m1).sum().item())
- 
+            hit = torch.bincount(t[p == t], minlength=k).tolist()
+            for i in range(k):
+                s["correct"][i] += hit[i]
+
     def _update_metrics(self, logits, labels, stage):
-        """NEW: convenience wrapper — call this from `compute_loss_and_metrics`
+        """Convenience wrapper — call this from `compute_loss_and_metrics`
         instead of `_update_class_counts` and you get balanced accuracy for free."""
         self._update_class_counts(labels, stage, preds=self._logits_to_preds(logits))
- 
-    # ---------- NEW: TensorBoard helpers --------------------------------------
+
+    # ---------- TensorBoard helpers -------------------------------------------
     def _sum_across_ranks(self, value):
-        """Sum a python int over DDP ranks (no-op on a single process)."""
+        """Sum an int, or elementwise-sum a list of ints, over DDP ranks."""
+        seq = isinstance(value, (list, tuple))
         try:
             world = self.trainer.world_size
         except RuntimeError:
-            return int(value)
+            world = 1
         if world <= 1:
-            return int(value)
-        t = torch.tensor(float(value), device=self.device)
-        return int(self.all_gather(t).sum().item())
- 
+            return [int(v) for v in value] if seq else int(value)
+        t = torch.tensor([float(v) for v in value] if seq else float(value),
+                         device=self.device)
+        out = self.all_gather(t).sum(dim=0)          # (world,) or (world, k)
+        return [int(x) for x in out] if seq else int(out.item())
+
     def _log_class_metrics(self, stage):
-        """NEW: class counts, ratio, per-class recall, balanced accuracy.
-        Every value goes through self.log() as its own scalar tag."""
         s = self._stats[stage]
-        n0 = self._sum_across_ranks(s["n0"])
-        n1 = self._sum_across_ranks(s["n1"])
-        c0 = self._sum_across_ranks(s["correct_0"])
-        c1 = self._sum_across_ranks(s["correct_1"])
- 
-        recall_0 = c0 / n0 if n0 > 0 else float("nan")
-        recall_1 = c1 / n1 if n1 > 0 else float("nan")
- 
-        # individual scalars (each its own TB chart, grouped under the stage tag)
-        self.log(f"{stage}_class_0_count", float(n0), prog_bar=False, rank_zero_only=True)
-        self.log(f"{stage}_class_1_count", float(n1), prog_bar=False, rank_zero_only=True)
-        self.log(f"{stage}_class_ratio", n0 / n1 if n1 > 0 else float("inf"),
-                 prog_bar=False, rank_zero_only=True)
- 
-        if n0 > 0 and n1 > 0:
-            balanced_acc = 0.5 * (recall_0 + recall_1)
-            self.log(f"{stage}_recall_class_0", recall_0, prog_bar=False, rank_zero_only=True)
-            self.log(f"{stage}_recall_class_1", recall_1, prog_bar=False, rank_zero_only=True)
-            self.log(f"{stage}_balanced_accuracy", balanced_acc,
-                     prog_bar=(stage == "val"), rank_zero_only=True)
+        n = self._sum_across_ranks(s["n"])
+        c = self._sum_across_ranks(s["correct"])
+        k, total = len(n), sum(n)
+
+        recalls = [c[i] / n[i] if n[i] > 0 else float("nan") for i in range(k)]
+
+        # CHANGED: all counts now live under "{stage}/class_counts/..."
+        for i in range(k):
+            self.log(f"{stage}/class_counts/class_{i}_count", float(n[i]),
+                     rank_zero_only=True)
+            if total > 0:
+                self.log(f"{stage}/class_counts/class_{i}_fraction", n[i] / total,
+                         rank_zero_only=True)
+
+        if k == 2:   # keep the familiar binary chart
+            self.log(f"{stage}/class_counts/class_ratio",
+                     n[0] / n[1] if n[1] > 0 else float("inf"), rank_zero_only=True)
         else:
-            balanced_acc = float("nan")
- 
-        self.write_log(
-            f"[Epoch {self.current_epoch + 1}] {stage}: n0={n0} n1={n1} "
-            f"recall0={recall_0:.4f} recall1={recall_1:.4f} balanced_acc={balanced_acc:.4f}\n"
-        )
+            self.log(f"{stage}/class_counts/imbalance_ratio",
+                     max(n) / min(n) if min(n) > 0 else float("inf"),
+                     rank_zero_only=True)
+
+        for i, r in enumerate(recalls):
+            if r == r:                                # skip NaN
+                self.log(f"{stage}/recall_class_{i}", r, rank_zero_only=True)
+
+        balanced_acc = (sum(recalls) / k
+                        if all(r == r for r in recalls) else float("nan"))
+        if balanced_acc == balanced_acc:
+            self.log(f"{stage}/balanced_accuracy", balanced_acc,
+                     prog_bar=(stage == "val"), rank_zero_only=True)
+
+        counts_str = " ".join(f"n{i}={n[i]}" for i in range(k))
+        rec_str = " ".join(f"recall{i}={recalls[i]:.4f}" for i in range(k))
+        self.write_log(f"[Epoch {self.current_epoch + 1}] {stage}: {counts_str} "
+                       f"{rec_str} balanced_acc={balanced_acc:.4f}\n")
         self._stats[stage] = self._empty_stats()
- 
+
     # ---- epoch hooks ------------------------------------------------------------
     def on_train_epoch_start(self):
         if self.current_epoch == 0:
             self.write_log(f"Device of model at start of training: {next(self.model.parameters()).device}")
         self.train_sample_count = 0
- 
+
     def _log_epoch_summary_extras(self):
         """Subclasses may append regime-specific lines to the epoch summary."""
         pass
- 
+
     def on_train_epoch_end(self):
         WHITE = "\033[97m"
         RED = "\033[91m"
         RESET = "\033[0m"
- 
+
         # 0. Map each parameter to its optimizer group's current lr (and name)
         param_lr = {}
         optimizer = self.optimizers()
-        # self.optimizers() may return a single optimizer or a list
         optimizers = optimizer if isinstance(optimizer, (list, tuple)) else [optimizer]
         for opt in optimizers:
             for group in opt.param_groups:
                 for p in group["params"]:
                     param_lr[id(p)] = (group["lr"], group.get("lr_name", "?"))
- 
+
         # 1. Walk every parameter in model order
         all_layers_info = []
         total_trainable_params = 0
@@ -608,23 +625,23 @@ class ModelPDBase(L.LightningModule):
             else:
                 all_layers_info.append(f"{RED}{layer_str}{RESET}")
                 total_non_trainable_params += param.numel()
- 
+
         total_params = total_trainable_params + total_non_trainable_params
- 
+
         self.write_log(
             f"\n[Epoch {self.current_epoch + 1}] "
             f"Total Parameters: {total_params:,} | "
             f"{WHITE}Trainable: {total_trainable_params:,}{RESET} | "
             f"{RED}Non-trainable: {total_non_trainable_params:,}{RESET}"
         )
- 
+
         if self.current_epoch in [0, 5]:
             self.write_log(f"\n--- Epoch {self.current_epoch + 1} Summary ---")
             self.write_log(f"Expected number of stepping batches: {self.trainer.estimated_stepping_batches}")
             self.write_log(f"Epoch {self.current_epoch + 1}: Total Training Samples Processed: {self.train_sample_count}\n")
             self.write_log(f"Expected total units (subjects or groups): {self.total_units}\n")
             self._log_epoch_summary_extras()
- 
+
             self.write_log("\n--- Model Architecture Summary ---\n")
             self.write_log(f"Total Parameters Count: {total_params:,}\n")
             self.write_log(f"Total Trainable Parameters Count: {total_trainable_params:,}\n")
@@ -632,15 +649,15 @@ class ModelPDBase(L.LightningModule):
             self.write_log("Model Layers Structure (white = trainable, red = frozen):\n")
             for layer_info in all_layers_info:
                 self.write_log(f"{layer_info}\n")
- 
-        self._log_class_metrics("train")   # CHANGED: replaces the manual ratio block
- 
+
+        self._log_class_metrics("train")
+
     def on_validation_epoch_end(self):
-        self._log_class_metrics("val")     # CHANGED
- 
+        self._log_class_metrics("val")
+
     # ---- optimizers ---------------------------------------------------------------
     def configure_optimizers(self):
- 
+
         def split_decay(named_params):
             """(decay, no_decay): exclude bias and 1-D (BatchNorm/LayerNorm) params from weight decay."""
             decay, no_decay = [], []
@@ -652,14 +669,14 @@ class ModelPDBase(L.LightningModule):
                 else:
                     decay.append(p)
             return decay, no_decay
- 
+
         def add_group(named, lr, lr_name):
             decay, no_decay = split_decay(named)
             if decay:
                 param_groups.append({'params': decay,    'lr': lr, 'weight_decay': self.weight_decay, 'lr_name': lr_name})
             if no_decay:
                 param_groups.append({'params': no_decay, 'lr': lr, 'weight_decay': 0.0, 'lr_name': lr_name})
- 
+
         param_groups = []
         if self.opt_groups:
             assigned = {}  # param name -> lr_name of the group that claimed it (first match wins)
@@ -667,8 +684,7 @@ class ModelPDBase(L.LightningModule):
                 matched = [(name, param) for name, param in self.model.named_parameters()
                            if any(key in name.lower() for key in group['names'])
                            and param.requires_grad]
- 
-                # Split into new claims vs. names already claimed by an earlier group
+
                 named = [(name, param) for name, param in matched if name not in assigned]
                 duplicates = [name for name, _ in matched if name in assigned]
                 if duplicates:
@@ -678,11 +694,10 @@ class ModelPDBase(L.LightningModule):
                             f"group '{group['lr_name']}' but was already assigned to "
                             f"group '{assigned[name]}' (first group in order wins).\n"
                         )
- 
+
                 assigned.update({name: group['lr_name'] for name, _ in named})
                 add_group(named, group['lr'], group['lr_name'])
- 
-            # Leftover check: every trainable parameter must belong to some group.
+
             leftover = [name for name, param in self.model.named_parameters()
                         if param.requires_grad and name not in assigned]
             if leftover:
@@ -702,13 +717,13 @@ class ModelPDBase(L.LightningModule):
                     backbone.append((name, param))
             add_group(backbone, self.lr_backbone, 'lr_backbone')
             add_group(head, self.lr_classifier_head, 'lr_head')
- 
+
         optimizer = optim.AdamW(param_groups)
- 
+
         if self.lr_scheduling == 'cosine':
             total_steps = self.total_steps
             warmup_steps = max(1, int(self.warmup_fraction * total_steps))
- 
+
             warmup = torch.optim.lr_scheduler.LinearLR(
                 optimizer, start_factor=1e-2, end_factor=1.0, total_iters=warmup_steps)
             cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -720,7 +735,7 @@ class ModelPDBase(L.LightningModule):
                 "lr_scheduler": {"scheduler": scheduler, "interval": "step", "frequency": 1},
             }
         return {"optimizer": optimizer}
- 
+
     # ---- gradient sanity check ------------------------------------------------------
     def on_after_backward(self):
         if self.trainer.global_step == 0:
@@ -733,7 +748,8 @@ class ModelPDBase(L.LightningModule):
                         if grad_abs_mean < 1e-8:
                             self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
             self.write_log("-------------------------------------\n")
- 
+
+
 # Flat regime: standard BCE / CE training (original ModelPD behaviour)
 class ModelPDClassification(ModelPDBase):
     """Per-subject classification supporting an arbitrary number of classes.
@@ -764,13 +780,9 @@ class ModelPDClassification(ModelPDBase):
             raise ValueError("class_counts must be a 1-D sequence with >= 2 entries "
                              "(e.g. [n_class0, n_class1, ...]).")
 
-        # Infer multiclass num_classes from the counts when not given.
-        # Binary BCE (num_classes=1) must be requested explicitly.
         if num_classes is None:
             num_classes = counts.numel()
 
-        # Effective number of classes for the weight formula: the BCE head is a
-        # 2-class problem even though its num_classes == 1.
         n_eff = 2 if num_classes == 1 else num_classes
         if counts.numel() != n_eff:
             raise ValueError(
@@ -788,17 +800,16 @@ class ModelPDClassification(ModelPDBase):
 
         # ---- balancing weights -------------------------------------------------
         raw_weights = self.total / (n_eff * counts.clamp(min=1.0))
-        # interpolate toward uniform (1.0): factor 0 -> off, 1 -> full balancing
         class_weights = 1.0 + balancing_factor * (raw_weights - 1.0)
         self.register_buffer("class_weights", class_weights)
 
-        # pos_weight for BCE = count_neg / count_pos, same interpolation applied
         raw_pos = (counts[0] / counts[1]) if counts[1] > 0 else torch.tensor(1.0)
         pos_weight = 1.0 + balancing_factor * (raw_pos - 1.0)
         self.register_buffer("pos_weight",
                              pos_weight.reshape(1).to(torch.float32))
 
-        # ---- criterion ---------------------------------------------------------
+        # ---- criteria ----------------------------------------------------------
+        # Weighted criterion = training objective (unchanged).
         if num_classes == 1:
             self.criterion = (nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
                               if use_balanced_weights else nn.BCEWithLogitsLoss())
@@ -806,7 +817,57 @@ class ModelPDClassification(ModelPDBase):
             self.criterion = (nn.CrossEntropyLoss(weight=self.class_weights)
                               if use_balanced_weights else nn.CrossEntropyLoss())
 
+        # NEW: unweighted criterion, val-only, as a *calibration diagnostic*.
+        # This is the proper NLL under val's actual class prior — NOT a
+        # selection metric (its constant-predictor optimum is the base rate,
+        # so it would reward the majority-leaning degenerate solution).
+        self.criterion_unweighted = (nn.BCEWithLogitsLoss() if num_classes == 1
+                                     else nn.CrossEntropyLoss())
+
+        # kept for backward compatibility (macro recall == balanced accuracy)
         self.val_balanced_acc = MulticlassRecall(num_classes=n_eff, average="macro")
+
+        # ---- NEW: pr-auc / f1(pos) / mcc as torchmetrics objects --------------
+        # n_eff == 2 covers BOTH the 1-logit BCE head and a 2-logit CE head:
+        #   -> Binary* metrics, F1 is the positive-class (label 1) F1,
+        #      PR-AUC is average precision of the positive class.
+        # n_eff  > 2 -> Multiclass* with macro averaging; there is no single
+        #      "positive class", so f1_pos falls back to macro-F1.
+        def _build_metrics(k):
+            if k == 2:
+                return MetricCollection({
+                    "pr_auc": BinaryAveragePrecision(),
+                    "f1_pos": BinaryF1Score(),               # F1 of class 1
+                    "mcc":    BinaryMatthewsCorrCoef(),
+                })
+            return MetricCollection({
+                "pr_auc": MulticlassAveragePrecision(num_classes=k, average="macro"),
+                "f1_pos": MulticlassF1Score(num_classes=k, average="macro"),  # macro-F1
+                "mcc":    MulticlassMatthewsCorrCoef(num_classes=k),
+            })
+
+        base = _build_metrics(n_eff)
+        # NOTE: PR-AUC (AveragePrecision) accumulates every score+target over the
+        # epoch. On val that's fine; on a very large TRAIN set it can be memory
+        # heavy — drop self.train_metrics["pr_auc"] if that bites.
+        self.train_metrics = base.clone(prefix="train/")
+        self.val_metrics = base.clone(prefix="val/")
+
+    # ---- score shaping for the torchmetrics collection ------------------------
+    def _scores_for_metrics(self, outputs):
+        """Per-sample scores in the shape the metric collection expects.
+
+        n_eff == 2 -> (N,) positive-class probability
+                       (sigmoid for the 1-logit BCE head; softmax[:, 1] for a
+                        2-logit CE head — both threshold at 0.5, matching the
+                        preds used for acc/recall).
+        n_eff  > 2 -> (N, C) class probabilities.
+        """
+        if self._n_stat_classes == 2:
+            if self.num_classes == 1:                          # BCE single logit
+                return torch.sigmoid(outputs).reshape(-1)
+            return torch.softmax(outputs, dim=1)[:, 1]         # 2-logit CE head
+        return torch.softmax(outputs, dim=1)                   # multiclass
 
     # ---- loss + metrics --------------------------------------------------------
     def compute_loss_and_metrics(self, batch, stage):
@@ -829,17 +890,33 @@ class ModelPDClassification(ModelPDBase):
             preds = torch.argmax(outputs, dim=1)
         acc = (preds == labels.long().view(-1)).float().mean()
 
-        self._update_class_counts(labels, stage)
-        self.log(f"{stage}_loss", loss, on_epoch=True, prog_bar=True, batch_size=bsz)
-        self.log(f"{stage}_acc",  acc,  on_epoch=True, prog_bar=True, batch_size=bsz)
+        self._update_class_counts(labels, stage, preds=preds)
+
+        # CHANGED: everything rerooted under "{stage}/..."
+        self.log(f"{stage}/loss", loss, on_epoch=True, prog_bar=True, batch_size=bsz)
+        self.log(f"{stage}/acc",  acc,  on_epoch=True, prog_bar=True, batch_size=bsz)
+
+        # NEW: pr-auc / f1(pos) / mcc — logged as objects so Lightning
+        # computes + resets + DDP-syncs at epoch end. Names become
+        # "{stage}/pr_auc", "{stage}/f1_pos", "{stage}/mcc".
+        scores = self._scores_for_metrics(outputs)
+        tgt = labels.long().view(-1)
+        mcoll = self.train_metrics if stage == "train" else self.val_metrics
+        mcoll.update(scores, tgt)
+        self.log_dict(mcoll, on_step=False, on_epoch=True, batch_size=bsz)
 
         if stage == "train":
             self.train_sample_count += bsz
             self._log_lrs()
             return loss
         else:
+            # NEW: unweighted (proper) val loss — diagnostic only.
+            loss_unweighted = self.criterion_unweighted(outputs, targets)
+            self.log("val/loss_unweighted", loss_unweighted,
+                     on_epoch=True, batch_size=bsz)
+
             self.val_balanced_acc.update(preds.view(-1), labels.long().view(-1))
-            self.log("val_balanced_acc", self.val_balanced_acc, on_epoch=True,
+            self.log("val/balanced_acc", self.val_balanced_acc, on_epoch=True,
                      prog_bar=True, batch_size=bsz)
             return None
 
@@ -873,7 +950,7 @@ class ModelPDClassification(ModelPDBase):
             "labels": labels.detach().cpu().flatten(),
             "subject_ids": subject_ids,
         }
- 
+
 # Grouped regime: conditional-logistic (within-group softmax) training
 class ModelPDGrouped(ModelPDBase):
     """Case/control matched-set training. Expects the grouped collate:
@@ -1231,7 +1308,7 @@ class ThroughputMonitor(Callback):
             self._gpu_ms += start_ev.elapsed_time(end_ev)
             self._gpu_n += 1
 
-    def _flush(self, pl_module):
+    def _flush(self, pl_module, on_step=True):
         if self._n_batches == 0:
             return
         wall = time.perf_counter() - self._wall_t0
@@ -1249,8 +1326,8 @@ class ThroughputMonitor(Callback):
             # scale by batches in the window, since event readback lags
             logs["time/gpu_utilization"] = gpu_per_batch * self._n_batches / wall
 
-        pl_module.log_dict(logs, on_step=True, on_epoch=False,
-                           prog_bar=False, batch_size=1)
+        pl_module.log_dict(logs, on_step=on_step, on_epoch=not on_step,
+                       prog_bar=False, batch_size=1)
 
         if self.verbose:
             parts = [f"{logs.get('time/samples_per_s', float('nan')):8.1f} samp/s"]
@@ -1300,7 +1377,7 @@ class ThroughputMonitor(Callback):
     def on_train_epoch_end(self, trainer, pl_module):
         if self.cuda:
             self._drain(force=True)
-        self._flush(pl_module)
+        self._flush(pl_module, on_step=False)   # <-- add on_step=False
         if self._epoch_t0 is not None:
             pl_module.log("time/epoch_s", time.perf_counter() - self._epoch_t0,
                           on_step=False, on_epoch=True, batch_size=1)

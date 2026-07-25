@@ -33,7 +33,7 @@ import psutil
 
 from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict, synthetic_data_override
 from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
-from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
+from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel, load_ln_checkpoint
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
@@ -42,8 +42,24 @@ from src.utils.training_utils import set_automatic_hyperparameters, MemMonitor, 
 #set variables
 #torch.set_num_threads(2)  # Set the number of threads cores for the main process (eg 2+workers=num physical cores)
 
-SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
-#"/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
+
+def pre_trained_weights(name):
+    if name is None:
+        return None
+    #options for custom_pre_trained_weights:
+    if name == 'pre_trained_E3N_resnet18':
+        out_path =os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_2',
+                    'best-epoch=01-val_loss=0.23.ckpt')
+    elif name == 'pre_trained_E3N_resnet50':
+        out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_1',
+                    'best-epoch=00-val_loss=0.30.ckpt')
+    '''os.path.join(
+        '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
+        'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
+    ),'''
+    #resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
+    #resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
+    return out_path
 
 exp_params = {
     'problem': 'PD', #handedness, PD, pre_training
@@ -52,38 +68,39 @@ exp_params = {
 
     #debugging
     'debugging_callbacks':True,
+    'fast_dev_run':None, #can be False, None or True, False and None have same behavior
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'pre_training': True,
+    'pre_training': False,
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': ALL_SYNTHETIC_TRANSFORMS, #or None
+    'synthetic': None, # ALL_SYNTHETIC_TRANSFORMS or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
 
     #experiment parameters
-    'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(2)]+['text_full','text_crop']+ ['text' for _ in range(2)],
+    'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)],
     #['X_crop','X']+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
-    'use_balanced_weights': False,
+    'use_balanced_weights': True,
     'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': False, #note that this and balace_validation are independent
+    'balanced_data': True, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all',#'last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'successive',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':'resnet18',#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':'resnet50',#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': None, #None, see options below
-    'model_structure': 'SequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+    'custom_pre_trained_weights': pre_trained_weights('pre_trained_E3N_resnet50'), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50'
+    'model_structure': 'SetQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'model_parameters': {
         'd_model': 128, 
         'n_heads': 4,
@@ -102,34 +119,37 @@ exp_params = {
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
     
     #Training params definition
-    'use_opt_groups': True,
-    'lr_backbone': 5e-5,
+    'use_opt_groups': False,
+    'lr_backbone': 1e-7,
     'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 8,
-    'num_epochs': 1,
-    'patience': 1,
+    'batch_size': 2,
+    'num_epochs': 30,
+    'patience': 30,
     'val_check_interval': 1.0, #if integers the number of steps after which 
     #to perform validation, if float the fraction of the epoch after which to perform validation, 1.0 is the default value for doing at epoch end
     'eta_min_cosine': 1e-8,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
+    'layers_to_unfreeze': ['classifier','layer4'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     'seed': 42,
-    'accumulate_grad_batches': None,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "16-mixed", #None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
     'gradient_clip_val': 1.0, #1.0, None
 
     'prefetch_factor': 2,
 }
-#options for custom_pre_trained_weights:
-'''os.path.join(
-    '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
-    'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
-),'''
-#resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
-#resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
+
+def get_source_path():
+    if exp_params['problem'] == 'PD' and not exp_params['pre_training']:
+        return "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
+    elif exp_params['problem'] == 'PD' and exp_params['pre_training']:
+        return "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
+    else:
+        raise ValueError(f"Unknown problem type: {exp_params['problem']}")
+SOURCE_PATH = get_source_path()
+#"/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 
 # Authomatic settings
 exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
@@ -286,18 +306,21 @@ def trainer_definition(current_version, exp_params):
 
     # 2. Setup Checkpointing
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",               # Monitor validation loss
-        dirpath=os.path.join(CHECKPOINT_PATH,f'v_{current_version}'),           # Directory where weights will be saved
-        filename="best-{epoch:02d}-{val_loss:.2f}",            # Filename for the best model
-        save_top_k=1,                     # Save only the 1 best model
-        mode="min",                       # Stop when val_loss stops minimizing
-        save_last=False ,                   # Automatically creates 'last.ckpt' every epoch
-        #enable_version_counter=False
+        monitor="val/pr_auc",
+        dirpath=os.path.join(CHECKPOINT_PATH, f'v_{current_version}'),
+        # auto_insert_metric_name=False so the '/' in 'val/pr_auc' is NOT turned
+        # into a subdirectory — the value is substituted, not the key.
+        filename="best-{epoch:02d}-{val/pr_auc:.4f}",
+        auto_insert_metric_name=False,
+        save_top_k=1,
+        mode="max",
+        save_last=False,
     )
 
     periodic_ckpt = ModelCheckpoint(
         dirpath=os.path.join(CHECKPOINT_PATH, f'v_{current_version}'),
         filename="latest-{epoch:02d}",
+        auto_insert_metric_name=False, #auto_insert_metric_name=False with {val/pr_auc:.4f} produces best-04-0.7321.ckpt
         save_top_k=1,
         every_n_epochs=1,
         monitor=None,          # no metric -> saves the current/last state each time
@@ -305,10 +328,10 @@ def trainer_definition(current_version, exp_params):
 
     # 3. Setup Early Stopping
     early_stop_callback = EarlyStopping(
-        monitor="val_loss",
+        monitor="val/pr_auc",
         patience=exp_params['patience'],
-        mode="min",
-        verbose=True
+        mode="max",
+        verbose=True,
     )
 
     metrics_tracker = BestMetricTracker()
@@ -330,7 +353,7 @@ def trainer_definition(current_version, exp_params):
         version=current_version  # Works perfectly as an integer or string
     )
 
-    optional = ['precision', 'accumulate_grad_batches', 'gradient_clip_val']
+    optional = ['precision', 'accumulate_grad_batches', 'gradient_clip_val', 'fast_dev_run']
     extra_kwargs = {k: exp_params[k] for k in optional if exp_params.get(k) is not None}
 
     # 4. Initialize Trainer and Fit
@@ -408,6 +431,8 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
                                            use_spread=True, use_count_feature=True,count_norm=2)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
+    
+    model = load_ln_checkpoint(model,exp_params['custom_pre_trained_weights'])
 
     if val:
         return model, transform

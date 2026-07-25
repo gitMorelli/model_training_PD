@@ -113,6 +113,46 @@ def recolor_border_via_profiles(image, coords, black_tolerance=5):
     return image
 
 
+#window modality functions
+import math
+import numpy as np
+from PIL import Image
+
+def place_patches(patches, size, background=255):
+    n = len(patches)
+    grid_dim = math.isqrt(n)
+    assert grid_dim * grid_dim == n, "n must be a perfect square"
+
+    cell = size / grid_dim
+    out = np.full((size, size, 3), background, dtype=np.uint8)   # white canvas
+
+    for idx, patch in enumerate(patches):
+        arr = np.asarray(patch.convert("RGB"))
+        h, w = arr.shape[:2]
+
+        row, col = divmod(idx, grid_dim)
+        x = round((col + 0.5) * cell - w / 2)
+        y = round((row + 0.5) * cell - h / 2)
+
+        x0, y0 = max(x, 0), max(y, 0)
+        x1, y1 = min(x + w, size), min(y + h, size)
+        if x0 >= x1 or y0 >= y1:
+            continue
+
+        px0, py0 = x0 - x, y0 - y
+        px1, py1 = px0 + (x1 - x0), py0 + (y1 - y0)
+
+        region = out[y0:y1, x0:x1]
+        out[y0:y1, x0:x1] = np.minimum(region, arr[py0:py1, px0:px1])
+
+    return Image.fromarray(out, "RGB")
+def get_grid_sample(x_coords, y_coords, img, rand_num, n_x):
+    coordinates = (x_coords[(rand_num - 1) % n_x],
+                    y_coords[(rand_num - 1) // n_x],
+                    x_coords[(rand_num - 1) % n_x + 1],
+                    y_coords[(rand_num - 1) // n_x + 1])
+    return img.crop(coordinates)
+
 # ----------------- custom torch transforms ---------------------
 class ResizeLongestSide:
     def __init__(self, size, interpolation=InterpolationMode.BILINEAR):
@@ -577,6 +617,8 @@ def get_augmentation_transform(exp_params):
             t = T.Compose([
                 PadOrCropToSize(64, fill=(255,255,255)) #pad shortersides and then centerCrop
             ])
+        elif t_modality == 'window':
+            t = t = T.Compose([]) #Identity transform, the windowing is done in the dataset class
         else:
             raise ValueError(f"Unknown augmentation_transform: {exp_params['apply_augmentation']}")
         return (t_modality,t)
@@ -588,13 +630,16 @@ def get_augmentation_transform(exp_params):
         modality_to_transform = {
             'digit_full': None,
             'digit_crop': 'random_crop',
+            'digit_window': 'window',
             'digit':'grid',
             'text_full': None,
             'text_crop': 'random_crop',
             'text':'grid',
+            'text_window': 'window',
             'X_crop' : 'random_crop',
             'X_full' : None,
             'X' : 'grid',
+            'X_window' : 'window',
         }
         for t in exp_params['data_modality']:
             if t in modality_to_transform:

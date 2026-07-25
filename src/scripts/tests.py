@@ -308,7 +308,7 @@ def prepare_pre_training_data():
     print(f"Pre-training data saved to {save_path}")
 
 def inspect_columns(): 
-    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_13_7_26.parquet"
+    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
     csv_data = pd.read_parquet(load_path)
     columns = csv_data.columns
     for col in columns:
@@ -452,7 +452,8 @@ def repack_grid_dict():
 
     exp_params = {}
     exp_params['use_grid'] = True
-    exp_params['grid_dict_path'] = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26.pkl"
+    exp_params['grid_dict_path'] = '/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl'
+    #"/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26.pkl"
     save_dir = os.path.dirname(exp_params['grid_dict_path'])
     save_dir = os.path.join(save_dir, os.path.basename(exp_params['grid_dict_path']).replace(".pkl", ""))
 
@@ -483,7 +484,8 @@ def repack_grid_dict():
     lengths = np.array([a.shape[1] for a in arrays], dtype=np.int64)   # number of columns
     offsets = np.zeros(len(arrays) + 1, dtype=np.int64)
     np.cumsum(lengths, out=offsets[1:])
-    data = np.concatenate(arrays, axis=1)     # shape (2, total_columns)
+    data = np.concatenate(arrays, axis=1)     # Concatenate all the 2xN_i arrays in a single 2xN array
+    #we will slice from this one big array using the offsets to get the original arrays back
 
     print("value range:", data.min() if data.size else "empty",
           data.max() if data.size else "")
@@ -516,12 +518,14 @@ def repack_grid_dict():
         f"n_codes={n_codes:,} too large for a dense table; "
         "switch to the sorted-codes + searchsorted variant instead")
 
+    #every triple is collapsed into a single integer "code" using mixed-radix (row-major) encoding
     codes = np.array(
         [(id_code[a] * NQ + q_code[b]) * NC + c_code[c] for a, b, c in keys],
         dtype=np.int64)
     assert len(np.unique(codes)) == len(codes), "duplicate (id, q_name, class_key) triples!"
 
     # dense code -> entry index table, -1 = absent
+    #entry_of_code is a dense reverse-lookup table of length n_codes, initialized to -1 (meaning "no such entry")
     entry_of_code = np.full(n_codes, -1, dtype=np.int32)
     entry_of_code[codes] = np.arange(len(codes), dtype=np.int32)
 
@@ -578,18 +582,96 @@ def repack_grid_dict():
     print(f"saved to {save_dir}: grid_data.npy, grid_offsets.npy, "
           f"grid_scalars.npy, grid_entry_of_code.npy, grid_vocabs.pkl")
 
+def get_grid_properties():
+    exp_params = {}
+    exp_params['use_grid'] = True
+    exp_params['grid_dict_path'] = '/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl'
+
+    def load_grid_dict_local(exp_params):
+        if exp_params['use_grid']:
+            with open(exp_params['grid_dict_path'], "rb") as f:
+                grid_dict = pickle.load(f)
+            print("Grid dictionary loaded successfully. Number of entries:", len(grid_dict))
+            return grid_dict
+        else:
+            print("Grid usage is disabled. No grid dictionary will be loaded.")
+            return None
+
+    grid_dict = load_grid_dict_local(exp_params)
+
+
+    def grid_stats(arr):
+        arr = np.asarray(arr)
+        x = np.sort(arr[0])          # x coords of vertical lines
+        #add coordinate 0
+        x = np.insert(x, 0, 0)
+        y = np.sort(arr[1])          # y coords of horizontal lines
+        y = np.insert(y, 0, 0)
+        widths  = np.diff(x)         # chunk widths  (N-1 values)
+        heights = np.diff(y)         # chunk heights (N-1 values)
+
+        def stats(v, prefix):
+            if v.size == 0:          # single line -> no gaps
+                return {f"{prefix}_mean": np.nan,
+                        f"{prefix}_median": np.nan,
+                        f"{prefix}_std": np.nan}
+            return {f"{prefix}_mean":   v.mean(),
+                    f"{prefix}_median": np.median(v),
+                    f"{prefix}_std":    v.std()}   # ddof=0 (population)
+
+        return {
+            "x_span": x[-1] - x[0],
+            "y_span": y[-1] - y[0],
+            **stats(widths,  "width"),
+            **stats(heights, "height"),
+        }
+
+    rows = []
+    for id_, q_dicts in grid_dict.items():
+        for q_name, class_dicts in q_dicts.items():
+            for class_key, (scalar, arr) in class_dicts.items():
+                rows.append({"id": id_, "q": q_name, "class": class_key,
+                            **grid_stats(arr)})
+
+    df = pd.DataFrame(rows)
+    
+    # numeric columns to describe (everything except the index columns)
+    stat_cols = [c for c in df.columns if c not in ("id", "q", "class")]
+
+    out_path = "/home/a_morelli/vscode_projects/model_training/results/tests/grid_stats_by_q_class.txt"
+
+    with open(out_path, "w") as f:
+        for class_val in sorted(df["class"].unique()):
+            sub = df[df["class"] == class_val]
+
+            f.write(f"class = {class_val}   "
+                    f"(n = {len(sub)}) ---\n")
+            f.write(sub[stat_cols].describe().to_string())
+            f.write("\n\n")
+        f.write("\n\n")
+        f.write("=" * 70 + "\n")
+        f.write("GROUPED BY QUESTIONNAIRE\n")
+        f.write("=" * 70 + "\n\n")
+        for q_val in sorted(df["q"].unique()):          # q = 1 .. 13
+            f.write("=" * 70 + "\n")
+            f.write(f"GROUP  q = {q_val}\n")
+            f.write("=" * 70 + "\n\n")
+
+            q_df = df[df["q"] == q_val]
+
+            for class_val in sorted(q_df["class"].unique()):
+                sub = q_df[q_df["class"] == class_val]
+
+                f.write(f"--- q = {q_val} | class = {class_val}   "
+                        f"(n = {len(sub)}) ---\n")
+                f.write(sub[stat_cols].describe().to_string())
+                f.write("\n\n")
+
+            f.write("\n")
+
+    print(f"saved to {out_path}")
+
+
 if __name__ == "__main__":
-    #check_n_subjects_exclusion_criteria()
-    repack_grid_dict()
-    '''import psutil, os
-    def rss_gb(): return psutil.Process(os.getpid()).memory_info().rss / 1e9
-    base = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26"
-    print(f"before: {rss_gb():.2f}")
-    data = np.load(f"{base}/grid_data.npy", mmap_mode='r')
-    offsets = np.load(f"{base}/grid_offsets.npy")
-    scalars = np.load(f"{base}/grid_scalars.npy")
-    print(f"after arrays: {rss_gb():.2f}")
-    with open(f"{base}/grid_index.pkl", "rb") as f:
-        key_to_idx = pickle.load(f)
-    print(f"after index: {rss_gb():.2f}  |  len(key_to_idx) = {len(key_to_idx):,}")'''
+    get_grid_properties()
     

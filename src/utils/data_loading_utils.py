@@ -24,7 +24,7 @@ import pickle
 import cv2
 import gc
 
-from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform
+from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform, place_patches, get_grid_sample
 
 #Datasets and dataloaders for speed tests
 class InMemoryWdsDataset(torch.utils.data.Dataset):
@@ -817,12 +817,27 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
     builder only needs the per-subject data.
     """
 
+    size_dict = {
+        'hand': 100,
+        'number_random': 60,
+        'X': 60
+    } #average of the median size of patches in the modality
+
+    n_elements_window_dict = {
+        'hand': 9,
+        'number_random': 9,
+        'X': 16
+    }
+
     def build_questionnaire_views(X, images_for_q, original_id, questionnaire_info, synth_transform=None):
         """Build the list of augmented views for one questionnaire."""
         list_of_views = []
         list_of_modality_names = []
         # if the image was rescaled, the grid coordinates must be rescaled too
         rescale_factor = questionnaire_info[str(X)]['rescale_factor']
+
+        to_grayscale = exp_params.get('to_grayscale', False) if exp_params else False
+        num_channels = 1 if to_grayscale else 3
 
         for current_mode in ALL_MODALITIES:
             num, grid = grid_lookup(grid_dict, original_id, 'q' + str(X), current_mode)
@@ -855,23 +870,50 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 selected_modality_names = ([selected_modality_names[0].split('_')[0] + '_original']
                                            + selected_modality_names)
 
+            if num>0:
+                x_coords = [0] + sorted(list(grid[0, :] * rescale_factor[0])) + [img.width]
+                n_x = len(x_coords) - 1
+                y_coords = [0] + sorted(list(grid[1, :] * rescale_factor[1])) + [img.height]
+            #if i have a window modality i need to prepare some data
+            n_elements_window = n_elements_window_dict.get(current_mode, 9)
+            if num>0 and 'window' in [t[0] for t in selected_transforms]:
+                #count the number of window views you have in selected_transforms
+                n_window_views = sum(1 for t in selected_transforms if t[0] == 'window')
+                indices = [i for i in range(1, num + 1)]
+                sampled_windows_no_rep = random.sample(indices, len(indices))
+                remaining = n_elements_window * n_window_views - len(sampled_windows_no_rep)
+                if remaining > 0:
+                    sampled_windows = sampled_windows_no_rep + random.choices(indices, k=remaining)
+                    sampled_windows = random.sample(sampled_windows, len(sampled_windows))
+                else:
+                    sampled_windows = sampled_windows_no_rep[:n_elements_window * n_window_views]
+                count_windows = 0
+            
             for k, augmentation_transform in enumerate(selected_transforms):
+
                 if augmentation_transform[0] == 'original':
                     img_view = img.copy()
                 elif augmentation_transform[0] == 'grid':
                     # select a random grid crop
                     if num > 0:
-                        x_coords = [0] + sorted(list(grid[0, :] * rescale_factor[0])) + [img.width]
-                        n_x = len(x_coords) - 1
-                        y_coords = [0] + sorted(list(grid[1, :] * rescale_factor[1])) + [img.height]
                         rand_num = random.randint(1, num)
-                        coordinates = (x_coords[(rand_num - 1) % n_x],
-                                       y_coords[(rand_num - 1) // n_x],
-                                       x_coords[(rand_num - 1) % n_x + 1],
-                                       y_coords[(rand_num - 1) // n_x + 1])
-                        img_view = img.crop(coordinates)
+                        img_view = get_grid_sample(x_coords, y_coords, img, rand_num, n_x)
                     else:
                         img_view = img.copy()
+                    img_view = augmentation_transform[1](img_view)  # apply the callable transform
+                elif augmentation_transform[0] == 'window':
+                    # scale the size based on the number of elements in the window (if 9 -> 3xexpected size of a chunk)
+                    size = int(size_dict.get(current_mode, 60)*np.sqrt(n_elements_window))  
+                    #create a sizexsizex3 blank image
+                    img_view = Image.new('RGB', (size, size), color=(255, 255, 255))
+                    if num>0:
+                        this_window_indexes = sampled_windows[(count_windows) * n_elements_window: (count_windows+1) * n_elements_window]
+                        count_windows += 1
+                        patches=[]
+                        for idx in this_window_indexes:
+                            patch = get_grid_sample(x_coords, y_coords, img, idx, n_x)
+                            patches.append(patch)
+                        img_view = place_patches(patches, size, 255)
                     img_view = augmentation_transform[1](img_view)  # apply the callable transform
                 elif augmentation_transform[0] is None:
                     img_view = img.copy()
@@ -882,7 +924,6 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 if invert_color and not debug:
                     img_view = ImageOps.invert(img_view)
                 
-                to_grayscale = exp_params.get('to_grayscale', False) if exp_params else False
                 if to_grayscale:
                     img_view = T.Grayscale(num_output_channels=1)(img_view)
 
@@ -1855,7 +1896,7 @@ def merge_properties_from_full_dataset_PD(exp_params, csv_data, properties_to_ad
     
     return csv_data
 
-#Preparing synthetic data dataframe
+#Preparing synthetic data dataframe 
 def synthetic_data_override(exp_params, verbose=True):
     '''this function generate a new training set with the synthetic classes, save it to file and override the id_list_path
     -> the other functions go read that'''
@@ -1948,7 +1989,7 @@ def load_grid_dict_old(exp_params):
         return None
 def load_grid_dict(exp_params):
     if exp_params['use_grid']:
-        base = exp_params['grid_dict_path']  # wherever you saved step 1
+        base = exp_params['grid_dict_path']  # wherever you saved step 1 
         packed = {
             "data":          np.load(os.path.join(base, "grid_data.npy"), mmap_mode='r'),
             "offsets":       np.load(os.path.join(base, "grid_offsets.npy")),
@@ -2007,7 +2048,7 @@ def return_file_paths(problem,grouped,pre_training):
         data_folder = '/mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26'
         #"/mnt/beegfs02/scratch/a_morelli/model_training/PD/final_png_whitebg"
         #"/home/a_morelli/datasets/shards/PD/final_png_whitebg_21_07_26"
-        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5.pkl"
+        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5"
     elif problem == 'PD' and pre_training:
         list_of_ids_paths = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet"
         data_folder = "/mnt/beegfs02/scratch/a_morelli/model_training/shards/PDpretraining/final_png_whitebg_21_07_26"

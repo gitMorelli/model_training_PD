@@ -1,27 +1,19 @@
-Grid dictionary loaded successfully. Number of entries: 86808
-value range: 18 20309
-entries: 5,755,519
-data: shape=(2, 29881390), dtype=int64, 0.48 GB
-scalars: dtype=int64
-vocab sizes: ids=86,808  q_names=13  class_keys=7
-n_codes (dense table size): 7,899,528  -> int32 table = 0.03 GB
-absent codes: 2,144,009 (correctly marked -1)
-verification passed on 5,000 random entries + structural checks
-saved to /home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26: grid_data.npy, grid_offsets.npy, grid_scalars.npy, grid_entry_of_code.npy, grid_vocabs.pkl
+Grid dictionary loaded successfully. Number of entries: 11023
+saved to /home/a_morelli/vscode_projects/model_training/results/tests/grid_stats_by_q_class.txt
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5075330
+Job ID: 5104551
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
 Nodelist: n10
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-07-22 17:03:34
-Job ended at:   2026-07-22 17:04:48
-Job Wall-clock time: 00:01:14
-CPU Utilized: 00:01:08
-CPU Efficiency: 22.97% of 00:04:56 core-walltime
-Memory Utilized: 8.55 GB
-Memory Efficiency: 53.45% of 16.00 GB
+Job started at: 2026-07-25 14:16:31
+Job ended at:   2026-07-25 14:19:34
+Job Wall-clock time: 00:03:03
+CPU Utilized: 00:02:58
+CPU Efficiency: 24.32% of 00:12:12 core-walltime
+Memory Utilized: 2.65 GB
+Memory Efficiency: 16.57% of 16.00 GB

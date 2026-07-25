@@ -32,28 +32,28 @@ import pickle
 from sklearn.metrics import (
     precision_recall_curve, average_precision_score, roc_auc_score,
     precision_score, recall_score, f1_score, balanced_accuracy_score,
-    classification_report, confusion_matrix,
+    classification_report, confusion_matrix, roc_curve
 )
 from sklearn.preprocessing import label_binarize
 import matplotlib.pyplot as plt
 import numpy as np
 import sys, os, contextlib
 
-from src.utils.data_loading_utils import melt_df, prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD
+from src.utils.data_loading_utils import melt_df, prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD, return_file_paths
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_dataset
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std
-from src.utils.training_utils import ModelPD, BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
+from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.scripts.train_PD_model import model_initialization
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 CHECKPOINT_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints"
-version='21'
+version='22'
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-epoch=24-val_loss=0.69.ckpt"
+checkpoint_to_load=f"v_{version}/best-epoch=05-val_loss=0.69.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)
@@ -66,6 +66,8 @@ exp_params['balance_validation'] = False
 exp_params['batch_size'] = 1
 #'precision': "16-mixed",
 
+exp_params['matched_validation'] = False
+
 #PATHS
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,exp_params['data_folder'])
 SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
@@ -74,6 +76,14 @@ SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 VERBOSE = False
 CLASS_COL = exp_params['class_col'] 
 
+
+#overrides
+#print(exp_params['custom_pre_trained_weights'],flush=True)
+#assert 1==0
+'''
+exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths('PD', False, False)
+print(exp_params['custom_pre_trained_weights'],flush=True)
+exp_params['custom_pre_trained_weights'] = None'''
 
 def main(exp_params):
     args = get_args()
@@ -105,6 +115,9 @@ def main(exp_params):
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict, transform, 
                                                     SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df)
     
+    if exp_params['matched_validation']:
+        matched_val_loader = prepare_balanced_validation(worker,prefetch_factor,exp_params, grid_dict, transform)
+    
     # 1. Gather predictions using the best checkpoint saved during training
     # Setting ckpt_path="best" tells Lightning to automatically find your top model
     ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
@@ -126,9 +139,17 @@ def main(exp_params):
     log_path = os.path.join(os.path.dirname(ckpt_path), f"stats.txt") #copy prints also to a log file in the checkpoint folder
     with tee_stdout(log_path):
         analyze_results(all_probs, all_labels, results_df, split="validation",
-                        pos_label=1, threshold=None, strategy="f1",
+                        pos_label=1, threshold=None, strategy="youden",
                         target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
         
+        if exp_params['matched_validation']:
+            print("#" * 50)
+            print(f"Evaluating model on matched validation set using checkpoint: {ckpt_path}")
+            outputs = trainer.predict(lit_model, dataloaders=matched_val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
+            results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = get_result_df(outputs)
+            analyze_results(all_probs_matched, all_labels_matched, results_df_matched, split="matched_validation",
+                            pos_label=1, threshold=None, strategy="youden",
+                            target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
 
         if exp_params['predict_on_train']:
             outputs = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
@@ -140,6 +161,18 @@ def main(exp_params):
             results_df = results_complete.copy()
     
     store_results(csv_data, results_df, ckpt_path,exp_params)
+
+def prepare_balanced_validation(worker,prefetch_factor,exp_params, grid_dict, transform):
+    exp_params_temp=exp_params.copy()
+    exp_params_temp['balance_validation'] = True
+    exp_params_temp['balancing_factor'] = 1.0
+
+    train_df = pd.read_parquet(exp_params_temp['list_of_ids_paths'])
+    exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params_temp,verbose=VERBOSE,class_col=CLASS_COL)
+
+    _,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params_temp,exclusion_set,val_exclusion_set, grid_dict, transform, 
+                                                    SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df)
+    return val_loader
 
 def get_args():
     import argparse
@@ -271,16 +304,32 @@ def _as_prob_matrix(all_scores, num_classes=None):
 # ======================================================================
 # binary path (unchanged behavior) -- used when C == 2
 # ======================================================================
-def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90):
+def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90, pos_label=1):
     """Choose a decision threshold for the positive class (binary only).
-
+ 
     strategy="f1"            -> threshold that maximizes F1 on the positive class
+    strategy="youden"        -> threshold that maximizes Youden's J = TPR - FPR
+                                (equivalently sensitivity + specificity - 1);
+                                the point on the ROC curve furthest above the
+                                chance diagonal. Weights both classes equally,
+                                unlike F1, which ignores true negatives.
     strategy="target_recall" -> best-precision threshold that still hits
                                 recall >= target_recall
     """
-    precision, recall, thresholds = precision_recall_curve(y_true, y_scores)
+    if strategy == "youden":
+        fpr, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=pos_label)
+        # thresholds[0] is +inf (sklearn >= 1.3) or max(score) + 1: the degenerate
+        # "predict everything negative" point, where J == 0. Drop it.
+        if len(thresholds) > 1:
+            fpr, tpr, thresholds = fpr[1:], tpr[1:], thresholds[1:]
+        j = tpr - fpr
+        return float(thresholds[np.argmax(j)])
+ 
+    precision, recall, thresholds = precision_recall_curve(
+        y_true, y_scores, pos_label=pos_label
+    )
     precision, recall = precision[:-1], recall[:-1]
-
+ 
     if strategy == "f1":
         f1 = np.where(
             (precision + recall) > 0,
@@ -288,7 +337,7 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90):
             0.0,
         )
         return float(thresholds[np.argmax(f1)])
-
+ 
     if strategy == "target_recall":
         ok = recall >= target_recall
         if not ok.any():
@@ -296,9 +345,73 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90):
         idx = np.where(ok)[0]
         best = idx[np.argmax(precision[idx])]
         return float(thresholds[best])
-
+ 
     raise ValueError(f"unknown strategy: {strategy}")
 
+def _plot_roc_curve_binary(y_true, y_scores, pos_label=1, threshold=None, path=None):
+    if plt is None:
+        print("matplotlib not available; skipping ROC plot")
+        return
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=pos_label)
+    auc = roc_auc_score(y_true, y_scores)
+ 
+    plt.figure(figsize=(5, 5))
+    plt.plot(fpr, tpr, label=f"model (AUC={auc:.3f})")
+    plt.plot([0, 1], [0, 1], ls="--", color="gray", label="random (AUC=0.500)")
+ 
+    # Youden-optimal point on the curve, shown regardless of which strategy was used
+    if len(thresholds) > 1:
+        j = (tpr - fpr)[1:]
+        k = int(np.argmax(j)) + 1
+        plt.scatter([fpr[k]], [tpr[k]], facecolors="none", edgecolors="green",
+                    s=90, zorder=4,
+                    label=f"max Youden J={j[k - 1]:.3f} @ {thresholds[k]:.3f}")
+ 
+    # the operating point actually used
+    if threshold is not None:
+        y_pred = (y_scores >= threshold).astype(int)
+        sens = recall_score(y_true, y_pred, pos_label=pos_label, zero_division=0)
+        spec = recall_score(y_true, y_pred, pos_label=1 - pos_label, zero_division=0)
+        plt.scatter([1 - spec], [sens], color="red", zorder=5,
+                    label=f"threshold={threshold:.3f}")
+ 
+    plt.xlabel("false positive rate (1 - specificity)")
+    plt.ylabel("true positive rate (sensitivity)")
+    plt.xlim(0, 1); plt.ylim(0, 1)
+    plt.legend(loc="lower right", fontsize=8)
+    plt.tight_layout()
+    if path:
+        plt.savefig(path)
+        plt.close()
+    else:
+        plt.show()
+
+def _plot_roc_curve_mc(y_true, y_prob, class_names, path=None):
+    if plt is None:
+        print("matplotlib not available; skipping ROC plot")
+        return
+    classes = np.arange(len(class_names))
+    Y = label_binarize(y_true, classes=classes)
+ 
+    plt.figure(figsize=(6, 6))
+    for c in classes:
+        if Y[:, c].sum() == 0 or Y[:, c].sum() == len(y_true):
+            continue                                  # AUC undefined for that class
+        fpr, tpr, _ = roc_curve(Y[:, c], y_prob[:, c])
+        auc = roc_auc_score(Y[:, c], y_prob[:, c])
+        plt.plot(fpr, tpr, label=f"{class_names[c]} (AUC={auc:.3f})")
+    plt.plot([0, 1], [0, 1], ls="--", color="gray", label="random (AUC=0.500)")
+ 
+    plt.xlabel("false positive rate"); plt.ylabel("true positive rate")
+    plt.title("One-vs-rest ROC curves")
+    plt.xlim(0, 1); plt.ylim(0, 1)
+    plt.legend(loc="lower right", fontsize=8)
+    plt.tight_layout()
+    if path:
+        plt.savefig(path)
+        plt.close()
+    else:
+        plt.show()
 
 def _threshold_free_report_binary(y_true, y_scores, pos_label=1):
     prevalence = float(np.mean(y_true == pos_label))
@@ -364,37 +477,44 @@ def _plot_pr_curve_binary(y_true, y_scores, pos_label=1, threshold=None, path=No
 def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
                     threshold, strategy, target_recall, plot, out_dir_path):
     y_scores = y_prob[:, pos_label]
-
+ 
     # 1. threshold-free view
     _threshold_free_report_binary(y_true, y_scores, pos_label)
-
+ 
     # 2. pick / apply a threshold
     if threshold is None:
         threshold = pick_threshold(y_true, y_scores, strategy=strategy,
-                                   target_recall=target_recall)
+                                   target_recall=target_recall, pos_label=pos_label)
         extra = (", target_recall=%.2f" % target_recall) if strategy == "target_recall" else ""
         print(f"\nChosen threshold ({strategy}{extra}): {threshold:.3f}")
     else:
         print(f"\nUsing fixed threshold: {threshold:.3f}")
     y_pred = (y_scores >= threshold).astype(int)
-
+ 
+    # 2b. operating point in sensitivity / specificity terms
+    sens = recall_score(y_true, y_pred, pos_label=pos_label, zero_division=0)
+    spec = recall_score(y_true, y_pred, pos_label=1 - pos_label, zero_division=0)
+    print(f"  sensitivity = {sens:.3f}   specificity = {spec:.3f}   "
+          f"Youden's J = {sens + spec - 1:.3f}")
+ 
     # 3. report at that threshold
     print("\n--- Classification Report @ threshold ---")
     print(classification_report(y_true, y_pred, target_names=class_names, zero_division=0))
     print("--- Confusion Matrix @ threshold ---")
     print(confusion_matrix(y_true, y_pred))
-
+ 
     # 4. baselines
     print("\n--- Baseline comparison (positive = %s) ---" % class_names[pos_label])
     with pd.option_context("display.float_format", "{:.3f}".format):
         print(_baseline_table_binary(y_true, pos_label).to_string(index=False))
-
+ 
     if plot:
         _plot_pr_curve_binary(y_true, y_scores, pos_label, threshold,
                               path=os.path.join(out_dir_path, f"pr_curve_{split}.png"))
-    return {"threshold": threshold, "y_pred": y_pred}
-
-
+        _plot_roc_curve_binary(y_true, y_scores, pos_label, threshold,
+                               path=os.path.join(out_dir_path, f"roc_curve_{split}.png"))
+    return {"threshold": threshold, "y_pred": y_pred,
+            "sensitivity": sens, "specificity": spec, "youden_j": sens + spec - 1}
 # ======================================================================
 # multiclass path -- used when C > 2
 # ======================================================================
@@ -479,28 +599,30 @@ def _analyze_multiclass(y_true, y_prob, results_df, split, class_names,
                         plot, out_dir_path):
     n_classes = y_prob.shape[1]
     labels = np.arange(n_classes)
-
+ 
     # 1. threshold-free view (macro OvR)
     _threshold_free_report_mc(y_true, y_prob, class_names)
-
+ 
     # 2. predictions via argmax (no threshold in multiclass)
     y_pred = np.argmax(y_prob, axis=1)
-
+ 
     # 3. report
     print("\n--- Classification Report (argmax) ---")
     print(classification_report(y_true, y_pred, labels=labels,
                                 target_names=class_names, zero_division=0))
     print("--- Confusion Matrix (rows=true, cols=pred) ---")
     print(confusion_matrix(y_true, y_pred, labels=labels))
-
+ 
     # 4. baselines
     print("\n--- Baseline comparison (macro-averaged) ---")
     with pd.option_context("display.float_format", "{:.3f}".format):
         print(_baseline_table_mc(y_true, class_names).to_string(index=False))
-
+ 
     if plot:
         _plot_pr_curve_mc(y_true, y_prob, class_names,
                           path=os.path.join(out_dir_path, f"pr_curve_{split}.png"))
+        _plot_roc_curve_mc(y_true, y_prob, class_names,
+                           path=os.path.join(out_dir_path, f"roc_curve_{split}.png"))
     return {"threshold": None, "y_pred": y_pred}
 
 
@@ -517,9 +639,12 @@ def analyze_results(all_scores, all_labels, results_df, split="validation",
                  (NOT hard predictions -- PR-AUC/thresholding need scores.)
     class_names: list of length C. Defaults to ["healthy","PD"] when C==2,
                  else ["class 0", ...].
+    strategy   : "f1" | "youden" | "target_recall"  (binary only).
     Binary (C==2): threshold-based analysis, tuned via `strategy`/`threshold`.
+                   With plot=True writes pr_curve_{split}.png and roc_curve_{split}.png.
     Multiclass (C>2): argmax-based analysis with macro / per-class metrics;
                       `pos_label`, `threshold`, `strategy` are ignored.
+                      With plot=True writes one-vs-rest PR and ROC figures.
     Assumes labels are integers in [0, C-1].
     """
     y_true = all_labels.numpy() if hasattr(all_labels, "numpy") else np.asarray(all_labels)
@@ -527,16 +652,16 @@ def analyze_results(all_scores, all_labels, results_df, split="validation",
     scores = all_scores.numpy() if hasattr(all_scores, "numpy") else all_scores
     y_prob = _as_prob_matrix(scores)
     n_classes = y_prob.shape[1]
-
+ 
     if class_names is None:
         class_names = (["healthy", "PD"] if n_classes == 2
                        else [f"class {i}" for i in range(n_classes)])
     if len(class_names) != n_classes:
         raise ValueError(f"class_names has {len(class_names)} entries "
                          f"but scores imply {n_classes} classes")
-
+ 
     print(f"\n================ {split.upper()} STATISTICS ================")
-
+ 
     if n_classes == 2:
         result = _analyze_binary(y_true, y_prob, results_df, split, class_names,
                                  pos_label, threshold, strategy, target_recall,
@@ -544,7 +669,7 @@ def analyze_results(all_scores, all_labels, results_df, split="validation",
     else:
         result = _analyze_multiclass(y_true, y_prob, results_df, split,
                                      class_names, plot, out_dir_path)
-
+ 
     print("=======================================================")
     with pd.option_context("display.max_rows", None, "display.max_columns", None):
         print(results_df.head(10))
