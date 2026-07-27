@@ -1,3 +1,5 @@
+import math
+
 import torch
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset, DataLoader
@@ -422,7 +424,7 @@ class ModelPDBase(L.LightningModule):
                  example_input_array=None,
                  opt_groups=None, num_epochs=10, lr_scheduling='cosine',
                  weight_decay=1e-4, warmup_fraction=0.1,
-                 eta_min_cosine=1e-6, batch_size=32):
+                 eta_min_cosine=1e-6, batch_size=32, accumulate_grad_batches=1, world_size=1):
         super().__init__()
         self.write_log = write_log
         self.model = model
@@ -437,11 +439,14 @@ class ModelPDBase(L.LightningModule):
         self.warmup_fraction = warmup_fraction
         self.eta_min_cosine = eta_min_cosine
         self.batch_size = batch_size
-
+        self.accumulate_grad_batches = accumulate_grad_batches
         # NOTE: `total_units` counts *whatever the loader batches*:
         # subjects for the flat loader, groups for the grouped loader.
         self.total_units = total_units
-        self.total_steps = int(self.num_epochs * (total_units // batch_size))
+        steps_per_epoch = math.ceil(
+            math.ceil(total_units / (batch_size * world_size)) / accumulate_grad_batches
+        )
+        self.total_steps = num_epochs * steps_per_epoch
 
         if example_input_array is not None:
             self.example_input_array = example_input_array
@@ -721,7 +726,15 @@ class ModelPDBase(L.LightningModule):
         optimizer = optim.AdamW(param_groups)
 
         if self.lr_scheduling == 'cosine':
-            total_steps = self.total_steps
+            try:
+                total_steps = int(self.trainer.estimated_stepping_batches)
+            except (RuntimeError, AttributeError):
+                # no trainer attached (unit tests, manual instantiation) -> fall back
+                total_steps = self.total_steps
+            if not math.isfinite(total_steps) or total_steps <= 0:
+                total_steps = self.total_steps
+
+            self.write_log(f"[configure_optimizers] scheduler total_steps={total_steps}")
             warmup_steps = max(1, int(self.warmup_fraction * total_steps))
 
             warmup = torch.optim.lr_scheduler.LinearLR(
@@ -738,6 +751,10 @@ class ModelPDBase(L.LightningModule):
 
     # ---- gradient sanity check ------------------------------------------------------
     def on_after_backward(self):
+        if getattr(self, "_grad_check_done", False):
+            #cause with gradient accumulation self.trainer.global_step == 0 accumulate_grad_batches times
+            return
+        self._grad_check_done = True
         if self.trainer.global_step == 0:
             self.write_log("\n--- Gradient Check (First Batch) ---")
             for name, param in self.model.named_parameters():

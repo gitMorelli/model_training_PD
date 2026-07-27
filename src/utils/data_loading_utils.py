@@ -1758,7 +1758,7 @@ def generate_exclusion_set_val(csv_data, data_modality, majority_class_id, balan
     exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
     return exclusion_set
 
-def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data=None):
+def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data=None, exclude_cases=False, class_col='diag_park_final1_quest'):
     '''
     this funciton computes, for a specific split, all the ids that should be ignored during loading, accounting for all exclusion/inclusion
     conditions.
@@ -1809,7 +1809,11 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
         csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1].astype(int)
         print(f"Balancing the dataset for {split} set with balancing factor {exp_params['balancing_factor']})")
         #keep only the controls
-        csv_data_controls = csv_data[csv_data['case_control'] == 0]
+        if exclude_cases:
+            print("Excluding cases from the controls for balancing")
+            csv_data_controls = csv_data[(csv_data['case_control'] == 0) & (csv_data[class_col] == 0)]
+        else:
+            csv_data_controls = csv_data[csv_data['case_control'] == 0]
         csv_data_cases = csv_data[csv_data['case_control'] == 1]
 
         #keep balancing factor ids in each group for each case, sampling with priority from the at_least_warning==0 controls
@@ -1841,7 +1845,7 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
     
     return ids_to_exclude
 
-def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed_csv=None):
+def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed_csv=None, exclude_cases=False):
     '''returns the num_0 and num_1 in the training set after considering the exclusion -> the true class numerosity'''
     exclusion_set = set()
     val_exclusion_set = set()
@@ -1867,8 +1871,10 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
             print('#' * 50)
 
     
-    exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train',original_data=original_data) 
-    val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val', original_data=original_data)
+    exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train',original_data=original_data, exclude_cases=exclude_cases, 
+                                              class_col=class_col) 
+    val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val', original_data=original_data, exclude_cases=exclude_cases, 
+                                                  class_col=class_col)
     
     if verbose:
         print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")

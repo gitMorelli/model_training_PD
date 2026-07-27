@@ -50,10 +50,10 @@ from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireMo
 from src.scripts.train_PD_model import model_initialization
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
-CHECKPOINT_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet50_model_results/checkpoints"
-version='9'
+CHECKPOINT_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/FiveStageResidualStridedConvNet_model_results/checkpoints"
+version='3'
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-29-0.2294.ckpt"
+checkpoint_to_load=f"v_{version}/best-08-0.2662.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)
@@ -66,7 +66,7 @@ exp_params['balance_validation'] = False
 exp_params['batch_size'] = 1
 #'precision': "16-mixed",
 
-exp_params['matched_validation'] = False
+exp_params['matched_validation'] = True
 
 #PATHS
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,exp_params['data_folder'])
@@ -138,6 +138,8 @@ def main(exp_params):
 
     log_path = os.path.join(os.path.dirname(ckpt_path), f"stats.txt") #copy prints also to a log file in the checkpoint folder
     with tee_stdout(log_path):
+        return_model_info(exp_params)
+
         analyze_results(all_probs, all_labels, results_df, split="validation",
                         pos_label=1, threshold=None, strategy="youden",
                         target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
@@ -162,13 +164,24 @@ def main(exp_params):
     
     store_results(csv_data, results_df, ckpt_path,exp_params)
 
+
+def return_model_info(params):
+    print(f"Model properties:")
+    print(f"Model name -----> {params['model']}")
+    print(f"Initial weights -----> {params['custom_pre_trained_weights']}")
+    print(f"Decoder structure -----> {params['model_structure']}")
+    print(f"Fine tuning strategy -----> {params['layers_to_unfreeze']}")
+    print(f"Data modality -----> {params['data_modality']}")
+    print(f"Balancing strategy -----> factor={params['balancing_factor']}, balanced_data={params['balanced_data']}, weighted_loss={params['use_balanced_weights']}, balance_validation={params['balance_validation']}")
+    print(f"Selected sequence -----> {params['censor_time']}")
+
 def prepare_balanced_validation(worker,prefetch_factor,exp_params, grid_dict, transform):
     exp_params_temp=exp_params.copy()
     exp_params_temp['balance_validation'] = True
     exp_params_temp['balancing_factor'] = 1.0
 
     train_df = pd.read_parquet(exp_params_temp['list_of_ids_paths'])
-    exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params_temp,verbose=VERBOSE,class_col=CLASS_COL)
+    exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params_temp,verbose=VERBOSE,class_col=CLASS_COL, exclude_cases=True)
 
     _,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params_temp,exclusion_set,val_exclusion_set, grid_dict, transform, 
                                                     SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df)

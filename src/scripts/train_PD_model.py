@@ -431,7 +431,8 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
                          lr_classifier_head=exp_params['lr_classifier_head'], example_input_array=example_input_array, 
                          opt_groups=define_optimization_groups, num_epochs=exp_params['num_epochs'], lr_scheduling=exp_params['lr_scheduling'],
                          weight_decay=exp_params['weight_decay'], warmup_fraction=exp_params['warmup_fraction'], 
-                         eta_min_cosine=exp_params['eta_min_cosine'], batch_size=exp_params['batch_size'],**additional_kwargs)
+                         eta_min_cosine=exp_params['eta_min_cosine'], batch_size=exp_params['batch_size'],
+                         accumulate_grad_batches=exp_params['accumulate_grad_batches'], world_size=1,**additional_kwargs)
     return lit_model
 
 #model loading
