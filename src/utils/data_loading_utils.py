@@ -23,6 +23,7 @@ from functools import partial
 import pickle
 import cv2
 import gc
+import glob
 
 from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform, place_patches, get_grid_sample
 
@@ -921,7 +922,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     # a callable transform
                     img_view = augmentation_transform[1](img)
 
-                if invert_color and not debug:
+                if invert_color:
                     img_view = ImageOps.invert(img_view)
                 
                 if to_grayscale:
@@ -1028,16 +1029,28 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
             if case_grid_pattern[q-1]=='1':
                 new_list.append(q)
         return new_list
+    
+    if rempli_seulq12==0: 
+        #remove questionnaires>=12 if present and q12 was not filled alone
+        last_valid=11
+    else:
+        last_valid=13
+    
+    if last_q is None:
+        last_q=13
+
+    if last_q>last_valid:
+        last_q=last_valid    
 
     if censor_time=='all':
-        list_questionnaires = list(range(1,14))
+        list_questionnaires = list(range(1,last_valid+1))
     elif censor_time=='pre_diagnosis':
         list_questionnaires = [q for q in range(1,last_q+1)]
         list_questionnaires = filter_grid_pattern(case_grid_pattern, list_questionnaires)
     elif censor_time=='pre_diagnosis_1y':
         list_questionnaires = [q for q in range(1,last_q+1) if questionnaire_info[q]['case_dt_dateq']<=-1]
         list_questionnaires = filter_grid_pattern(case_grid_pattern, list_questionnaires)
-    elif censor_time=='last_and_previous':
+    elif censor_time=='last_and_previous':     
         list_questionnaires = [last_q]
         for q in range(last_q-1,0,-1):
             if grid_pattern[q-1]=='1' and q in subject_images:
@@ -1045,13 +1058,13 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
                 break 
     elif censor_time=='last_and_successive':
         list_questionnaires = [last_q]
-        for q in range(last_q+1,14):
+        for q in range(last_q+1,last_valid+1):
             if grid_pattern[q-1]=='1' and q in subject_images:
                 list_questionnaires.append(q)
                 break
     elif censor_time=='last_successive_and_previous':
         list_questionnaires = [last_q]
-        for q in range(last_q+1,14):
+        for q in range(last_q+1,last_valid+1):
             if grid_pattern[q-1]=='1' and q in subject_images:
                 list_questionnaires.append(q)
                 break
@@ -1061,7 +1074,7 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
                 break 
     elif censor_time=='successive':
         list_questionnaires = []
-        for q in range(last_q+1,14):
+        for q in range(last_q+1,last_valid+1):
             if grid_pattern[q-1]=='1' and q in subject_images:
                 list_questionnaires.append(q)
         list_questionnaires = filter_grid_pattern(case_grid_pattern, list_questionnaires)
@@ -1069,13 +1082,20 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
         def count_ones(s):
             return s.count('1')
         if count_ones(grid_pattern)>=8:
-            list_questionnaires = [q for q in range(1,14)]
+            list_questionnaires = [q for q in range(1,last_valid+1)]
         else:
             list_questionnaires = []
+    elif censor_time=='first_and_last':
+        list_questionnaires = []
+        for q in range(1,last_valid+1):
+            if grid_pattern[q-1]=='1' and q in subject_images:
+                list_questionnaires.append(q)
+                break
+        for q in range(last_valid,0,-1):
+            if grid_pattern[q-1]=='1' and q in subject_images:
+                list_questionnaires.append(q)
+                break
     
-    if rempli_seulq12==0: 
-        #remove questionnaires>=12 if present and q12 was not filled alone
-        list_questionnaires = [q for q in list_questionnaires if q<12]
     #print(f"List {subject_id}: ",list_questionnaires)
     return list_questionnaires
 
@@ -1414,7 +1434,7 @@ def collate_groups_PD(batch_of_groups, debug=False):
 #------ Build dataset --------
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
                        huggingface_transform=False,augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None,
-                       censor_time='pre_diagnosis', filter_modality='digit', debug=False, grouped=False, train_df=None, exp_params=None):
+                       censor_time='pre_diagnosis', filter_modality='digit', debug=False, grouped=False, train_df=None, exp_params=None, partial_batch=False):
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
@@ -1435,8 +1455,11 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     filter_modality = modalities_map.get(filter_modality)  # Normalize filter modality
 
     # 2. File gathering
-    shard_files = glob.glob(shard_pattern)
-    shard_files.sort()
+    if isinstance(shard_pattern, str):
+        shard_files = glob.glob(shard_pattern)
+        shard_files.sort()
+    else:
+        shard_files = shard_pattern  # assume it's already a list of files
         
     # 3. Build the WebDataset Pipeline
     dataset = wds.WebDataset(shard_files, shardshuffle=100, 
@@ -1465,7 +1488,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                                                     grid_dict=grid_dict, censor_time=censor_time)) # This replaces .map() and .select()
                 .batched(batch_size,
                         collation_fn=partial(collate_variable_sequences_PD, questionnaire_to_slot=None),
-                        partial=False)
+                        partial=partial_batch)
             )
         elif isinstance(modality, list):
             compose_fn = create_sequence_group_flattener_PD_multiview if grouped else create_sequence_flattener_PD_multiview
@@ -1480,7 +1503,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                                     exp_params=exp_params)) # This replaces .map() and .select()
                 .batched(batch_size,
                         collation_fn=partial(collate_fn, debug=debug),
-                        partial=False)
+                        partial=partial_batch)
             )
         else:
             raise ValueError("grid_dict must be provided for PD dataset preparation.")
@@ -1490,7 +1513,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
 
 #pipelines
 def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, 
-                       SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None):
+                       SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None, cross_val=False):
     def worker_init_fn(worker_id):
         # Force OpenCV to use a single thread per DataLoader worker process
         cv2.setNumThreads(0)
@@ -1520,8 +1543,20 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
 
     )
 
-    train_dataset = prepare_PD_dataset(SHARD_PATTERN_train, exclusion_set=exclusion_set,train_df=train_df, exp_params=exp_params, **common_kwargs)
-    val_dataset   = prepare_PD_dataset(SHARD_PATTERN_val, exclusion_set=val_exclusion_set,train_df=train_df,exp_params=exp_params, **common_kwargs)
+    if cross_val:
+        train_shards = sorted(glob.glob(SHARD_PATTERN_train))
+        val_shards   = sorted(glob.glob(SHARD_PATTERN_val))
+        all_shards   = train_shards + val_shards
+        train_input = all_shards
+        val_input   = all_shards
+    else:
+        train_input = SHARD_PATTERN_train
+        val_input   = SHARD_PATTERN_val
+
+    train_dataset = prepare_PD_dataset(train_input, exclusion_set=exclusion_set,train_df=train_df, exp_params=exp_params, 
+                                       partial_batch=False, **common_kwargs)
+    val_dataset   = prepare_PD_dataset(val_input, exclusion_set=val_exclusion_set,train_df=train_df,exp_params=exp_params, 
+                                       partial_batch=True, **common_kwargs)
     
     train_loader = DataLoader(
         train_dataset, 

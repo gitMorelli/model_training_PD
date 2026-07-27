@@ -672,6 +672,28 @@ def get_grid_properties():
     print(f"saved to {out_path}")
 
 
+def get_normalization_values():
+    input_file = "/home/a_morelli/datasets/others/dataset_overview.csv"
+    df = pd.read_csv(input_file)
+    pix_sum = df['pixel_sum'].sum()                
+    pix_sqsum = df['pixel_sq_sum'].sum()           
+    pix_count = df['num_pixels'].sum()             
+    mean = pix_sum / pix_count                  
+    var  = pix_sqsum / pix_count - mean ** 2
+    std  = np.sqrt(np.clip(var, 0, None))                          # clamp guards tiny negative drift
+    print("Normalization values:")
+    print(f"Mean: {mean}")
+    print(f"Std: {std}")
 if __name__ == "__main__":
-    get_grid_properties()
+    #get_grid_properties()
+    get_normalization_values()
+    '''
+    row['subject_id'] = sid
+    row['q'] = q
+    row['modality'] = map_modality(modality)
+    row['memory'] = meta['memory_size_bytes']
+    row['pixel_sum'] = meta['pixel_sum']
+    row['pixel_sq_sum'] = meta['pixel_sq_sum']
+    row['num_pixels'] = meta['num_pixels']
+    '''
     

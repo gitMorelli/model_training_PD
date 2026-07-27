@@ -557,23 +557,23 @@ class ModelPDBase(L.LightningModule):
 
         # CHANGED: all counts now live under "{stage}/class_counts/..."
         for i in range(k):
-            self.log(f"{stage}/class_counts/class_{i}_count", float(n[i]),
+            self.log(f"class_counts/{stage}_class_{i}_count", float(n[i]),
                      rank_zero_only=True)
             if total > 0:
-                self.log(f"{stage}/class_counts/class_{i}_fraction", n[i] / total,
+                self.log(f"class_counts/{stage}_class_{i}_fraction", n[i] / total,
                          rank_zero_only=True)
 
         if k == 2:   # keep the familiar binary chart
-            self.log(f"{stage}/class_counts/class_ratio",
+            self.log(f"class_counts/{stage}_class_ratio",
                      n[0] / n[1] if n[1] > 0 else float("inf"), rank_zero_only=True)
         else:
-            self.log(f"{stage}/class_counts/imbalance_ratio",
+            self.log(f"class_counts/{stage}_imbalance_ratio",
                      max(n) / min(n) if min(n) > 0 else float("inf"),
                      rank_zero_only=True)
 
         for i, r in enumerate(recalls):
             if r == r:                                # skip NaN
-                self.log(f"{stage}/recall_class_{i}", r, rank_zero_only=True)
+                self.log(f"class_counts/{stage}_recall_class_{i}", r, rank_zero_only=True)
 
         balanced_acc = (sum(recalls) / k
                         if all(r == r for r in recalls) else float("nan"))
@@ -772,7 +772,7 @@ class ModelPDClassification(ModelPDBase):
     """
 
     def __init__(self, write_log, model, class_counts, num_classes=None,
-                 use_balanced_weights=True, balancing_factor=1.0, balanced_data=False,
+                 use_balanced_weights=True, balancing_factor=1.0, balanced_data=False, drop_train_pr_auc=True,
                  **base_kwargs):
         # ---- normalize counts --------------------------------------------------
         counts = torch.as_tensor(class_counts, dtype=torch.float32)
@@ -833,25 +833,28 @@ class ModelPDClassification(ModelPDBase):
         #      PR-AUC is average precision of the positive class.
         # n_eff  > 2 -> Multiclass* with macro averaging; there is no single
         #      "positive class", so f1_pos falls back to macro-F1.
-        def _build_metrics(k):
+        def _build_metrics(k, prefix, include_pr_auc=True):
+            metrics = {}
             if k == 2:
-                return MetricCollection({
-                    "pr_auc": BinaryAveragePrecision(),
-                    "f1_pos": BinaryF1Score(),               # F1 of class 1
-                    "mcc":    BinaryMatthewsCorrCoef(),
-                })
-            return MetricCollection({
-                "pr_auc": MulticlassAveragePrecision(num_classes=k, average="macro"),
-                "f1_pos": MulticlassF1Score(num_classes=k, average="macro"),  # macro-F1
-                "mcc":    MulticlassMatthewsCorrCoef(num_classes=k),
-            })
+                if include_pr_auc:
+                    metrics["pr_auc"] = BinaryAveragePrecision()
+                metrics["f1_pos"] = BinaryF1Score()
+                metrics["mcc"]    = BinaryMatthewsCorrCoef()
+            else:
+                if include_pr_auc:
+                    metrics["pr_auc"] = MulticlassAveragePrecision(num_classes=k, average="macro")
+                metrics["f1_pos"] = MulticlassF1Score(num_classes=k, average="macro")
+                metrics["mcc"]    = MulticlassMatthewsCorrCoef(num_classes=k)
+            # prefix goes straight on the collection -> no .clone() needed,
+            # and fresh instances per collection (metrics are stateful).
+            return MetricCollection(metrics, prefix=prefix)
 
-        base = _build_metrics(n_eff)
-        # NOTE: PR-AUC (AveragePrecision) accumulates every score+target over the
-        # epoch. On val that's fine; on a very large TRAIN set it can be memory
-        # heavy — drop self.train_metrics["pr_auc"] if that bites.
-        self.train_metrics = base.clone(prefix="train/")
-        self.val_metrics = base.clone(prefix="val/")
+        # drop_train_pr_auc: skip the memory-heavy AveragePrecision on train only.
+        self.train_metrics = _build_metrics(n_eff, prefix="train/",
+                                            include_pr_auc=not drop_train_pr_auc)
+        self.val_metrics   = _build_metrics(n_eff, prefix="val/",
+                                            include_pr_auc=True)
+
 
     # ---- score shaping for the torchmetrics collection ------------------------
     def _scores_for_metrics(self, outputs):
@@ -1072,39 +1075,78 @@ def grouped_ce_loss(scores, labels, group_ids):
 # -------------- Callbacks -------------------
 #tracking experiments
 class BestMetricTracker(L.Callback):
+    """Tracks best-so-far validation metrics. Selection now follows PR-AUC
+    (max), matching the ModelCheckpoint / EarlyStopping monitor, so best_epoch
+    points at the epoch whose checkpoint was saved."""
+
+    # "higher is better"  -> logged metric name : attribute
+    _MAX_METRICS = {
+        "val/pr_auc":       "best_val_pr_auc",
+        "val/f1_pos":       "best_val_f1_pos",
+        "val/mcc":          "best_val_mcc",
+        "val/balanced_acc": "best_val_balanced_acc",
+        "val/acc":          "best_val_acc",
+        "train/acc_epoch":  "best_train_acc",   # note: train keeps the _epoch suffix
+    }
+    # "lower is better"
+    _MIN_METRICS = {
+        "val/loss":            "best_val_loss",              # weighted (training objective)
+        "val/loss_unweighted": "best_val_loss_unweighted",   # proper NLL, diagnostic only
+    }
+    # metric that defines "the best epoch"
+    _ANCHOR = ("val/pr_auc", "max")
+
     def __init__(self):
         super().__init__()
-        self.best_train_acc = 0.0
-        self.best_val_acc = 0.0
-        self.best_val_loss = float('inf')
+        for attr in self._MAX_METRICS.values():
+            setattr(self, attr, float("-inf"))
+        for attr in self._MIN_METRICS.values():
+            setattr(self, attr, float("inf"))
         self.best_epoch = 0
+        self._anchor_best = float("-inf") if self._ANCHOR[1] == "max" else float("inf")
+
+    @staticmethod
+    def _get(metrics, key):
+        """Fetch a metric as a float, or None if missing/NaN."""
+        v = metrics.get(key)
+        if v is None:
+            return None
+        v = v.item() if hasattr(v, "item") else float(v)
+        return v if v == v else None      # drop NaN (e.g. degenerate pr-auc epoch)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        # Prevent tracking during the initial sanity check pass
-        if trainer.sanity_checking:
+        if trainer.sanity_checking:       # skip the sanity pass
             return
-
-        # Fetch the logged metrics dictionary
         metrics = trainer.callback_metrics
-        
-        # Extract values (handling the _epoch suffix for training metrics)
-        train_acc = metrics.get("train_acc_epoch") 
-        val_loss = metrics.get("val_loss")
-        val_acc = metrics.get("val_acc")
-        
-        current_epoch = trainer.current_epoch
+        epoch = trainer.current_epoch
 
-        # Keep track of global maximums / minimums
-        if train_acc is not None:
-            self.best_train_acc = max(self.best_train_acc, train_acc.item())
-        
-        if val_acc is not None:
-            self.best_val_acc = max(self.best_val_acc, val_acc.item())
-            
-        if val_loss is not None and val_loss.item() < self.best_val_loss:
-            self.best_val_loss = val_loss.item()
-            # If you want the epoch where the best validation loss happened:
-            self.best_epoch = current_epoch
+        for key, attr in self._MAX_METRICS.items():
+            v = self._get(metrics, key)
+            if v is not None:
+                setattr(self, attr, max(getattr(self, attr), v))
+
+        for key, attr in self._MIN_METRICS.items():
+            v = self._get(metrics, key)
+            if v is not None:
+                setattr(self, attr, min(getattr(self, attr), v))
+
+        # anchor best_epoch to the selection metric
+        anchor_key, anchor_mode = self._ANCHOR
+        v = self._get(metrics, anchor_key)
+        if v is not None:
+            improved = (v > self._anchor_best if anchor_mode == "max"
+                        else v < self._anchor_best)
+            if improved:
+                self._anchor_best = v
+                self.best_epoch = epoch
+
+    @property
+    def best_metrics(self):
+        """Convenience dict for end-of-run printing."""
+        d = {attr: getattr(self, attr)
+             for attr in list(self._MAX_METRICS.values()) + list(self._MIN_METRICS.values())}
+        d["best_epoch"] = self.best_epoch
+        return d
 
 class ClearCache(L.Callback):
     def on_validation_epoch_start(self, trainer, pl_module):
@@ -1421,10 +1463,10 @@ def get_optimization_groups(model_name,exp_params):
         ] # or None or other configurations fo other models
     elif 'FiveStageResidualStridedConvNet' in model_name:
         define_optimization_groups = [
-            {'names': ['stem', 'stages.0'], 'lr': 1e-5, 'lr_name': 'lr_1'},   # ~ conv1/bn1/layer1
-            {'names': ['stages.1'],         'lr': 3e-5, 'lr_name': 'lr_2'},   # ~ layer2
-            {'names': ['stages.2'],         'lr': 1e-4, 'lr_name': 'lr_3'},   # ~ layer3
-            {'names': ['stages.3', 'stages.4'], 'lr': 5e-4, 'lr_name': 'lr_4'},  # ~ layer4
+            {'names': ['stem', 'stages.0'], 'lr': exp_params['lr_backbone']*0.1*0.1, 'lr_name': 'lr_1'},   # ~ conv1/bn1/layer1
+            {'names': ['stages.1'],         'lr': exp_params['lr_backbone']*0.1, 'lr_name': 'lr_2'},   # ~ layer2
+            {'names': ['stages.2'],         'lr': exp_params['lr_backbone']*0.5, 'lr_name': 'lr_3'},   # ~ layer3
+            {'names': ['stages.3', 'stages.4'], 'lr': exp_params['lr_backbone'], 'lr_name': 'lr_4'},  # ~ layer4
             {'names': ['head', 'projector'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
             {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_classifier'},
         ]

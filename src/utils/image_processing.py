@@ -665,6 +665,9 @@ def get_mu_std(exp_params,verbose=False):
         elif exp_params['norm_mu']=='handedness':
             mu = [0.06040578708052635, 0.06040578708052635, 0.06040578708052635]
             std = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]
+        elif exp_params['norm_mu']=='PD_window':
+            mu = [0.0610334410445247, 0.0610334410445247, 0.0610334410445247]
+            std = [0.23933505962649537, 0.23933505962649537, 0.23933505962649537]
     if verbose:
         print(f"Using normalization mean: {mu} and std: {std}")
     

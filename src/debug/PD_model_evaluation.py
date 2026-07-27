@@ -50,10 +50,10 @@ from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireMo
 from src.scripts.train_PD_model import model_initialization
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
-CHECKPOINT_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints"
-version='22'
+CHECKPOINT_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet50_model_results/checkpoints"
+version='9'
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-epoch=05-val_loss=0.69.ckpt"
+checkpoint_to_load=f"v_{version}/best-29-0.2294.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)
@@ -121,7 +121,7 @@ def main(exp_params):
     # 1. Gather predictions using the best checkpoint saved during training
     # Setting ckpt_path="best" tells Lightning to automatically find your top model
     ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
-    lit_model = litmodel_initialization(model, ckpt_path, exp_params)
+    lit_model = litmodel_initialization_from_checkpoint(model, ckpt_path, exp_params)
 
     tb_logger=False
     # 4. Initialize Trainer and Fit
@@ -257,7 +257,7 @@ def store_results(csv_data, results_df, ckpt_path,params):
     with open(os.path.join(os.path.dirname(ckpt_path), f"predictions_metadata.pkl"), 'wb') as f:
         pickle.dump(params, f)
 
-def litmodel_initialization(model, ckpt_path, exp_params):
+def litmodel_initialization_from_checkpoint(model, ckpt_path, exp_params):
     if exp_params['grouped']:
         model_class=ModelPDGrouped
     else:
@@ -479,7 +479,7 @@ def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
     y_scores = y_prob[:, pos_label]
  
     # 1. threshold-free view
-    _threshold_free_report_binary(y_true, y_scores, pos_label)
+    pr_auc, roc_auc, prevalence = _threshold_free_report_binary(y_true, y_scores, pos_label)
  
     # 2. pick / apply a threshold
     if threshold is None:
@@ -514,7 +514,8 @@ def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
         _plot_roc_curve_binary(y_true, y_scores, pos_label, threshold,
                                path=os.path.join(out_dir_path, f"roc_curve_{split}.png"))
     return {"threshold": threshold, "y_pred": y_pred,
-            "sensitivity": sens, "specificity": spec, "youden_j": sens + spec - 1}
+            "sensitivity": sens, "specificity": spec, "youden_j": sens + spec - 1,
+            "pr_auc": pr_auc, "roc_auc": roc_auc, "prevalence": prevalence}
 # ======================================================================
 # multiclass path -- used when C > 2
 # ======================================================================
@@ -601,7 +602,7 @@ def _analyze_multiclass(y_true, y_prob, results_df, split, class_names,
     labels = np.arange(n_classes)
  
     # 1. threshold-free view (macro OvR)
-    _threshold_free_report_mc(y_true, y_prob, class_names)
+    macro_ap, roc_auc, prevalence = _threshold_free_report_mc(y_true, y_prob, class_names)
  
     # 2. predictions via argmax (no threshold in multiclass)
     y_pred = np.argmax(y_prob, axis=1)
@@ -623,7 +624,8 @@ def _analyze_multiclass(y_true, y_prob, results_df, split, class_names,
                           path=os.path.join(out_dir_path, f"pr_curve_{split}.png"))
         _plot_roc_curve_mc(y_true, y_prob, class_names,
                            path=os.path.join(out_dir_path, f"roc_curve_{split}.png"))
-    return {"threshold": None, "y_pred": y_pred}
+    return {"threshold": None, "y_pred": y_pred,
+            "pr_auc": macro_ap, "roc_auc": roc_auc}
 
 
 # ======================================================================

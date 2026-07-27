@@ -1,19 +1,20 @@
-Grid dictionary loaded successfully. Number of entries: 11023
-saved to /home/a_morelli/vscode_projects/model_training/results/tests/grid_stats_by_q_class.txt
+Normalization values:
+Mean: 0.0610334410445247
+Std: 0.23933505962649537
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5104551
+Job ID: 5107239
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n10
+Nodelist: n20
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-07-25 14:16:31
-Job ended at:   2026-07-25 14:19:34
-Job Wall-clock time: 00:03:03
-CPU Utilized: 00:02:58
-CPU Efficiency: 24.32% of 00:12:12 core-walltime
-Memory Utilized: 2.65 GB
-Memory Efficiency: 16.57% of 16.00 GB
+Job started at: 2026-07-26 01:55:14
+Job ended at:   2026-07-26 01:55:21
+Job Wall-clock time: 00:00:07
+CPU Utilized: 00:00:05
+CPU Efficiency: 17.86% of 00:00:28 core-walltime
+Memory Utilized: 3.23 MB
+Memory Efficiency: 0.02% of 16.00 GB

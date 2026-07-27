@@ -53,6 +53,12 @@ def pre_trained_weights(name):
     elif name == 'pre_trained_E3N_resnet50':
         out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_1',
                     'best-epoch=00-val_loss=0.30.ckpt')
+    elif name == 'pre_trained_E3N_resnet50_window':
+        out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_2',
+                    'best-02-0.2264.ckpt')
+    elif name == 'pre_trained_E3N_custom_window':
+        out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_1',
+                    'best-00-0.8068.ckpt')
     '''os.path.join(
         '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
         'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
@@ -68,7 +74,7 @@ exp_params = {
 
     #debugging
     'debugging_callbacks':True,
-    'fast_dev_run':None, #can be False, None or True, False and None have same behavior
+    'fast_dev_run':False, #can be False, None or True, False and None have same behavior
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
@@ -79,27 +85,27 @@ exp_params = {
 
 
     #experiment parameters
-    'data_modality': ['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)],
+    'data_modality': ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)],
     #['X_crop','X']+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
     'num_tiles': 3,
     'use_grid': True,
     'use_balanced_weights': True,
-    'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': True, #note that this and balace_validation are independent
+    'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
+    'balanced_data': False, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'successive',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'first_and_last',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':'resnet50',#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':"FiveStageResidualStridedConvNet",#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': pre_trained_weights('pre_trained_E3N_resnet50'), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50'
+    'custom_pre_trained_weights': pre_trained_weights('pre_trained_E3N_custom_window'), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50'
     'model_structure': 'SetQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'model_parameters': {
         'd_model': 128, 
@@ -107,34 +113,37 @@ exp_params = {
         'n_layers':1,
         'ff_mult':2,
         'dropout': 0.4,
+        'count_norm': 2
     },
 
     #Transforms definitions
     'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-    'norm_mu': 'handedness', #imagenet,handedness,mnist
-    'norm_std': 'handedness',
+    'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
+    'norm_std': 'PD_window',
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
     
     #Training params definition
-    'use_opt_groups': False,
-    'lr_backbone': 1e-7,
+    'use_opt_groups': True,
+    'lr_backbone': 1e-5,
     'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 2,
-    'num_epochs': 30,
-    'patience': 30,
+    'batch_size': 4,
+    'num_epochs': 60,
+    'patience': 20,
+    'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
     'val_check_interval': 1.0, #if integers the number of steps after which 
     #to perform validation, if float the fraction of the epoch after which to perform validation, 1.0 is the default value for doing at epoch end
-    'eta_min_cosine': 1e-8,
+    'eta_min_cosine': 1e-7,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier','layer4'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
+    'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
+    #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
-    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "16-mixed", #None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
     'gradient_clip_val': 1.0, #1.0, None
 
@@ -164,6 +173,10 @@ define_optimization_groups = get_optimization_groups(model_name=exp_params['mode
 
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
+exp_params['CHECKPOINT_PATH'] = CHECKPOINT_PATH
+exp_params['OUTPUT_PATH'] = OUTPUT_PATH
+exp_params['SOURCE_PATH'] = SOURCE_PATH
+
 DEBUG_IMGS = True
 VERBOSE = True
 
@@ -302,24 +315,30 @@ def validity_checks(exp_params):
     if exp_params['grouped']==False and 'group' in exp_params['data_folder']:
         raise ValueError("Error: you have selected grouped=False but the data_folder contains 'group' in its name. Please check your settings.")
     
-def trainer_definition(current_version, exp_params):
+def trainer_definition(current_version, exp_params, cv=None):
+
+    stopping_metric = exp_params['stopping_metric']  # e.g., 'val/pr_auc'
+    if stopping_metric in ['val/pr_auc', 'val/roc_auc', 'val/f1', 'val/mcc', 'val/accuracy']:
+        mode = 'max'  # We want to maximize these metrics
+    elif stopping_metric in ['val/loss',"val/loss_unweighted"]:
+        mode = 'min'  # We want to minimize loss
 
     # 2. Setup Checkpointing
     checkpoint_callback = ModelCheckpoint(
-        monitor="val/pr_auc",
-        dirpath=os.path.join(CHECKPOINT_PATH, f'v_{current_version}'),
+        monitor=stopping_metric,
+        dirpath=os.path.join(exp_params['CHECKPOINT_PATH'], f'v_{current_version}'),
         # auto_insert_metric_name=False so the '/' in 'val/pr_auc' is NOT turned
         # into a subdirectory — the value is substituted, not the key.
-        filename="best-{epoch:02d}-{val/pr_auc:.4f}",
+        filename=f"best-{{epoch:02d}}-{{{stopping_metric}:.4f}}",
         auto_insert_metric_name=False,
         save_top_k=1,
-        mode="max",
+        mode=mode,
         save_last=False,
     )
 
     periodic_ckpt = ModelCheckpoint(
-        dirpath=os.path.join(CHECKPOINT_PATH, f'v_{current_version}'),
-        filename="latest-{epoch:02d}",
+        dirpath=os.path.join(exp_params['CHECKPOINT_PATH'], f'v_{current_version}'),
+        filename=f"latest-{{epoch:02d}}",
         auto_insert_metric_name=False, #auto_insert_metric_name=False with {val/pr_auc:.4f} produces best-04-0.7321.ckpt
         save_top_k=1,
         every_n_epochs=1,
@@ -328,30 +347,41 @@ def trainer_definition(current_version, exp_params):
 
     # 3. Setup Early Stopping
     early_stop_callback = EarlyStopping(
-        monitor="val/pr_auc",
+        monitor=stopping_metric,
         patience=exp_params['patience'],
-        mode="max",
+        mode=mode,
         verbose=True,
     )
 
     metrics_tracker = BestMetricTracker()
     
     # 1. Construct clean paths (removed trailing slash, kept version as a string/int)
-    log_root = os.path.join(SOURCE_PATH, 'tensor_board_logging')
-    version_dir = os.path.join(log_root, exp_params['model'], 'version_'+str(current_version)) #tensorboard automatically adds 'version_' prefix, 
-    #so we match that format here.
-
-    # 2. Wipe the old folder if it exists
-    if os.path.exists(version_dir):
-        shutil.rmtree(version_dir)
-
-    # 3. Initialize the logger
-    tb_logger = TensorBoardLogger(
-        save_dir=log_root,
-        name=exp_params['model'],
-        log_graph=False, 
-        version=current_version  # Works perfectly as an integer or string
-    )
+    if cv is not None:
+        log_root = os.path.join(exp_params['SOURCE_PATH'], 'tensor_board_logging',exp_params['model'],str(current_version))
+        version_dir = os.path.join(log_root, 'run_'+str(cv))
+        if os.path.exists(version_dir):
+            shutil.rmtree(version_dir)
+        # 3. Initialize the logger
+        tb_logger = TensorBoardLogger(
+            save_dir=log_root,
+            name='',
+            log_graph=False, 
+            version='run_'+str(cv)  
+        )
+    else:
+        log_root = os.path.join(exp_params['SOURCE_PATH'], 'tensor_board_logging')
+        version_dir = os.path.join(log_root, exp_params['model'], 'version_'+str(current_version)) #tensorboard automatically adds 'version_' prefix, 
+        #so we match that format here.
+        # 2. Wipe the old folder if it exists
+        if os.path.exists(version_dir):
+            shutil.rmtree(version_dir)
+        # 3. Initialize the logger
+        tb_logger = TensorBoardLogger(
+            save_dir=log_root,
+            name=exp_params['model'],
+            log_graph=False, 
+            version=current_version  # Works perfectly as an integer or string
+        )
 
     optional = ['precision', 'accumulate_grad_batches', 'gradient_clip_val', 'fast_dev_run']
     extra_kwargs = {k: exp_params[k] for k in optional if exp_params.get(k) is not None}
@@ -426,9 +456,10 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
         d_model = kwargs.get('d_model', 128)
         ff_mult = kwargs.get('ff_mult', 2)
         dropout = kwargs.get('dropout', 0.4)
+        count_norm = kwargs.get('count_norm', 2)
         model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'],  
                                            d_model=d_model, ff_mult=ff_mult, view_agg='attention', dropout=dropout,
-                                           use_spread=True, use_count_feature=True,count_norm=2)
+                                           use_spread=True, use_count_feature=True,count_norm=count_norm)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
     
@@ -527,7 +558,7 @@ def get_trainable_parameters_string(model):
 
 def save_experiment_logs(params_dict, status_suffix=""):
     """Helper function to write/append dictionary to the CSV log file."""
-    log_path = os.path.join(CHECKPOINT_PATH, "experiments_log.csv")
+    log_path = os.path.join(params_dict['CHECKPOINT_PATH'], "experiments_log.csv")
         
     if not os.path.exists(log_path):
         df = pd.DataFrame([params_dict])
