@@ -50,10 +50,12 @@ from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireMo
 from src.scripts.train_PD_model import model_initialization
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
-CHECKPOINT_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/FiveStageResidualStridedConvNet_model_results/checkpoints"
-version='3'
+model_name = 'resnet18' #"FiveStageResidualStridedConvNet"
+CHECKPOINT_PATH = f"/mnt/beegfs02/scratch/a_morelli/model_training/PD/{model_name}_model_results/checkpoints"
+version='25'
+old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-08-0.2662.ckpt"
+checkpoint_to_load=f"v_{version}/best-22-0.2384.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)
@@ -76,14 +78,11 @@ SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
 VERBOSE = False
 CLASS_COL = exp_params['class_col'] 
 
-
-#overrides
-#print(exp_params['custom_pre_trained_weights'],flush=True)
-#assert 1==0
-'''
-exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths('PD', False, False)
-print(exp_params['custom_pre_trained_weights'],flush=True)
-exp_params['custom_pre_trained_weights'] = None'''
+if old_run:
+    exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths('PD', False, False)
+    print(exp_params['custom_pre_trained_weights'],flush=True) 
+    exp_params['custom_pre_trained_weights_old'] = exp_params['custom_pre_trained_weights']
+    exp_params['custom_pre_trained_weights'] = None #why do i need this?
 
 def main(exp_params):
     args = get_args()
@@ -168,12 +167,26 @@ def main(exp_params):
 def return_model_info(params):
     print(f"Model properties:")
     print(f"Model name -----> {params['model']}")
-    print(f"Initial weights -----> {params['custom_pre_trained_weights']}")
+    if 'custom_pre_trained_weights_old' in params:
+        print(f"Initial weights -----> {params['custom_pre_trained_weights_old']} (old run)")
+    else:
+        print(f"Initial weights -----> {params['custom_pre_trained_weights']}")
     print(f"Decoder structure -----> {params['model_structure']}")
     print(f"Fine tuning strategy -----> {params['layers_to_unfreeze']}")
     print(f"Data modality -----> {params['data_modality']}")
     print(f"Balancing strategy -----> factor={params['balancing_factor']}, balanced_data={params['balanced_data']}, weighted_loss={params['use_balanced_weights']}, balance_validation={params['balance_validation']}")
     print(f"Selected sequence -----> {params['censor_time']}")
+    print('Training parameters:')
+    print(f"  use_opt_groups: {params['use_opt_groups']}")
+    print(f"  lr_backbone: {params['lr_backbone']}")
+    print(f"  lr_classifier_head: {params['lr_classifier_head']}")
+    print(f"  lr_scheduling: {params['lr_scheduling']}")
+    #print(f"  batch_size: {params['batch_size']}")
+    print(f"  num_epochs: {params['num_epochs']}")
+    print(f"  patience: {params['patience']}")
+    print(f"  eta_min_cosine: {params['eta_min_cosine']}")
+    print(f"  weight_decay: {params['weight_decay']}")
+    print(f"  warmup_fraction: {params['warmup_fraction']}")
 
 def prepare_balanced_validation(worker,prefetch_factor,exp_params, grid_dict, transform):
     exp_params_temp=exp_params.copy()

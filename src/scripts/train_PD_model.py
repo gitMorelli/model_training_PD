@@ -50,6 +50,9 @@ def pre_trained_weights(name):
     if name == 'pre_trained_E3N_resnet18':
         out_path =os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_2',
                     'best-epoch=01-val_loss=0.23.ckpt')
+    elif name == 'pre_trained_E3N_resnet18_window':
+        out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_4',
+                    'best-02-0.2222.ckpt')
     elif name == 'pre_trained_E3N_resnet50':
         out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_1',
                     'best-epoch=00-val_loss=0.30.ckpt')
@@ -66,6 +69,12 @@ def pre_trained_weights(name):
     #resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
     #resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
     return out_path
+
+def get_input_modality(name):
+    if name=='mixed_view':
+        return ['X_crop', 'digit_full', 'digit_crop', 'digit', 'digit', 'digit', 'text_full', 'text_crop', 'text', 'text', 'text']
+    elif name=='window_view':
+        return ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)]
 
 exp_params = {
     'problem': 'PD', #handedness, PD, pre_training
@@ -85,54 +94,56 @@ exp_params = {
 
 
     #experiment parameters
-    'data_modality': ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)],
-    #['X_crop','X']+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
-    #or list e.g. ['digit_full','digit_crop','digit','digit','digit'] for 5 tiles
+    'data_modality': get_input_modality('window_view'), #mixed_view, window_view
     'num_tiles': 3,
     'use_grid': True,
     'use_balanced_weights': True,
-    'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': False, #note that this and balace_validation are independent
+    'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
+    'balanced_data': True, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'first_and_last',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':"FiveStageResidualStridedConvNet",#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':"resnet18",#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': pre_trained_weights('pre_trained_E3N_custom_window'), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50'
-    'model_structure': 'SetQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+    'custom_pre_trained_weights': pre_trained_weights('pre_trained_E3N_resnet18_window'), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
+    #or
+    'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
+    'norm_std': 'PD_window',
+    'model_structure': 'SequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'model_parameters': {
         'd_model': 128, 
-        'n_heads': 4,
+        'n_heads': 4, # -> for each head 128/4 = 32 is the hidden dimension during the attention computation 
         'n_layers':1,
-        'ff_mult':2,
+        'ff_mult':2, # the hidden dimension of the feedforward layer is ff_mult*d_model
         'dropout': 0.4,
-        'count_norm': 2
+        'count_norm': 2,
+        'use_spread': True, #add a variance feature of dimension d_model to the average d_model feature
+        'use_count_feature': True,
+        'use_attention_pool': False #if true overrides use_spread and use_count_feature 
     },
 
     #Transforms definitions
     'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-    'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
-    'norm_std': 'PD_window',
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
     
     #Training params definition
-    'use_opt_groups': True,
-    'lr_backbone': 1e-5,
+    'use_opt_groups': False,
+    'lr_backbone': 1e-6,
     'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
     'num_epochs': 60,
-    'patience': 20,
+    'patience': 10,
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
     'val_check_interval': 1.0, #if integers the number of steps after which 
     #to perform validation, if float the fraction of the epoch after which to perform validation, 1.0 is the default value for doing at epoch end
@@ -140,7 +151,7 @@ exp_params = {
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
+    'layers_to_unfreeze': ['classifier','layer4'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
     'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
@@ -458,9 +469,12 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
         ff_mult = kwargs.get('ff_mult', 2)
         dropout = kwargs.get('dropout', 0.4)
         count_norm = kwargs.get('count_norm', 2)
+        use_spread = kwargs.get('use_spread', True)
+        use_count_feature = kwargs.get('use_count_feature', True)
+        use_attention_pool = kwargs.get('use_attention_pool', False)
         model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'],  
-                                           d_model=d_model, ff_mult=ff_mult, view_agg='attention', dropout=dropout,
-                                           use_spread=True, use_count_feature=True,count_norm=count_norm)
+                                           d_model=d_model, ff_mult=ff_mult, view_agg='attention', dropout=dropout,count_norm=count_norm,
+                                           use_spread=use_spread, use_count_feature=use_count_feature, use_attention_pool=use_attention_pool)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
     

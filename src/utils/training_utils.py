@@ -497,7 +497,7 @@ class ModelPDBase(L.LightningModule):
         for g in opt.param_groups:
             name = g.get('lr_name')
             if name and name not in logged:
-                self.log(f'lr/{name}', g['lr'], on_step=False, on_epoch=True)
+                self.log(f'lr/{name}', g['lr'], on_step=True, on_epoch=False)
                 logged.add(name)
 
     # ---------- metric bookkeeping (manual counts / balanced acc) --------------
@@ -1472,7 +1472,7 @@ def get_optimization_groups(model_name,exp_params):
         return None
     if 'resnet' in model_name:
         define_optimization_groups = [
-            {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': exp_params['lr_backbone']*0.002, 'lr_name': 'lr_1'},
+            {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': exp_params['lr_backbone']*0.005, 'lr_name': 'lr_1'},
             {'names': ['layer2'],'lr': exp_params['lr_backbone']*0.01, 'lr_name': 'lr_2'},
             {'names': ['layer3'],'lr': exp_params['lr_backbone']*0.1, 'lr_name': 'lr_3'},
             {'names': ['layer4'],'lr': exp_params['lr_backbone'], 'lr_name': 'lr_4'},

@@ -1044,6 +1044,9 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
 
     if censor_time=='all':
         list_questionnaires = list(range(1,last_valid+1))
+    elif censor_time=='all_matched':
+        list_questionnaires = list(range(1,last_valid+1))
+        list_questionnaires = filter_grid_pattern(case_grid_pattern, list_questionnaires)
     elif censor_time=='pre_diagnosis':
         list_questionnaires = [q for q in range(1,last_q+1)]
         list_questionnaires = filter_grid_pattern(case_grid_pattern, list_questionnaires)

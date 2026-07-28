@@ -731,10 +731,42 @@ class GatedAttentionPool(nn.Module):
         self.V = nn.Linear(dim, hidden)
         self.U = nn.Linear(dim, hidden)
         self.w = nn.Linear(hidden, 1)
-    def forward(self, x):                                   # (N, k, F)
+    def forward(self, x):           
+        #x: (B, n, d_model)                        
+        #torch.tanh(self.V(x)) -> (B, n, hidden)
         a = self.w(torch.tanh(self.V(x)) * torch.sigmoid(self.U(x)))
+        #a: (B, n, 1)
         alpha = torch.softmax(a, dim=1)
-        return (alpha * x).sum(1), alpha.squeeze(-1)
+        return (alpha * x).sum(1), alpha.squeeze(-1) #(B,d_model), (B,n)
+class SegmentedGatedAttentionPool(nn.Module):
+    """Gated attention (Ilse et al., ABMIL) over ragged segments.
+
+    h:   (N, D)  per-timestep features
+    seq: (N,)    segment id in [0, B)
+    ->   (B, D) pooled, (N,) per-timestep weights (sum to 1 within each segment)
+    """
+    def __init__(self, d_model, d_attn=None):
+        super().__init__()
+        d_attn = d_attn or d_model // 2
+        self.V = nn.Linear(d_model, d_attn)
+        self.U = nn.Linear(d_model, d_attn)
+        self.w = nn.Linear(d_attn, 1)
+
+    def forward(self, h, seq, B):
+        dev, dt = h.device, h.dtype
+        a = torch.tanh(self.V(h)) * torch.sigmoid(self.U(h))
+        scores = self.w(a)                                            # (N, 1)
+
+        # segmented softmax with per-segment max subtraction
+        m = torch.zeros(B, 1, device=dev, dtype=dt).index_reduce_(
+            0, seq, scores, 'amax', include_self=False)
+        e = torch.exp(scores - m[seq])
+        Z = torch.zeros(B, 1, device=dev, dtype=dt).index_add_(0, seq, e)
+        w = e / Z[seq].clamp_min(torch.finfo(dt).tiny)
+
+        pooled = torch.zeros(B, h.size(-1), device=dev, dtype=dt
+                             ).index_add_(0, seq, w * h)
+        return pooled, w.squeeze(1)
 
 #Wrappers
 class JoinedModels(nn.Module):
@@ -817,6 +849,7 @@ class SequenceClassifierHead(nn.Module):
         self.n_slots  = n_slots
         self.slot_pos = nn.Embedding(n_slots, d_model)
         self.cls      = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
+        #The * 0.02 is the standard transformer init scale — it's initializer_range=0.02 from BERT and GPT-2, inherited by most implementations since
 
         layer = nn.TransformerEncoderLayer(
             d_model, n_heads, dim_feedforward=ff_mult * d_model,
@@ -826,22 +859,20 @@ class SequenceClassifierHead(nn.Module):
         self.head = nn.Linear(d_model, n_classes)
 
     def forward(self, feats, N, k, seq_ids, slot_ids, lengths, return_view_attn=False):
-        # N total number of frames (can come from different subjects)
+        # N total number of frames (can come from different subjects), k modality dimensions
         # feats: (N*k, feat_dim) straight from the CNN
         x = self.proj(feats).view(N, k, -1)                 # (N, k, d_model)
 
         if self.view_pool is not None:
             q_repr, view_attn = self.view_pool(x)           # (N, d_model)
         else:
-            q_repr, view_attn = x.mean(1), None
+            q_repr, view_attn = x.mean(1), None #use a simple mean instead of global average pooling
 
-        B   = lengths.size(0)
-        D   = q_repr.size(-1)
+        B   = lengths.size(0) #number of subjects in the batch
+        D   = q_repr.size(-1) #dimensionality of the pooled features
         dev = q_repr.device
 
-        #these lines, for each subject, select the available timesteps and put them in a buffer of size (B, n_slots, D) with padding for missing slots
-        #-> they manage to transfmr a sum(T_i) x D tensor into a B x n_slots x D tensor, where T_i is the number of available slots for subject i
-        buffer = q_repr.new_zeros(B, self.n_slots, D)
+        buffer = q_repr.new_zeros(B, self.n_slots, D) #new_zeros creates a zero tensor that keeps the type and device of q_repr
         buffer[seq_ids, slot_ids] = q_repr
         pad_mask = torch.ones(B, self.n_slots, dtype=torch.bool, device=dev)
         pad_mask[seq_ids, slot_ids] = False
@@ -849,7 +880,7 @@ class SequenceClassifierHead(nn.Module):
         pos    = self.slot_pos(torch.arange(self.n_slots, device=dev))
         buffer = buffer + pos.unsqueeze(0)
 
-        cls  = self.cls.expand(B, -1, -1)
+        cls  = self.cls.expand(B, -1, -1) # (1,1,D) -> (B, 1, D) — expand is like repeat but without copying memory
         seq  = torch.cat([cls, buffer], dim=1)              # (B, 1+Q, D)
         mask = torch.cat([torch.zeros(B, 1, dtype=torch.bool, device=dev),
                           pad_mask], dim=1)
@@ -888,11 +919,17 @@ class SetClassifierHead(nn.Module):
     def __init__(self, feat_dim, n_classes,
                  d_model=512, view_agg='attention', dropout=0.1,
                  ff_mult=2, use_spread=True, use_count_feature=True,
-                 count_norm=8.0):
+                 count_norm=8.0, use_attention_pool=False):
         super().__init__()
         self.proj = nn.Linear(feat_dim, d_model) if feat_dim != d_model else nn.Identity()
         self.view_agg = view_agg
         self.view_pool = GatedAttentionPool(d_model) if view_agg == 'attention' else None
+
+        self.use_attention_pool = use_attention_pool
+        if self.use_attention_pool:
+            self.time_attention_pool = SegmentedGatedAttentionPool(d_model)
+            use_spread = False  # spread is redundant with attention pooling
+            use_count_feature = False  # count feature is redundant with attention pooling
 
         # shared per-timestep encoder (phi)
         self.phi = nn.Sequential(
@@ -944,8 +981,12 @@ class SetClassifierHead(nn.Module):
             0, seq, torch.ones(seq.numel(), 1, device=dev, dtype=h.dtype))
         assert (n.squeeze(1) > 0).all(), "a subject in the batch has no timesteps"
 
-        s = torch.zeros(B, D, device=dev, dtype=h.dtype).index_add_(0, seq, h)
-        mean = s / n
+        if self.use_attention_pool:
+            # Use attention pooling over the time dimension for each subject
+            mean, _ = self.time_attention_pool(h, seq, B)  # (B, D)
+        else:
+            s = torch.zeros(B, D, device=dev, dtype=h.dtype).index_add_(0, seq, h)
+            mean = s / n
 
         parts = [mean]
         if self.use_spread:
