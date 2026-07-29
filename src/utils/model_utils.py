@@ -194,8 +194,126 @@ class FiveStageResidualStridedConvNet(nn.Module): #can get any input size -> con
             x = F.normalize(self.projector(x), dim=1)
         return x
 
-
 #custom time series models
+class MeanMixer(nn.Module):
+    """Rung 1: masked mean over valid slots. Zero parameters."""
+    needs_compact, wants_raw_values = False, True
+
+    def __init__(self, d):
+        super().__init__()
+        self.out_dim = d
+
+    def forward(self, x, pad_mask, lengths, values=None):
+        keep = (~pad_mask).unsqueeze(-1).to(x.dtype)
+        val = values if values is not None else x
+        return (val * keep).sum(1) / keep.sum(1).clamp(min=1), None
+class AttnPoolMixer(nn.Module):
+    """Rungs 2-3: learned masked weighted average. No temporal interaction."""
+    needs_compact, wants_raw_values = False, True
+
+    def __init__(self, d, hidden=None, gated=True):
+        super().__init__()
+        hidden = hidden or d // 2
+        self.norm = nn.LayerNorm(d)
+        self.gated = gated
+        if gated:
+            self.v = nn.Linear(d, hidden)
+            self.u = nn.Linear(d, hidden)
+            self.w = nn.Linear(hidden, 1)
+        else:
+            self.w = nn.Linear(d, 1)
+        self.out_dim = d
+
+    def forward(self, x, pad_mask, lengths, values=None):
+        h = self.norm(x)
+        s = (self.w(torch.tanh(self.v(h)) * torch.sigmoid(self.u(h)))
+             if self.gated else self.w(h)).squeeze(-1)
+        a = s.masked_fill(pad_mask, float('-inf')).softmax(-1).nan_to_num(0.0)
+        val = values if values is not None else x
+        return (val * a.unsqueeze(-1)).sum(1), a
+class ConvMixer(nn.Module):
+    """Rung 4a: dilated depthwise-separable residual blocks + attention readout."""
+    needs_compact, wants_raw_values = False, False
+
+    def __init__(self, d, n_blocks=3, k=5, mult=2, dropout=0.1):
+        super().__init__()
+        self.blocks = nn.ModuleList([
+            nn.ModuleDict(dict(
+                norm=nn.LayerNorm(d),
+                dw=nn.Conv1d(d, d, k, padding=(2 ** i) * (k - 1) // 2,
+                             dilation=2 ** i, groups=d),
+                pw1=nn.Linear(d, mult * d),
+                pw2=nn.Linear(mult * d, d),
+                drop=nn.Dropout(dropout),
+            )) for i in range(n_blocks)])
+        self.pool_score = nn.Linear(d, 1)
+        self.out_dim = d
+
+    def forward(self, x, pad_mask, lengths, values=None):
+        keep = (~pad_mask).unsqueeze(-1).to(x.dtype)
+        for b in self.blocks:
+            h = b['norm'](x) * keep                        # never leak into padding
+            h = b['dw'](h.transpose(1, 2)).transpose(1, 2)
+            h = b['pw2'](F.gelu(b['pw1'](h)))
+            x = x + b['drop'](h) * keep
+        s = self.pool_score(x).squeeze(-1).masked_fill(pad_mask, float('-inf'))
+        a = s.softmax(-1).nan_to_num(0.0)
+        return (x * a.unsqueeze(-1)).sum(1), a
+class GRUMixer(nn.Module):
+    """Rung 4b: packed bi-GRU, final hidden state as the summary. Needs compact layout."""
+    needs_compact, wants_raw_values = True, False
+
+    def __init__(self, d, hidden=None, n_layers=1, dropout=0.1, bidirectional=True):
+        super().__init__()
+        hidden = hidden or d // 2
+        self.rnn = nn.GRU(d, hidden, num_layers=n_layers, batch_first=True,
+                          bidirectional=bidirectional,
+                          dropout=dropout if n_layers > 1 else 0.0)
+        self.dirs = 2 if bidirectional else 1
+        self.hidden = hidden
+        self.out_dim = hidden * self.dirs
+
+    def forward(self, x, pad_mask, lengths, values=None):
+        B = x.size(0)
+        packed = nn.utils.rnn.pack_padded_sequence(
+            x, lengths.clamp(min=1).cpu(), batch_first=True, enforce_sorted=False)
+        _, h = self.rnn(packed)
+        h = h.view(-1, self.dirs, B, self.hidden)[-1]      # last layer: (dirs, B, H)
+        summary = torch.cat(list(h), dim=-1)               # (B, H*dirs)
+        return summary * (lengths > 0).unsqueeze(-1).to(summary.dtype), None
+class TransformerMixer(nn.Module):
+    """Rung 5: your original encoder + CLS readout."""
+    needs_compact, wants_raw_values = False, False
+
+    def __init__(self, d, n_heads=8, n_layers=4, ff_mult=4, dropout=0.1):
+        super().__init__()
+        layer = nn.TransformerEncoderLayer(
+            d, n_heads, dim_feedforward=ff_mult * d, dropout=dropout,
+            batch_first=True, norm_first=True)
+        self.enc = nn.TransformerEncoder(layer, n_layers)
+        self.cls = nn.Parameter(torch.randn(1, 1, d) * 0.02)
+        self.out_dim = d
+
+    def forward(self, x, pad_mask, lengths, values=None):
+        B, dev = x.size(0), x.device
+        seq = torch.cat([self.cls.expand(B, -1, -1), x], dim=1)
+        mask = torch.cat([torch.zeros(B, 1, dtype=torch.bool, device=dev), pad_mask], dim=1)
+        return self.enc(seq, src_key_padding_mask=mask)[:, 0], None
+MIXERS = {
+    'mean':        lambda d, c: MeanMixer(d),
+    'pool':        lambda d, c: AttnPoolMixer(d, gated=c.get('gated', True)),
+    'conv':        lambda d, c: ConvMixer(d, n_blocks=c.get('n_blocks', 3),
+                                          k=c.get('kernel', 5), mult=c.get('ff_mult', 2),
+                                          dropout=c.get('dropout', 0.1)),
+    'gru':         lambda d, c: GRUMixer(d, hidden=c.get('hidden', None),
+                                         n_layers=c.get('n_layers', 1),
+                                         dropout=c.get('dropout', 0.1),
+                                         bidirectional=c.get('bidirectional', True)),
+    'transformer': lambda d, c: TransformerMixer(d, n_heads=c.get('n_heads', 8),
+                                                 n_layers=c.get('n_layers', 4),
+                                                 ff_mult=c.get('ff_mult', 4),
+                                                 dropout=c.get('dropout', 0.1)),
+}
 
 #custom classification heads
 class CustomMLP(nn.Module):
@@ -832,7 +950,7 @@ class ConcatenateViews(nn.Module):
         
         return features
 
-
+#Helpers time-sequences
 #Time-sequence models
 class SequenceClassifierHead(nn.Module):
     """Everything after the CNN: view aggregation + slot transformer + classification.
@@ -893,6 +1011,116 @@ class SequenceQuestionnaireModel(nn.Module):
         super().__init__()
         self.vision_model = vision_model                               # -> cnn.*
         self.classifier = SequenceClassifierHead(           # -> classifier.*
+            feat_dim, n_slots, n_classes, **head_kwargs)
+
+    def forward(self, frames, seq_ids, slot_ids, lengths, return_view_attn=False):
+        N, k  = frames.shape[:2]
+        feats = self.vision_model(frames.flatten(0, 1))             # (N*k, feat_dim)  <- only heavy step
+        return self.classifier(feats, N, k, seq_ids, slot_ids, lengths, return_view_attn)
+class SequenceFlexibleClassifierHead(nn.Module):
+    """Everything after the CNN: view aggregation + slot mixing + classification.
+    All params land under `classifier.*` in the parent's named_parameters().
+
+    `d_model` is now the single width: the CNN features are projected straight to it
+    and pooling happens there, so there is no separate sequence-side dimension.
+
+
+    h = SequenceClassifierHead(feat_dim, n_slots, n_classes, d_model=256, seq_model='mean', use_slot_pos=False) #masked mean
+    h = SequenceClassifierHead(feat_dim, n_slots, n_classes, d_model=256, seq_model='pool', use_slot_pos=False) #attention pooling
+    h = SequenceClassifierHead(feat_dim, n_slots, n_classes, d_model=256, seq_model='pool') #attention pooling with slot pos
+    h = SequenceClassifierHead(feat_dim, n_slots, n_classes, d_model=256, seq_model='gru', bidirectional=True) #bidirectional GRU
+    h = SequenceClassifierHead(feat_dim, n_slots, n_classes, d_model=256, seq_model='conv', n_blocks=3, kernel=5) #temporal convolution
+    h = SequenceClassifierHead(feat_dim, n_slots, n_classes, d_model=256, seq_model='transformer', n_layers=4)
+    """
+
+    def __init__(self, feat_dim, n_slots, n_classes,
+                 d_model=256, seq_model='gru', view_agg='attention',
+                 use_slot_pos=True, dropout=0.1, **mixer_kwargs):
+        super().__init__()
+        if seq_model not in MIXERS:
+            raise ValueError(f'seq_model must be one of {sorted(MIXERS)}')
+
+        self.proj = nn.Linear(feat_dim, d_model) if feat_dim != d_model else nn.Identity()
+        self.view_agg = view_agg
+        self.view_pool = GatedAttentionPool(d_model) if view_agg == 'attention' else None
+
+        self.seq_in_norm = nn.LayerNorm(d_model)          # scale-match before + slot_pos
+        self.n_slots = n_slots
+        self.use_slot_pos = use_slot_pos
+        if use_slot_pos:
+            self.slot_pos = nn.Embedding(n_slots, d_model)
+            nn.init.normal_(self.slot_pos.weight, std=0.02)
+
+        cfg = dict(dropout=dropout, **mixer_kwargs)
+        self.seq_model = seq_model
+        self.mixer = MIXERS[seq_model](d_model, cfg)
+        # keep positions out of the summed value when the mixer is a pure weighted average
+        self.separate_values = use_slot_pos and self.mixer.wants_raw_values
+
+        self.drop = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(self.mixer.out_dim)
+        self.head = nn.Linear(self.mixer.out_dim, n_classes)
+
+    # ---- slot layout -------------------------------------------------------
+
+    def _layout(self, seq_ids, slot_ids, B, compact):
+        """Row/col indices for scattering tokens into a (B, L, D) buffer."""
+        if not compact:
+            return seq_ids, slot_ids, self.n_slots, None
+        order = torch.argsort(seq_ids * self.n_slots + slot_ids)   # subject-major, in time
+        rows = seq_ids[order]
+        counts = torch.bincount(rows, minlength=B)
+        offs = torch.cumsum(counts, 0) - counts
+        cols = torch.arange(rows.numel(), device=rows.device) - offs[rows]
+        L = int(counts.max()) if rows.numel() else 1
+        return rows, cols, max(L, 1), order
+
+    @staticmethod
+    def _scatter(q, rows, cols, order, B, L):
+        buf = q.new_zeros(B, L, q.size(-1))
+        buf[rows, cols] = q if order is None else q[order]
+        return buf
+
+    # ---- forward -----------------------------------------------------------
+
+    def forward(self, feats, N, k, seq_ids, slot_ids, lengths,
+                return_view_attn=False, return_slot_attn=False):
+        # feats: (N*k, feat_dim) straight from the CNN
+        x = self.proj(feats).view(N, k, -1)                        # (N, k, d_model)
+        if self.view_pool is not None:
+            q, view_attn = self.view_pool(x)
+        else:
+            q, view_attn = x.mean(1), None
+        q = self.seq_in_norm(q)                                    # (N, d_model)
+
+        B, dev = lengths.size(0), q.device
+        compact = self.mixer.needs_compact
+        rows, cols, L, order = self._layout(seq_ids, slot_ids, B, compact)
+
+        q_pos = q + self.slot_pos(slot_ids) if self.use_slot_pos else q
+        buf = self._scatter(q_pos, rows, cols, order, B, L)
+        values = self._scatter(q, rows, cols, order, B, L) if self.separate_values else None
+
+        pad_mask = torch.ones(B, L, dtype=torch.bool, device=dev)
+        pad_mask[rows, cols] = False
+        lens = torch.bincount(seq_ids, minlength=B)                # true valid-slot counts
+
+        pooled, slot_attn = self.mixer(buf, pad_mask, lens, values=values)
+        logits = self.head(self.drop(self.norm(pooled)))
+
+        if not (return_view_attn or return_slot_attn):
+            return logits
+        out = [logits]
+        if return_view_attn:
+            out.append(view_attn)
+        if return_slot_attn:
+            out.append(slot_attn)
+        return tuple(out)
+class FlexibleSequenceQuestionnaireModel(nn.Module):
+    def __init__(self, vision_model, feat_dim, n_slots, n_classes, **head_kwargs):
+        super().__init__()
+        self.vision_model = vision_model                               # -> cnn.*
+        self.classifier = SequenceFlexibleClassifierHead(           # -> classifier.*
             feat_dim, n_slots, n_classes, **head_kwargs)
 
     def forward(self, frames, seq_ids, slot_ids, lengths, return_view_attn=False):

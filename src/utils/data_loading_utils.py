@@ -1098,6 +1098,12 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
             if grid_pattern[q-1]=='1' and q in subject_images:
                 list_questionnaires.append(q)
                 break
+    elif censor_time=='last_abs':
+        list_questionnaires = []
+        for q in range(last_valid,0,-1):
+            if grid_pattern[q-1]=='1' and q in subject_images:
+                list_questionnaires.append(q)
+                break
     
     #print(f"List {subject_id}: ",list_questionnaires)
     return list_questionnaires

@@ -76,6 +76,9 @@ def get_input_modality(name):
     elif name=='window_view':
         return ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)]
 
+RESTORE = False
+version_override =  28
+
 exp_params = {
     'problem': 'PD', #handedness, PD, pre_training
     'class_col': 'diag_park_final1_quest',
@@ -106,7 +109,7 @@ exp_params = {
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
@@ -124,8 +127,8 @@ exp_params = {
         'ff_mult':2, # the hidden dimension of the feedforward layer is ff_mult*d_model
         'dropout': 0.4,
         'count_norm': 2,
-        'use_spread': True, #add a variance feature of dimension d_model to the average d_model feature
-        'use_count_feature': True,
+        'use_spread': False, #add a variance feature of dimension d_model to the average d_model feature
+        'use_count_feature': False,
         'use_attention_pool': False #if true overrides use_spread and use_count_feature 
     },
 
@@ -221,6 +224,10 @@ def main(exp_params):
     #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
     exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=exp_params['class_col'])
 
+    if RESTORE:
+        restore(version_override, exp_params)
+        return
+    
     write_log, current_version = logging_initialization() 
 
     model, transform = model_initialization(write_log,exp_params,verbose=VERBOSE, **exp_params['model_parameters'])
@@ -289,6 +296,28 @@ def main(exp_params):
 
 
 #### HELPER FUCNTIONS #### 
+def restore(current_version, exp_params):
+    exp_params['timestamp'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    exp_params['best_epoch'] = "N/A (Cancelled)"
+    exp_params['best_val_loss'] = "N/A (Cancelled)"
+    exp_params['best_val_acc'] = "N/A (Cancelled)"
+    exp_params['best_train_acc'] = "N/A (Cancelled)"
+    exp_params['current_version'] = current_version
+
+    #copy the list_ids parquet file to the checkpoint folder with the name 
+    base_name = os.path.basename(exp_params['list_of_ids_paths'])
+    copy_path = os.path.join(CHECKPOINT_PATH,f'v_{current_version}', base_name)
+    shutil.copy(exp_params['list_of_ids_paths'], copy_path)
+    exp_params['list_of_ids_paths'] = copy_path
+    exp_params['optimization_groups'] = define_optimization_groups
+
+    # Save normal log
+    save_experiment_logs(exp_params)
+        
+    #save the exp_params dictionary to a pickle file in the checkpoint folder
+    with open(os.path.join(CHECKPOINT_PATH,f'v_{current_version}', 'exp_params.pkl'), 'wb') as f:
+        pickle.dump(exp_params, f)
+
 def get_memory_usage(grid_dict, train_df, exclusion_set):
     def sizeof_grid_dict(d):
         """Sum numpy buffer sizes + rough python overhead for a (possibly nested) dict."""

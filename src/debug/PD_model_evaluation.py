@@ -52,10 +52,10 @@ from src.scripts.train_PD_model import model_initialization
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 model_name = 'resnet18' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/mnt/beegfs02/scratch/a_morelli/model_training/PD/{model_name}_model_results/checkpoints"
-version='25'
+version='29'
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-22-0.2384.ckpt"
+checkpoint_to_load=f"v_{version}/best-34-0.2593.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)

@@ -48,13 +48,13 @@ from src.debug.PD_model_evaluation import get_result_df, litmodel_initialization
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 CHECKPOINT_PATH_SOURCE = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints"
-version='22'
+version='26'
 params_path = os.path.join(CHECKPOINT_PATH_SOURCE,f"v_{version}", "exp_params.pkl")
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)
 
-exp_params['n_folds'] = 2
-exp_params['short_test'] = True
+exp_params['n_folds'] = 5
+exp_params['short_test'] = False
 if 'stopping_metric' not in exp_params:
     exp_params['stopping_metric'] = 'val/loss'
 
