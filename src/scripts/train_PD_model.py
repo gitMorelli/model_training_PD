@@ -30,10 +30,11 @@ import pickle
 from pympler import asizeof
 import numpy as np
 import psutil
+import math
 
 from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict, synthetic_data_override
 from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
-from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel, load_ln_checkpoint
+from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel, load_ln_checkpoint, FlexibleSequenceQuestionnaireModel
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
@@ -102,14 +103,14 @@ exp_params = {
     'use_grid': True,
     'use_balanced_weights': True,
     'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': True, #note that this and balace_validation are independent
+    'balanced_data': False, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
@@ -119,7 +120,11 @@ exp_params = {
     #or
     'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
     'norm_std': 'PD_window',
-    'model_structure': 'SequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+    'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+    'val_check_interval': 1.0, #if integers the number of steps after which 
+    #to perform validation, if float the fraction of the epoch after which to perform validation, 1.0 is the default value for doing at epoch end
+    'align_train_metrics_to_val': False, 
+    'min_window_steps': 50,
     'model_parameters': {
         'd_model': 128, 
         'n_heads': 4, # -> for each head 128/4 = 32 is the hidden dimension during the attention computation 
@@ -129,7 +134,9 @@ exp_params = {
         'count_norm': 2,
         'use_spread': False, #add a variance feature of dimension d_model to the average d_model feature
         'use_count_feature': False,
-        'use_attention_pool': False #if true overrides use_spread and use_count_feature 
+        'use_attention_pool': False, #if true overrides use_spread and use_count_feature 
+        'seq_model':'gru', 
+        'bidirectional':True,
     },
 
     #Transforms definitions
@@ -148,8 +155,6 @@ exp_params = {
     'num_epochs': 60,
     'patience': 10,
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'val_check_interval': 1.0, #if integers the number of steps after which 
-    #to perform validation, if float the fraction of the epoch after which to perform validation, 1.0 is the default value for doing at epoch end
     'eta_min_cosine': 1e-7,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
@@ -257,7 +262,7 @@ def main(exp_params):
     
     lit_model = litmodel_initialization(model,counts,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
 
-    trainer, metrics_tracker = trainer_definition(current_version, exp_params)
+    trainer, metrics_tracker = trainer_definition(current_version, exp_params, lit_model)
     
     exp_params['timestamp'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     exp_params['best_epoch'] = "N/A (Cancelled)"
@@ -355,91 +360,137 @@ def validity_checks(exp_params):
     if exp_params['grouped']==False and 'group' in exp_params['data_folder']:
         raise ValueError("Error: you have selected grouped=False but the data_folder contains 'group' in its name. Please check your settings.")
     
-def trainer_definition(current_version, exp_params, cv=None):
 
-    stopping_metric = exp_params['stopping_metric']  # e.g., 'val/pr_auc'
-    if stopping_metric in ['val/pr_auc', 'val/roc_auc', 'val/f1', 'val/mcc', 'val/accuracy']:
-        mode = 'max'  # We want to maximize these metrics
-    elif stopping_metric in ['val/loss',"val/loss_unweighted"]:
-        mode = 'min'  # We want to minimize loss
+def trainer_definition(current_version, exp_params, lit_model, cv=None):
+    # names the module actually logs
+    _MAX_METRICS = {"val/pr_auc", "val/f1_pos", "val/mcc", "val/acc", "val/balanced_acc"}
+    _MIN_METRICS = {"val/loss", "val/loss_unweighted"}
+    # logged rank_zero_only -> missing on ranks > 0 -> MisconfigurationException
+    _UNMONITORABLE = {"val/balanced_accuracy": "val/balanced_acc"}
 
-    # 2. Setup Checkpointing
+
+    def _resolve_mode(metric):
+        if metric in _UNMONITORABLE:
+            raise ValueError(
+                f"'{metric}' is logged rank_zero_only and cannot be monitored under "
+                f"DDP. Use '{_UNMONITORABLE[metric]}' instead.")
+        if metric in _MAX_METRICS:
+            return "max"
+        if metric in _MIN_METRICS:
+            return "min"
+        raise ValueError(
+            f"Unknown stopping_metric '{metric}'. Valid: "
+            f"{sorted(_MAX_METRICS | _MIN_METRICS)}")
+
+
+    def _val_runs_per_epoch(lit_model):
+        """How many times validation runs per training epoch."""
+        v = getattr(lit_model, "val_check_interval", None)
+        if v is None:
+            return 1
+        # val_check_interval counts dataloader batches, not optimizer steps
+        batches_per_epoch = ((lit_model.total_steps / lit_model.num_epochs)
+                            * lit_model.accumulate_grad_batches)
+        if isinstance(v, float):
+            return max(1, int(round(1.0 / v)))
+        return max(1, math.ceil(batches_per_epoch / int(v)))
+
+    stopping_metric = exp_params['stopping_metric']
+    mode = _resolve_mode(stopping_metric)          # FIX 2/3: no unbound `mode`
+
+    # ---- FIX 1: patience is in validation checks, not epochs -----------------
+    runs_per_epoch = _val_runs_per_epoch(lit_model)
+    patience_checks = exp_params['patience'] * runs_per_epoch
+
+    # ---- logger first, so paths are derived rather than reconstructed --------
+    if cv is not None:
+        log_root = os.path.join(exp_params['SOURCE_PATH'], 'tensor_board_logging',
+                                exp_params['model'], str(current_version))
+        tb_logger = TensorBoardLogger(save_dir=log_root, name='',
+                                      log_graph=False, version=f'run_{cv}')
+    else:
+        log_root = os.path.join(exp_params['SOURCE_PATH'], 'tensor_board_logging')
+        tb_logger = TensorBoardLogger(save_dir=log_root, name=exp_params['model'],
+                                      log_graph=False, version=current_version)
+
+    # FIX 5: log_dir is the ground truth; reconstructing it breaks on str versions
+    if os.path.exists(tb_logger.log_dir):
+        shutil.rmtree(tb_logger.log_dir)
+
+    ckpt_dir = os.path.join(exp_params['CHECKPOINT_PATH'], f'v_{current_version}')
+    if cv is not None:
+        ckpt_dir = os.path.join(ckpt_dir, f'run_{cv}')
+    if exp_params.get('wipe_checkpoints', True) and os.path.exists(ckpt_dir):
+        shutil.rmtree(ckpt_dir)                    # FIX 6: no stale "best" files
+
+    # ---- checkpointing -------------------------------------------------------
     checkpoint_callback = ModelCheckpoint(
         monitor=stopping_metric,
-        dirpath=os.path.join(exp_params['CHECKPOINT_PATH'], f'v_{current_version}'),
+        dirpath=ckpt_dir,
         # auto_insert_metric_name=False so the '/' in 'val/pr_auc' is NOT turned
         # into a subdirectory — the value is substituted, not the key.
-        filename=f"best-{{epoch:02d}}-{{{stopping_metric}:.4f}}",
+        filename=f"best-{{epoch:02d}}-{{step:06d}}-{{{stopping_metric}:.4f}}",
         auto_insert_metric_name=False,
-        save_top_k=1,
+        # FIX 6: more candidates than 1 when selecting from 4x as many points
+        save_top_k=exp_params.get('save_top_k', 1),
         mode=mode,
         save_last=False,
+        save_on_train_epoch_end=False,             # explicit: fire at validation end
     )
-
+    
     periodic_ckpt = ModelCheckpoint(
-        dirpath=os.path.join(exp_params['CHECKPOINT_PATH'], f'v_{current_version}'),
-        filename=f"latest-{{epoch:02d}}",
-        auto_insert_metric_name=False, #auto_insert_metric_name=False with {val/pr_auc:.4f} produces best-04-0.7321.ckpt
-        save_top_k=1,
-        every_n_epochs=1,
-        monitor=None,          # no metric -> saves the current/last state each time
+        dirpath=ckpt_dir,
+        save_top_k=0,                    # only last.ckpt
+        save_last=True,                  # rewritten at every validation run
+        save_on_train_epoch_end=False,   # <- the actual change
+        monitor=None,
     )
 
-    # 3. Setup Early Stopping
     early_stop_callback = EarlyStopping(
         monitor=stopping_metric,
-        patience=exp_params['patience'],
+        patience=patience_checks,                  # FIX 1
         mode=mode,
         verbose=True,
     )
-
     metrics_tracker = BestMetricTracker()
-    
-    # 1. Construct clean paths (removed trailing slash, kept version as a string/int)
-    if cv is not None:
-        log_root = os.path.join(exp_params['SOURCE_PATH'], 'tensor_board_logging',exp_params['model'],str(current_version))
-        version_dir = os.path.join(log_root, 'run_'+str(cv))
-        if os.path.exists(version_dir):
-            shutil.rmtree(version_dir)
-        # 3. Initialize the logger
-        tb_logger = TensorBoardLogger(
-            save_dir=log_root,
-            name='',
-            log_graph=False, 
-            version='run_'+str(cv)  
-        )
-    else:
-        log_root = os.path.join(exp_params['SOURCE_PATH'], 'tensor_board_logging')
-        version_dir = os.path.join(log_root, exp_params['model'], 'version_'+str(current_version)) #tensorboard automatically adds 'version_' prefix, 
-        #so we match that format here.
-        # 2. Wipe the old folder if it exists
-        if os.path.exists(version_dir):
-            shutil.rmtree(version_dir)
-        # 3. Initialize the logger
-        tb_logger = TensorBoardLogger(
-            save_dir=log_root,
-            name=exp_params['model'],
-            log_graph=False, 
-            version=current_version  # Works perfectly as an integer or string
-        )
 
     optional = ['precision', 'accumulate_grad_batches', 'gradient_clip_val', 'fast_dev_run']
     extra_kwargs = {k: exp_params[k] for k in optional if exp_params.get(k) is not None}
 
-    # 4. Initialize Trainer and Fit
-    extra_callbacks = [ClearCache(),ThroughputMonitor(), MemMonitor()] if exp_params['debugging_callbacks'] else []
+    # consistency: total_steps in the module was computed from this number
+    if extra_kwargs.get('accumulate_grad_batches', 1) != lit_model.accumulate_grad_batches:
+        raise ValueError(
+            f"accumulate_grad_batches mismatch: Trainer="
+            f"{extra_kwargs.get('accumulate_grad_batches', 1)} vs lit_model="
+            f"{lit_model.accumulate_grad_batches}; the LR schedule length would be wrong.")
+
+    # windows shorter than min_window_steps are dropped -> only the tail is logged
+    if getattr(lit_model, "align_train_metrics_to_val", False):
+        steps_per_window = ((lit_model.total_steps / lit_model.num_epochs)
+                            / runs_per_epoch)
+        if steps_per_window < lit_model.min_window_steps:
+            lit_model.write_log(
+                f"[trainer_definition] WARNING: ~{steps_per_window:.0f} optimizer "
+                f"steps per validation window < min_window_steps="
+                f"{lit_model.min_window_steps}; windowed train metrics will be "
+                f"suppressed. Lower min_window_steps or increase val_check_interval.\n")
+
+    extra_callbacks = ([ClearCache(), ThroughputMonitor(), MemMonitor()]
+                       if exp_params['debugging_callbacks'] else [])
     trainer = L.Trainer(
-        #limit_train_batches=500, limit_val_batches=0,
         max_epochs=exp_params['num_epochs'],
-        logger = tb_logger,
-        accelerator="auto",                # Automatically selects GPU/CPU/MPS
-        callbacks=[checkpoint_callback, early_stop_callback, metrics_tracker, periodic_ckpt]+extra_callbacks,
-        profiler="simple",  # Add this line to get a performance summary
-        enable_progress_bar=False,  # Remove this CPU overhead
-        **extra_kwargs
+        min_epochs=exp_params.get('min_epochs', 1),   # FIX 6: blocks early stop + selection
+        logger=tb_logger,
+        accelerator="auto",
+        callbacks=[checkpoint_callback, early_stop_callback,
+                   metrics_tracker, periodic_ckpt] + extra_callbacks,
+        profiler="simple",
+        enable_progress_bar=False,
+        **extra_kwargs,
+        **lit_model.trainer_val_kwargs
     )
-    # if you want you can set anothr kind of logger (not tensorboard but csv ..)
     return trainer, metrics_tracker
+
 
 def debug(train_dataloader,val_dataloader,exp_params):
     batch = next(iter(train_dataloader))
@@ -464,6 +515,9 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
         additional_kwargs['use_balanced_weights']= exp_params['use_balanced_weights']
         #additional_kwargs['balancing_factor']= exp_params['balancing_factor']
         additional_kwargs['balanced_data']= exp_params['balanced_data']
+        additional_kwargs['val_check_interval']= exp_params['val_check_interval']
+        additional_kwargs['align_train_metrics_to_val']= exp_params['align_train_metrics_to_val']
+        additional_kwargs['min_window_steps']= exp_params['min_window_steps']
         total_units = sum(counts)  # total number of samples in all classes
     example_input_array = model_class.make_example_input(k=exp_params['num_tiles'], n_slots=13, C=exp_params['num_channels'], 
                                                          H=exp_params['input_size'], W=exp_params['input_size'])
@@ -486,24 +540,13 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
     
     if exp_params['model_structure'] == 'SequenceQuestionnaireModel':
         n_slots = 13  # This is a fixed value based on your description
-        d_model = kwargs.get('d_model', 128)
-        n_heads  = kwargs.get('n_heads', 4)
-        n_layers = kwargs.get('n_layers', 2)
-        ff_mult = kwargs.get('ff_mult', 2)
-        dropout = kwargs.get('dropout', 0.4)
-        model = SequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, 
-                                           d_model=d_model, n_heads=n_heads, n_layers=n_layers, ff_mult=ff_mult, view_agg='attention', dropout=dropout)
+        model = SequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, view_agg='attention', 
+                                           **kwargs)
     elif exp_params['model_structure'] == 'SetQuestionnaireModel':
-        d_model = kwargs.get('d_model', 128)
-        ff_mult = kwargs.get('ff_mult', 2)
-        dropout = kwargs.get('dropout', 0.4)
-        count_norm = kwargs.get('count_norm', 2)
-        use_spread = kwargs.get('use_spread', True)
-        use_count_feature = kwargs.get('use_count_feature', True)
-        use_attention_pool = kwargs.get('use_attention_pool', False)
-        model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'],  
-                                           d_model=d_model, ff_mult=ff_mult, view_agg='attention', dropout=dropout,count_norm=count_norm,
-                                           use_spread=use_spread, use_count_feature=use_count_feature, use_attention_pool=use_attention_pool)
+        model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], view_agg='attention', **kwargs)
+    elif exp_params['model_structure'] == 'FlexibleSequenceQuestionnaireModel':
+        n_slots = 13  # This is a fixed value based on your description
+        model = FlexibleSequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, **kwargs)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
     

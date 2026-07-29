@@ -6,12 +6,12 @@
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=28             # Number of CPU cores per task
 #SBATCH --mem=52G                      # Job memory request
-#SBATCH --time=06:00:00                # Time limit hrs:min:sec
+#SBATCH --time=08:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
 #--gres=gpu:1
-#SBATCH --gres=gpu:p40:1
+#SBATCH --gres=gpu:v100:1
 #--gres=gpu:v100:1
 #--gres=gpu:p40:1
 #--nodelist=gpu05

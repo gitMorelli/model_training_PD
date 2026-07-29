@@ -415,7 +415,32 @@ class LitModel(L.LightningModule):
 class ModelPDBase(L.LightningModule):
     """Shared machinery: forward, optimizers/schedulers, epoch logging,
     gradient checks, class-ratio bookkeeping. Subclasses implement
-    `compute_loss_and_metrics(batch, stage)`."""
+    `compute_loss_and_metrics(batch, stage)`.
+
+    FRACTIONAL LOGGING (new)
+    ------------------------
+    `val_check_interval` makes validation run N times per epoch. It is a
+    *Trainer* argument -- pass it through `self.trainer_val_kwargs`, don't set
+    it on the Trainer by hand, or the two can drift apart.
+
+    NOTE: `val_check_interval` counts *dataloader batches*, not optimizer
+    steps. With accumulate_grad_batches=4, 0.25 still means a quarter of the
+    fetched batches. A float requires a finite len(train_dataloader); with an
+    iterable-style loader use the int form (which also sets
+    check_val_every_n_epoch=None).
+
+    `align_train_metrics_to_val` additionally emits a *windowed* train metric
+    at each of those validation points, so train and val curves share an
+    x-axis and the generalisation gap is readable. Windowed series are named
+    "train_window/..." and are written straight to the logger (see
+    `_log_class_metrics(direct_step=...)`) because Lightning mean-reduces
+    repeated self.log() calls within an epoch, which would collapse the four
+    window values into one point.
+
+    Dataset-composition metrics (counts / fractions / class ratio) are NOT
+    windowed: they describe the data, not the model, so windowing them only
+    adds sampling noise to a constant.
+    """
 
     def __init__(self, write_log, model,
                  total_units,                      # subjects (flat) or groups (grouped)
@@ -424,7 +449,11 @@ class ModelPDBase(L.LightningModule):
                  example_input_array=None,
                  opt_groups=None, num_epochs=10, lr_scheduling='cosine',
                  weight_decay=1e-4, warmup_fraction=0.1,
-                 eta_min_cosine=1e-6, batch_size=32, accumulate_grad_batches=1, world_size=1):
+                 eta_min_cosine=1e-6, batch_size=32, accumulate_grad_batches=1, world_size=1,
+                 # ===== FRACTIONAL LOGGING: new args =====
+                 val_check_interval=None,          # None -> epoch end; float in (0,1]; int -> every N batches
+                 align_train_metrics_to_val=False,  # also emit windowed train metrics at each val point
+                 min_window_steps=50):             # don't emit a window shorter than this many optimizer steps
         super().__init__()
         self.write_log = write_log
         self.model = model
@@ -458,6 +487,83 @@ class ModelPDBase(L.LightningModule):
         # correct_k = number of samples with true label k that were predicted k
         # -> recall_k = correct_k / n_k, balanced_acc = mean(recall_k)
         self._stats = {"train": self._empty_stats(), "val": self._empty_stats()}
+
+        # ===== FRACTIONAL LOGGING: state =====
+        self.val_check_interval = val_check_interval
+        # alignment is meaningless without mid-epoch validation, so it folds to False
+        self.align_train_metrics_to_val = bool(
+            align_train_metrics_to_val and val_check_interval is not None)
+        self.min_window_steps = min_window_steps
+        self._val_run_idx = 0          # which validation run within the current epoch
+        self._last_flush_step = 0      # global_step at the last window flush
+        # Second accumulator: `_stats["train"]` is cleared at every window flush,
+        # so the whole-epoch composition numbers need their own bucket.
+        self._epoch_stats_train = self._empty_stats()
+
+    # ===== FRACTIONAL LOGGING: Trainer wiring ================================
+    @property
+    def trainer_val_kwargs(self):
+        """Single source of truth for the Trainer:  L.Trainer(..., **lm.trainer_val_kwargs)"""
+        v = self.val_check_interval
+        if v is None:
+            return {}
+        if isinstance(v, float):
+            if not 0.0 < v <= 1.0:
+                raise ValueError("float val_check_interval must be in (0, 1]")
+            return {"val_check_interval": v}
+        # an int larger than len(train_loader) requires disabling the per-epoch check
+        return {"val_check_interval": int(v), "check_val_every_n_epoch": None}
+
+    def _epoch_progress(self):
+        """Fraction of the current training epoch consumed, for log tags."""
+        try:
+            done = self.trainer.fit_loop.epoch_loop.batch_progress.current.processed
+            total = self.trainer.num_training_batches
+            return done / total if total else 0.0
+        except (RuntimeError, AttributeError, ZeroDivisionError):
+            return 0.0
+
+    def _flush_train_window(self, force=False):
+        """Emit train metrics accumulated since the last flush.
+
+        The gate is on `global_step`, which is identical on every rank. Never
+        gate this on a locally-computed quantity (e.g. "did this window see
+        enough samples"): `_sum_across_ranks` and `MetricCollection.compute()`
+        are both collectives, so one rank skipping them hangs the job.
+        """
+        step = self.trainer.global_step
+        if step <= self._last_flush_step:
+            return                                     # empty window
+        if not force and step - self._last_flush_step < self.min_window_steps:
+            return
+        self._last_flush_step = step
+
+        # recall / balanced acc for this window only; composition stays epoch-level
+        self._log_class_metrics("train", include_composition=False,
+                                log_key="train_window", direct_step=step,
+                                suffix=f"[window @ {self._epoch_progress():.2f}]")
+
+        # torchmetrics collection: we own compute/reset here, so the subclass
+        # must NOT also hand the object to log_dict (see compute_loss_and_metrics).
+        tm = getattr(self, "train_metrics", None)      # base class has no such attr
+        if tm is not None:
+            out = tm.compute()                         # collective -> all ranks
+            if self.logger is not None and self.trainer.is_global_zero:
+                self.logger.log_metrics(
+                    {k.replace("train/", "train_window/"):
+                        (v.item() if torch.is_tensor(v) else float(v))
+                     for k, v in out.items()},
+                    step=step)
+            tm.reset()                                 # all ranks
+
+    def on_validation_epoch_start(self):
+        """Close the train window exactly at the validation point."""
+        if not self.align_train_metrics_to_val:
+            return
+        # nothing to flush during sanity check or a standalone trainer.validate()
+        if self.trainer.sanity_checking or self.trainer.state.fn != "fit":
+            return
+        self._flush_train_window()
 
     # ---- forward ------------------------------------------------------------
     def forward(self, frames, seq_ids, slot_ids, lengths):
@@ -522,15 +628,24 @@ class ModelPDBase(L.LightningModule):
         t = labels.detach().long().view(-1)
         if t.numel() and (t.min() < 0 or t.max() >= k):
             raise ValueError(f"labels contain values outside [0, {k})")
-        s = self._stats[stage]
+
         n = torch.bincount(t, minlength=k).tolist()
-        for i in range(k):
-            s["n"][i] += n[i]
+        hit = None
         if preds is not None:
             p = preds.detach().long().view(-1)
             hit = torch.bincount(t[p == t], minlength=k).tolist()
+
+        # ===== FRACTIONAL LOGGING: dual accumulation =====
+        # `_stats["train"]` is the sliding window (cleared on flush);
+        # `_epoch_stats_train` survives flushes and carries the epoch totals.
+        buckets = [self._stats[stage]]
+        if stage == "train" and self.align_train_metrics_to_val:
+            buckets.append(self._epoch_stats_train)
+        for s in buckets:
             for i in range(k):
-                s["correct"][i] += hit[i]
+                s["n"][i] += n[i]
+                if hit is not None:
+                    s["correct"][i] += hit[i]
 
     def _update_metrics(self, logits, labels, stage):
         """Convenience wrapper — call this from `compute_loss_and_metrics`
@@ -552,51 +667,82 @@ class ModelPDBase(L.LightningModule):
         out = self.all_gather(t).sum(dim=0)          # (world,) or (world, k)
         return [int(x) for x in out] if seq else int(out.item())
 
-    def _log_class_metrics(self, stage):
-        s = self._stats[stage]
+    # ===== FRACTIONAL LOGGING: four new params on this method =====
+    #   stats               which accumulator to read (None -> self._stats[stage])
+    #   include_composition emit dataset counts/fractions/ratio (epoch-level only)
+    #   log_key             log-name namespace, decoupled from the stats bucket
+    #                       ("train_window" vs "train") so windowed and epoch
+    #                       series don't collide and get mean-reduced together
+    #   direct_step         write via logger.log_metrics at this step, bypassing
+    #                       Lightning's per-epoch mean reduction
+    #   suffix              extra text on the write_log line
+    def _log_class_metrics(self, stage, stats=None, include_composition=True,
+                           suffix="", log_key=None, direct_step=None):
+        s = stats if stats is not None else self._stats[stage]
+        # collectives first: every rank must reach these before any early return
         n = self._sum_across_ranks(s["n"])
         c = self._sum_across_ranks(s["correct"])
         k, total = len(n), sum(n)
 
+        if total == 0:                                # empty window -> nothing to report
+            if stats is None:
+                self._stats[stage] = self._empty_stats()
+            return
+
+        key = log_key or stage
         recalls = [c[i] / n[i] if n[i] > 0 else float("nan") for i in range(k)]
 
-        # CHANGED: all counts now live under "{stage}/class_counts/..."
-        for i in range(k):
-            self.log(f"class_counts/{stage}_class_{i}_count", float(n[i]),
-                     rank_zero_only=True)
-            if total > 0:
-                self.log(f"class_counts/{stage}_class_{i}_fraction", n[i] / total,
-                         rank_zero_only=True)
-
-        if k == 2:   # keep the familiar binary chart
-            self.log(f"class_counts/{stage}_class_ratio",
-                     n[0] / n[1] if n[1] > 0 else float("inf"), rank_zero_only=True)
-        else:
-            self.log(f"class_counts/{stage}_imbalance_ratio",
-                     max(n) / min(n) if min(n) > 0 else float("inf"),
-                     rank_zero_only=True)
+        payload = {}
+        if include_composition:
+            for i in range(k):
+                payload[f"class_counts/{key}_class_{i}_count"] = float(n[i])
+                payload[f"class_counts/{key}_class_{i}_fraction"] = n[i] / total
+            if k == 2:   # keep the familiar binary chart
+                payload[f"class_counts/{key}_class_ratio"] = (
+                    n[0] / n[1] if n[1] > 0 else float("inf"))
+            else:
+                payload[f"class_counts/{key}_imbalance_ratio"] = (
+                    max(n) / min(n) if min(n) > 0 else float("inf"))
 
         for i, r in enumerate(recalls):
             if r == r:                                # skip NaN
-                self.log(f"class_counts/{stage}_recall_class_{i}", r, rank_zero_only=True)
+                payload[f"class_counts/{key}_recall_class_{i}"] = r
 
         balanced_acc = (sum(recalls) / k
                         if all(r == r for r in recalls) else float("nan"))
         if balanced_acc == balanced_acc:
-            self.log(f"{stage}/balanced_accuracy", balanced_acc,
-                     prog_bar=(stage == "val"), rank_zero_only=True)
+            payload[f"{key}/balanced_accuracy"] = balanced_acc
+
+        # ===== FRACTIONAL LOGGING: two write paths =====
+        if direct_step is not None:
+            # straight to the logger at an explicit step -> no mean reduction
+            if self.logger is not None and self.trainer.is_global_zero:
+                self.logger.log_metrics(payload, step=direct_step)
+        else:
+            for name, v in payload.items():
+                self.log(name, v, rank_zero_only=True,
+                         prog_bar=(stage == "val" and name.endswith("balanced_accuracy")))
 
         counts_str = " ".join(f"n{i}={n[i]}" for i in range(k))
         rec_str = " ".join(f"recall{i}={recalls[i]:.4f}" for i in range(k))
-        self.write_log(f"[Epoch {self.current_epoch + 1}] {stage}: {counts_str} "
+        # ===== FRACTIONAL LOGGING: tag lines so repeated runs are distinguishable
+        tag = f"[Epoch {self.current_epoch + 1}]"
+        if stage == "val" and self.val_check_interval is not None:
+            tag += f"[val #{self._val_run_idx} @ {self._epoch_progress():.2f}]"
+        if suffix:
+            tag += suffix
+        self.write_log(f"{tag} {stage}: {counts_str} "
                        f"{rec_str} balanced_acc={balanced_acc:.4f}\n")
-        self._stats[stage] = self._empty_stats()
+
+        if stats is None:                             # only clear the bucket we own
+            self._stats[stage] = self._empty_stats()
 
     # ---- epoch hooks ------------------------------------------------------------
     def on_train_epoch_start(self):
         if self.current_epoch == 0:
             self.write_log(f"Device of model at start of training: {next(self.model.parameters()).device}")
         self.train_sample_count = 0
+        self._val_run_idx = 0          # FRACTIONAL LOGGING: numbering is per-epoch
 
     def _log_epoch_summary_extras(self):
         """Subclasses may append regime-specific lines to the epoch summary."""
@@ -655,9 +801,25 @@ class ModelPDBase(L.LightningModule):
             for layer_info in all_layers_info:
                 self.write_log(f"{layer_info}\n")
 
-        self._log_class_metrics("train")
+        # ===== FRACTIONAL LOGGING: tail window, then epoch-level composition =====
+        if self.align_train_metrics_to_val:
+            # force=True so a short trailing window isn't silently dropped
+            # (dropping it would leak counts into the next epoch)
+            self._flush_train_window(force=True)
+            self._log_class_metrics("train", stats=self._epoch_stats_train,
+                                    suffix="[epoch]")
+            self._epoch_stats_train = self._empty_stats()
+        else:
+            self._log_class_metrics("train")
 
     def on_validation_epoch_end(self):
+        # ===== FRACTIONAL LOGGING: sanity-check guard + run counter =====
+        # Without the guard the sanity-check pass pollutes the first real run's
+        # counts. It matters more now that validation runs many times.
+        if self.trainer.sanity_checking:
+            self._stats["val"] = self._empty_stats()
+            return
+        self._val_run_idx += 1
         self._log_class_metrics("val")
 
     # ---- optimizers ---------------------------------------------------------------
@@ -766,7 +928,6 @@ class ModelPDBase(L.LightningModule):
                             self.write_log(f"  -> WARNING: Potential vanishing gradient in layer {name}")
             self.write_log("-------------------------------------\n")
 
-
 # Flat regime: standard BCE / CE training (original ModelPD behaviour)
 class ModelPDClassification(ModelPDBase):
     """Per-subject classification supporting an arbitrary number of classes.
@@ -834,7 +995,7 @@ class ModelPDClassification(ModelPDBase):
             self.criterion = (nn.CrossEntropyLoss(weight=self.class_weights)
                               if use_balanced_weights else nn.CrossEntropyLoss())
 
-        # NEW: unweighted criterion, val-only, as a *calibration diagnostic*.
+        # Unweighted criterion, val-only, as a *calibration diagnostic*.
         # This is the proper NLL under val's actual class prior — NOT a
         # selection metric (its constant-predictor optimum is the base rate,
         # so it would reward the majority-leaning degenerate solution).
@@ -844,7 +1005,7 @@ class ModelPDClassification(ModelPDBase):
         # kept for backward compatibility (macro recall == balanced accuracy)
         self.val_balanced_acc = MulticlassRecall(num_classes=n_eff, average="macro")
 
-        # ---- NEW: pr-auc / f1(pos) / mcc as torchmetrics objects --------------
+        # ---- pr-auc / f1(pos) / mcc as torchmetrics objects --------------------
         # n_eff == 2 covers BOTH the 1-logit BCE head and a 2-logit CE head:
         #   -> Binary* metrics, F1 is the positive-class (label 1) F1,
         #      PR-AUC is average precision of the positive class.
@@ -867,11 +1028,13 @@ class ModelPDClassification(ModelPDBase):
             return MetricCollection(metrics, prefix=prefix)
 
         # drop_train_pr_auc: skip the memory-heavy AveragePrecision on train only.
+        # FRACTIONAL LOGGING NOTE: windowing shrinks the AveragePrecision score
+        # buffer by roughly the val fraction, so drop_train_pr_auc=False is
+        # often affordable again once align_train_metrics_to_val is on.
         self.train_metrics = _build_metrics(n_eff, prefix="train/",
                                             include_pr_auc=not drop_train_pr_auc)
         self.val_metrics   = _build_metrics(n_eff, prefix="val/",
                                             include_pr_auc=True)
-
 
     # ---- score shaping for the torchmetrics collection ------------------------
     def _scores_for_metrics(self, outputs):
@@ -912,25 +1075,33 @@ class ModelPDClassification(ModelPDBase):
 
         self._update_class_counts(labels, stage, preds=preds)
 
-        # CHANGED: everything rerooted under "{stage}/..."
-        self.log(f"{stage}/loss", loss, on_epoch=True, prog_bar=True, batch_size=bsz)
-        self.log(f"{stage}/acc",  acc,  on_epoch=True, prog_bar=True, batch_size=bsz)
+        # ===== FRACTIONAL LOGGING: per-step train curves =====
+        # loss/acc need none of the windowing machinery — on_step gives a dense
+        # curve that already reads against the mid-epoch val points.
+        self.log(f"{stage}/loss", loss, on_step=(stage == "train"),
+                 on_epoch=True, prog_bar=True, batch_size=bsz)
+        self.log(f"{stage}/acc",  acc,  on_step=(stage == "train"),
+                 on_epoch=True, prog_bar=True, batch_size=bsz)
 
-        # NEW: pr-auc / f1(pos) / mcc — logged as objects so Lightning
-        # computes + resets + DDP-syncs at epoch end. Names become
-        # "{stage}/pr_auc", "{stage}/f1_pos", "{stage}/mcc".
         scores = self._scores_for_metrics(outputs)
         tgt = labels.long().view(-1)
         mcoll = self.train_metrics if stage == "train" else self.val_metrics
         mcoll.update(scores, tgt)
-        self.log_dict(mcoll, on_step=False, on_epoch=True, batch_size=bsz)
+        # ===== FRACTIONAL LOGGING: single ownership of the train collection =====
+        # In aligned mode `_flush_train_window` calls compute()/reset() itself.
+        # Handing the object to log_dict as well would let Lightning reset it at
+        # epoch end underneath us, so the epoch value would reflect only the
+        # post-flush tail. Val is unaffected: Lightning resets it per val run,
+        # which is exactly the desired mid-epoch behaviour.
+        if stage == "val" or not self.align_train_metrics_to_val:
+            self.log_dict(mcoll, on_step=False, on_epoch=True, batch_size=bsz)
 
         if stage == "train":
             self.train_sample_count += bsz
             self._log_lrs()
             return loss
         else:
-            # NEW: unweighted (proper) val loss — diagnostic only.
+            # unweighted (proper) val loss — diagnostic only.
             loss_unweighted = self.criterion_unweighted(outputs, targets)
             self.log("val/loss_unweighted", loss_unweighted,
                      on_epoch=True, batch_size=bsz)
@@ -970,7 +1141,6 @@ class ModelPDClassification(ModelPDBase):
             "labels": labels.detach().cpu().flatten(),
             "subject_ids": subject_ids,
         }
-
 # Grouped regime: conditional-logistic (within-group softmax) training
 class ModelPDGrouped(ModelPDBase):
     """Case/control matched-set training. Expects the grouped collate:
@@ -1498,6 +1668,9 @@ def set_automatic_hyperparameters(exp_params):
     if exp_params['pre_training']:
         exp_params['filter_missing'] = 'all'
         exp_params['censor_time'] = 'all'
+    else:
+        exp_params['val_check_interval'] = 1.0 #force epoch level logging if i am not doing pre_trainign
+        exp_params['align_train_metrics_to_val'] = False
     exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
     if isinstance(exp_params['data_modality'],list):
         exp_params['num_tiles'] = len(exp_params['data_modality'])

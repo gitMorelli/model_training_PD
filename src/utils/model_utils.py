@@ -1054,6 +1054,7 @@ class SequenceFlexibleClassifierHead(nn.Module):
         cfg = dict(dropout=dropout, **mixer_kwargs)
         self.seq_model = seq_model
         self.mixer = MIXERS[seq_model](d_model, cfg)
+
         # keep positions out of the summed value when the mixer is a pure weighted average
         self.separate_values = use_slot_pos and self.mixer.wants_raw_values
 
@@ -1091,10 +1092,10 @@ class SequenceFlexibleClassifierHead(nn.Module):
             q, view_attn = self.view_pool(x)
         else:
             q, view_attn = x.mean(1), None
-        q = self.seq_in_norm(q)                                    # (N, d_model)
+        q = self.seq_in_norm(q)          #Apply a normalization layer # (N, d_model)
 
         B, dev = lengths.size(0), q.device
-        compact = self.mixer.needs_compact
+        compact = self.mixer.needs_compact #for each mixe I have defined if it can accept sequences with missing values in between timesteps
         rows, cols, L, order = self._layout(seq_ids, slot_ids, B, compact)
 
         q_pos = q + self.slot_pos(slot_ids) if self.use_slot_pos else q
