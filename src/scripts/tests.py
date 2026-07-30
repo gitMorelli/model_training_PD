@@ -308,7 +308,7 @@ def prepare_pre_training_data():
     print(f"Pre-training data saved to {save_path}")
 
 def inspect_columns(): 
-    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
+    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet"
     csv_data = pd.read_parquet(load_path)
     columns = csv_data.columns
     for col in columns:
@@ -685,15 +685,25 @@ def get_normalization_values():
     print(f"Mean: {mean}")
     print(f"Std: {std}")
 if __name__ == "__main__":
-    #get_grid_properties()
-    get_normalization_values()
-    '''
-    row['subject_id'] = sid
-    row['q'] = q
-    row['modality'] = map_modality(modality)
-    row['memory'] = meta['memory_size_bytes']
-    row['pixel_sum'] = meta['pixel_sum']
-    row['pixel_sq_sum'] = meta['pixel_sq_sum']
-    row['num_pixels'] = meta['num_pixels']
-    '''
+    import io, os, time, torch
+
+    sd = trainer.strategy.lightning_module_state_dict()
+    sd = {k: v.cpu() for k, v in sd.items()}
+
+    for tgt in ["/dev/shm/t.ckpt", "/tmp/t.ckpt",
+                "/mnt/beegfs02/scratch/a_morelli/t.ckpt"]:
+        try:
+            t = time.time(); torch.save(sd, tgt); d = time.time() - t
+            mb = os.path.getsize(tgt) / 1e6
+            print(f"{tgt:50s} {d:6.2f}s  {mb/d:7.1f} MB/s")
+            os.remove(tgt)
+        except Exception as e:
+            print(f"{tgt}: {e}")
+
+    # same payload, one large buffered write instead of torch.save's chunked writes
+    buf = io.BytesIO(); torch.save(sd, buf)
+    t = time.time()
+    with open("/mnt/beegfs02/scratch/a_morelli/t2.ckpt", "wb", buffering=8 << 20) as f:
+        f.write(buf.getbuffer())
+    print(f"beegfs buffered: {time.time()-t:.2f}s")
     

@@ -51,9 +51,9 @@ from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireMo
 from src.scripts.train_PD_model import model_initialization
 from src.debug.PD_model_evaluation import analyze_results, tee_stdout
 
-SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/cross_val"
+SOURCE_PATH = "/home/a_morelli/models/model_training_logs/PD/cross_val"
 CHECKPOINT_PATH = os.path.join(SOURCE_PATH, "resnet18_model_results/checkpoints")
-version='1'
+version='2'
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
@@ -84,8 +84,13 @@ def main():
                         target_recall=0.90, plot=True, out_dir_path=load_folder)
 
         print("\n############## Per-fold CV analysis ##############")
-        analyze_cv_per_fold(results, metrics=("pr_auc", "roc_auc", "youden_j"), pos_label=1, threshold=None, strategy="youden",
+        analyze_cv_per_fold(results, pos_label=1, threshold=None, strategy="youden",
                             target_recall=0.90, out_dir_path=load_folder)
+
+        print("\n############## Per-fold CV analysis (1:1 matched) ##############")
+        analyze_cv_per_fold(results, pos_label=1, threshold=None, strategy="youden",
+                            target_recall=0.90, out_dir_path=load_folder, matched=True)
+
 
 def _to_np(x):
     return x.numpy() if hasattr(x, "numpy") else np.asarray(x)
@@ -99,12 +104,25 @@ def analyze_cv_pooled(results, results_df=None, **kwargs):
     return analyze_results(scores, labels, results_df=pooled,
                            split="cv_oof", **kwargs)
 
-def analyze_cv_per_fold(results, metrics=("pr_auc", "roc_auc", "youden_j"), **kwargs):
+def analyze_cv_per_fold(results, metrics=("pr_auc", "roc_auc", "youden_j","balanced_acc","f1_positive",
+                                          "sensitivity", "specificity", "precision_positive","accuracy"), matched=False, **kwargs):
     per_fold = {}
     for f in sorted(results):
         print(f"\n########## FOLD {f} ##########")
-        scores, labels = _scores_labels_from_df(results[f])
-        per_fold[f] = analyze_results(scores, labels, results_df=results[f],
+        fold_results = results[f]
+        #get the unique_id with label 1
+        label_1_ids = fold_results.loc[fold_results[LABEL_COL] == 1, "unique_id"].unique()
+        #get the unique_id with label 0
+        label_0_ids = fold_results.loc[fold_results[LABEL_COL] == 0, "unique_id"].unique()
+        #get the minimum number of samples between the two classes
+        min_samples = min(len(label_1_ids), len(label_0_ids))
+        #sample the unique_id with label 0 to match the number of samples with label 1
+        if matched:
+            label_0_ids_matched = np.random.choice(label_0_ids, size=min_samples, replace=False)
+            #filter the fold_results to keep only the matched samples
+            fold_results = fold_results[fold_results["unique_id"].isin(np.concatenate([label_1_ids, label_0_ids_matched]))]
+        scores, labels = _scores_labels_from_df(fold_results)
+        per_fold[f] = analyze_results(scores, labels, results_df=fold_results,
                                     split=f"fold_{f}", plot=False, **kwargs)
 
     print("\n########## CV SUMMARY ##########")

@@ -39,9 +39,7 @@ from src.utils.model_utils import get_model, test_output, get_classification_hea
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader, get_optimization_groups
-from src.utils.training_utils import set_automatic_hyperparameters, MemMonitor, BatchTimer, ThroughputMonitor
-#set variables
-#torch.set_num_threads(2)  # Set the number of threads cores for the main process (eg 2+workers=num physical cores)
+from src.utils.training_utils import set_automatic_hyperparameters, MemMonitor, BatchTimer, ThroughputMonitor, WriteProbe
 
 
 def pre_trained_weights(name):
@@ -49,22 +47,22 @@ def pre_trained_weights(name):
         return None
     #options for custom_pre_trained_weights:
     if name == 'pre_trained_E3N_resnet18':
-        out_path =os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_2',
+        out_path =os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_2',
                     'best-epoch=01-val_loss=0.23.ckpt')
     elif name == 'pre_trained_E3N_resnet18_window':
-        out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_4',
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_4',
                     'best-02-0.2222.ckpt')
     elif name == 'pre_trained_E3N_resnet50':
-        out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_1',
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_1',
                     'best-epoch=00-val_loss=0.30.ckpt')
     elif name == 'pre_trained_E3N_resnet50_window':
-        out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_2',
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_2',
                     'best-02-0.2264.ckpt')
     elif name == 'pre_trained_E3N_custom_window':
-        out_path = os.path.join('/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_1',
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_1',
                     'best-00-0.8068.ckpt')
     '''os.path.join(
-        '/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/mnist',
+        '/home/a_morelli/models/model_training_logs/pre_trained_models/mnist',
         'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
     ),'''
     #resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
@@ -91,9 +89,9 @@ exp_params = {
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'pre_training': False,
+    'pre_training': True,
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': None, # ALL_SYNTHETIC_TRANSFORMS or None
+    'synthetic': ALL_SYNTHETIC_TRANSFORMS, # ALL_SYNTHETIC_TRANSFORMS or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
 
@@ -101,29 +99,28 @@ exp_params = {
     'data_modality': get_input_modality('window_view'), #mixed_view, window_view
     'num_tiles': 3,
     'use_grid': True,
-    'use_balanced_weights': True,
-    'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': False, #note that this and balace_validation are independent
-    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
+    'use_balanced_weights': False,
+    'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
+    'balanced_data': True, #note that this and balace_validation are independent
+    'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':"resnet18",#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':"FiveStageResidualStridedConvNet",#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': pre_trained_weights('pre_trained_E3N_resnet18_window'), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
+    'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     #or
     'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
     'norm_std': 'PD_window',
     'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
-    'val_check_interval': 1.0, #if integers the number of steps after which 
-    #to perform validation, if float the fraction of the epoch after which to perform validation, 1.0 is the default value for doing at epoch end
-    'align_train_metrics_to_val': False, 
+    'val_check_interval': 0.1, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
+    'align_train_metrics_to_val': True, 
     'min_window_steps': 50,
     'model_parameters': {
         'd_model': 128, 
@@ -148,18 +145,19 @@ exp_params = {
     
     #Training params definition
     'use_opt_groups': False,
-    'lr_backbone': 1e-6,
-    'lr_classifier_head': 1e-4,
+    'lr_backbone': 1e-4,
+    'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
-    'num_epochs': 60,
-    'patience': 10,
+    'num_epochs': 2,
+    'max_steps': 700, #N or -1
+    'patience': 2, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-7,
+    'eta_min_cosine': 1e-6,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier','layer4'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
+    'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
     'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
@@ -171,13 +169,14 @@ exp_params = {
 
 def get_source_path():
     if exp_params['problem'] == 'PD' and not exp_params['pre_training']:
+        #return "/home/a_morelli/models/model_training_logs/PD/"
         return "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
     elif exp_params['problem'] == 'PD' and exp_params['pre_training']:
-        return "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
+        return "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N"
+        #return "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
     else:
         raise ValueError(f"Unknown problem type: {exp_params['problem']}")
 SOURCE_PATH = get_source_path()
-#"/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 
 # Authomatic settings
 exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
@@ -239,6 +238,8 @@ def main(exp_params):
 
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
 
+    val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
+    
     #get_memory_usage(grid_dict, train_df, exclusion_set)
 
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
@@ -301,6 +302,20 @@ def main(exp_params):
 
 
 #### HELPER FUCNTIONS #### 
+def override_val_exclusion(train_df, val_exclusion_set, exp_params):
+    if exp_params['pre_training']:
+        N=2000
+        #reduce the number of samples in the validation set to 1000 for pre-training
+        #identify the remaining ids after filtering for val_exclusion_set
+        val_df = train_df[train_df['split']=='val']
+        all_val_ids = set(val_df['unique_id'].unique())
+        remaining_ids = set(val_df[~val_df['unique_id'].isin(val_exclusion_set)]['unique_id'].unique())
+        #randomly sample N ids from the remaining ids
+        sampled_ids = random.sample(list(remaining_ids), N)
+        val_exclusion_set = all_val_ids - set(sampled_ids)
+        print(f"Reduced the number of samples in the validation set from {len(all_val_ids)} to {N} for pre-training. Excluded {len(val_exclusion_set)} samples.", flush=True)
+    return val_exclusion_set
+
 def restore(current_version, exp_params):
     exp_params['timestamp'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     exp_params['best_epoch'] = "N/A (Cancelled)"
@@ -479,6 +494,7 @@ def trainer_definition(current_version, exp_params, lit_model, cv=None):
                        if exp_params['debugging_callbacks'] else [])
     trainer = L.Trainer(
         max_epochs=exp_params['num_epochs'],
+        max_steps=exp_params.get('max_steps', -1),
         min_epochs=exp_params.get('min_epochs', 1),   # FIX 6: blocks early stop + selection
         logger=tb_logger,
         accelerator="auto",

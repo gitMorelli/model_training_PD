@@ -8,6 +8,7 @@ import os
 import pandas as pd
 import torch.nn as nn
 import time
+import torch
 import webdataset as wds
 import glob
 from tqdm import tqdm
@@ -453,7 +454,7 @@ class ModelPDBase(L.LightningModule):
                  # ===== FRACTIONAL LOGGING: new args =====
                  val_check_interval=None,          # None -> epoch end; float in (0,1]; int -> every N batches
                  align_train_metrics_to_val=False,  # also emit windowed train metrics at each val point
-                 min_window_steps=50):             # don't emit a window shorter than this many optimizer steps
+                 min_window_steps=50, iterable_train_dataset=True):             # don't emit a window shorter than this many optimizer steps
         super().__init__()
         self.write_log = write_log
         self.model = model
@@ -472,9 +473,8 @@ class ModelPDBase(L.LightningModule):
         # NOTE: `total_units` counts *whatever the loader batches*:
         # subjects for the flat loader, groups for the grouped loader.
         self.total_units = total_units
-        steps_per_epoch = math.ceil(
-            math.ceil(total_units / (batch_size * world_size)) / accumulate_grad_batches
-        )
+        self.batches_per_epoch = math.ceil(total_units / (batch_size * world_size))
+        steps_per_epoch = math.ceil(self.batches_per_epoch / accumulate_grad_batches)
         self.total_steps = num_epochs * steps_per_epoch
 
         if example_input_array is not None:
@@ -499,26 +499,39 @@ class ModelPDBase(L.LightningModule):
         # Second accumulator: `_stats["train"]` is cleared at every window flush,
         # so the whole-epoch composition numbers need their own bucket.
         self._epoch_stats_train = self._empty_stats()
+        self.iterable_train_dataset = iterable_train_dataset #True if dataloader has no __len__
 
     # ===== FRACTIONAL LOGGING: Trainer wiring ================================
     @property
     def trainer_val_kwargs(self):
-        """Single source of truth for the Trainer:  L.Trainer(..., **lm.trainer_val_kwargs)"""
         v = self.val_check_interval
         if v is None:
             return {}
         if isinstance(v, float):
             if not 0.0 < v <= 1.0:
                 raise ValueError("float val_check_interval must be in (0, 1]")
+            if v == 1.0:
+                return {}                       # Trainer default; also legal for iterable
+            if self.iterable_train_dataset:
+                # no __len__ -> Lightning can't resolve a fraction; convert to batches
+                n = max(1, int(round(v * self.batches_per_epoch)))
+                self.write_log(f"[trainer_val_kwargs] iterable train dataset: "
+                            f"val_check_interval {v} -> {n} batches "
+                            f"(batches_per_epoch≈{self.batches_per_epoch})\n")
+                return {"val_check_interval": n}
             return {"val_check_interval": v}
-        # an int larger than len(train_loader) requires disabling the per-epoch check
-        return {"val_check_interval": int(v), "check_val_every_n_epoch": None}
+        v = int(v)
+        # only disable the per-epoch check when the interval can exceed one epoch
+        if v > self.batches_per_epoch:
+            return {"val_check_interval": v, "check_val_every_n_epoch": None}
+        return {"val_check_interval": v}
 
     def _epoch_progress(self):
-        """Fraction of the current training epoch consumed, for log tags."""
         try:
             done = self.trainer.fit_loop.epoch_loop.batch_progress.current.processed
             total = self.trainer.num_training_batches
+            if not math.isfinite(total) or total <= 0:
+                total = self.batches_per_epoch          # estimate from total_units
             return done / total if total else 0.0
         except (RuntimeError, AttributeError, ZeroDivisionError):
             return 0.0
@@ -995,12 +1008,29 @@ class ModelPDClassification(ModelPDBase):
             self.criterion = (nn.CrossEntropyLoss(weight=self.class_weights)
                               if use_balanced_weights else nn.CrossEntropyLoss())
 
+
+        # --- per step prediction -------
+        mixer = getattr(getattr(model, 'classifier', None), 'mixer', None)
+        self.per_step = getattr(mixer, 'per_step', False)
+        # unreduced twin of self.criterion, for per-subject normalization
+        if num_classes == 1:
+            self.criterion_none = (
+                nn.BCEWithLogitsLoss(pos_weight=self.pos_weight, reduction='none')
+                if use_balanced_weights else nn.BCEWithLogitsLoss(reduction='none'))
+        else:
+            self.criterion_none = (
+                nn.CrossEntropyLoss(weight=self.class_weights, reduction='none')
+                if use_balanced_weights else nn.CrossEntropyLoss(reduction='none'))
+
         # Unweighted criterion, val-only, as a *calibration diagnostic*.
         # This is the proper NLL under val's actual class prior — NOT a
         # selection metric (its constant-predictor optimum is the base rate,
         # so it would reward the majority-leaning degenerate solution).
         self.criterion_unweighted = (nn.BCEWithLogitsLoss() if num_classes == 1
                                      else nn.CrossEntropyLoss())
+        self.criterion_unweighted_none = (
+            nn.BCEWithLogitsLoss(reduction='none') if num_classes == 1
+            else nn.CrossEntropyLoss(reduction='none'))
 
         # kept for backward compatibility (macro recall == balanced accuracy)
         self.val_balanced_acc = MulticlassRecall(num_classes=n_eff, average="macro")
@@ -1036,6 +1066,30 @@ class ModelPDClassification(ModelPDBase):
         self.val_metrics   = _build_metrics(n_eff, prefix="val/",
                                             include_pr_auc=True)
 
+    # ---- per step predictions helpers ----------------------------------------
+    def _unpack(self, outputs, batch):
+        """-> (logits_for_loss, targets_for_loss, subject_logits)"""
+        _, seq_ids, _, _, labels, *_ = batch
+        if not self.per_step:
+            tgt = labels.float().unsqueeze(1) if self.num_classes == 1 else labels.long()
+            return outputs, tgt, outputs
+
+        tok_logits, last = outputs
+        tok_labels = labels[seq_ids]                        # (n_tok,)
+        tgt = (tok_labels.float().unsqueeze(1) if self.num_classes == 1
+               else tok_labels.long())
+        return tok_logits, tgt, last
+
+    def _subject_mean_loss(self, logits, targets, seq_ids, B, crit=None):
+        """Mean over subjects of the mean token loss within each subject."""
+        crit = crit or self.criterion_none
+        per_tok = crit(logits, targets).float().view(-1)                  # (n_tok,)
+        counts  = torch.bincount(seq_ids, minlength=B)                    # (B,)
+        per_subj = torch.zeros(B, dtype=per_tok.dtype, device=per_tok.device)
+        per_subj.scatter_add_(0, seq_ids, per_tok)
+        nz = counts > 0
+        return (per_subj[nz] / counts[nz]).mean()
+
     # ---- score shaping for the torchmetrics collection ------------------------
     def _scores_for_metrics(self, outputs):
         """Per-sample scores in the shape the metric collection expects.
@@ -1057,20 +1111,21 @@ class ModelPDClassification(ModelPDBase):
         frames, seq_ids, slot_ids, lengths, labels, *_ = batch
         bsz = labels.size(0)
 
-        targets = labels.float().unsqueeze(1) if self.num_classes == 1 else labels.long()
         outputs = self(frames, seq_ids, slot_ids, lengths)
+        logits, targets, subj_logits = self._unpack(outputs, batch)
 
-        if stage == "train" and not self._guard_finite(outputs, "outputs"):
+        if stage == "train" and not self._guard_finite(logits, "outputs"):
             return None
 
-        loss = self.criterion(outputs, targets)
+        loss = (self._subject_mean_loss(logits, targets, seq_ids, bsz)
+                if self.per_step else self.criterion(logits, targets))
         if stage == "train" and not self._guard_finite(loss, "loss"):
             return None
 
         if self.num_classes == 1:
-            preds = (outputs > 0.0).long().view(-1)
+            preds = (subj_logits > 0.0).long().view(-1)
         else:
-            preds = torch.argmax(outputs, dim=1)
+            preds = torch.argmax(subj_logits, dim=1)
         acc = (preds == labels.long().view(-1)).float().mean()
 
         self._update_class_counts(labels, stage, preds=preds)
@@ -1083,7 +1138,7 @@ class ModelPDClassification(ModelPDBase):
         self.log(f"{stage}/acc",  acc,  on_step=(stage == "train"),
                  on_epoch=True, prog_bar=True, batch_size=bsz)
 
-        scores = self._scores_for_metrics(outputs)
+        scores = self._scores_for_metrics(subj_logits)
         tgt = labels.long().view(-1)
         mcoll = self.train_metrics if stage == "train" else self.val_metrics
         mcoll.update(scores, tgt)
@@ -1102,7 +1157,11 @@ class ModelPDClassification(ModelPDBase):
             return loss
         else:
             # unweighted (proper) val loss — diagnostic only.
-            loss_unweighted = self.criterion_unweighted(outputs, targets)
+            loss_unweighted = (
+                self._subject_mean_loss(logits, targets, seq_ids, bsz,
+                                        crit=self.criterion_unweighted_none)
+                if self.per_step else
+                self.criterion_unweighted(logits, targets))
             self.log("val/loss_unweighted", loss_unweighted,
                      on_epoch=True, batch_size=bsz)
 
@@ -1126,21 +1185,27 @@ class ModelPDClassification(ModelPDBase):
             resizing_factors, subject_ids, modalities = batch
 
         outputs = self(frames, seq_ids, slot_ids, lengths)
+        tok_logits, subj_logits = outputs if self.per_step else (None, outputs)
 
-        if self.num_classes == 1:
-            p1 = torch.sigmoid(outputs).flatten()
-            probs = torch.stack([1 - p1, p1], dim=1)
-            preds = (outputs > 0.0).long().flatten()
-        else:
-            probs = torch.softmax(outputs, dim=1)
-            preds = torch.argmax(outputs, dim=1)
+        def _probs_preds(z):
+            if self.num_classes == 1:
+                p1 = torch.sigmoid(z).flatten()
+                return torch.stack([1 - p1, p1], dim=1), (z > 0.0).long().flatten()
+            return torch.softmax(z, dim=1), torch.argmax(z, dim=1)
 
-        return {
-            "probs": probs.detach().cpu(),
-            "preds": preds.detach().cpu(),
-            "labels": labels.detach().cpu().flatten(),
-            "subject_ids": subject_ids,
-        }
+        probs, preds = _probs_preds(subj_logits)
+        out = {"probs": probs.detach().cpu(),
+               "preds": preds.detach().cpu(),
+               "labels": labels.detach().cpu().flatten(),
+               "subject_ids": subject_ids}
+
+        if self.per_step:
+            tok_probs, tok_preds = _probs_preds(tok_logits)
+            out.update(tok_probs=tok_probs.detach().cpu(),
+                       tok_preds=tok_preds.detach().cpu(),
+                       tok_seq_ids=seq_ids.detach().cpu(),
+                       tok_slot_ids=slot_ids.detach().cpu())
+        return out
 # Grouped regime: conditional-logistic (within-group softmax) training
 class ModelPDGrouped(ModelPDBase):
     """Case/control matched-set training. Expects the grouped collate:
@@ -1636,6 +1701,14 @@ class MemMonitor(L.Callback):
               f"workers={[f'{m:.2f}' for _, m in kids]} "
               f"total={total:.2f}GB (PSS)")
 
+class WriteProbe(L.Callback):
+    def on_validation_end(self, trainer, pl_module):
+        payload = torch.zeros(34_000_000, dtype=torch.float32)  # ~136 MB
+        for tgt in ["/tmp/probe.ckpt", "/mnt/beegfs02/scratch/a_morelli/probe.ckpt"]:
+            t = time.time(); torch.save(payload, tgt); d = time.time() - t
+            print(f"[probe] {tgt:55s} {d:6.2f}s {136/d:7.1f} MB/s", flush=True)
+            os.remove(tgt)
+
 #optimization groups utils
 def get_optimization_groups(model_name,exp_params):
     if exp_params['use_opt_groups'] == False:
@@ -1669,7 +1742,7 @@ def set_automatic_hyperparameters(exp_params):
         exp_params['filter_missing'] = 'all'
         exp_params['censor_time'] = 'all'
     else:
-        exp_params['val_check_interval'] = 1.0 #force epoch level logging if i am not doing pre_trainign
+        exp_params['val_check_interval'] = None #force epoch level logging if i am not doing pre_trainign
         exp_params['align_train_metrics_to_val'] = False
     exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
     if isinstance(exp_params['data_modality'],list):

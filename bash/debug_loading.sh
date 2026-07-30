@@ -4,9 +4,9 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/debug_loading.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=20              # Number of CPU cores per task
-#SBATCH --mem=96G                      # Job memory request
-#SBATCH --time=01:00:00                # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=40              # Number of CPU cores per task
+#SBATCH --mem=56G                      # Job memory request
+#SBATCH --time=00:10:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
 #--partition=visuq,gpgpuq
 #--gres=gpu:1
@@ -39,4 +39,4 @@ cat /sys/fs/cgroup/cpu.max
 
 # --- Execution ---
 $ENV_PYTHON -m src.debug.debug_loading \
-    --num_workers 18
+    --num_workers 36

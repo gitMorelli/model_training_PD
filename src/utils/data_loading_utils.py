@@ -1567,6 +1567,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
     val_dataset   = prepare_PD_dataset(val_input, exclusion_set=val_exclusion_set,train_df=train_df,exp_params=exp_params, 
                                        partial_batch=True, **common_kwargs)
     
+    val_workers = worker//2 
     train_loader = DataLoader(
         train_dataset, 
         num_workers=worker, 
@@ -1574,14 +1575,16 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
         pin_memory=False,
         worker_init_fn=worker_init_fn,
+        persistent_workers=True
     ) #add collate_fn=lambda x: x,  if you want to bypass thedefault converter (default converter converts numpy to tensors)
     val_loader = DataLoader(
         val_dataset, 
-        num_workers=2, 
+        num_workers=val_workers, 
         batch_size=None, 
-        prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
+        prefetch_factor=min(2, prefetch_factor) if val_workers > 0 else None,
         pin_memory=False, #creates a stall when true and variable size batches (eg custom collate)
         worker_init_fn=worker_init_fn,
+        persistent_workers=True
     )
     return train_loader, val_loader, train_dataset, val_dataset
 ####################################################################################################################

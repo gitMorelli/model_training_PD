@@ -39,6 +39,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import sys, os, contextlib
 
+
 from src.utils.data_loading_utils import melt_df, prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD, return_file_paths
 from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
@@ -52,10 +53,10 @@ from src.scripts.train_PD_model import model_initialization
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
 model_name = 'resnet18' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/mnt/beegfs02/scratch/a_morelli/model_training/PD/{model_name}_model_results/checkpoints"
-version='30'
+version='31'
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-12-0.1712.ckpt"
+checkpoint_to_load=f"v_{version}/best-32-0.4072.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)
@@ -525,6 +526,7 @@ def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
  
     # 3. report at that threshold
     print("\n--- Classification Report @ threshold ---")
+    report = classification_report(y_true, y_pred, target_names=class_names, zero_division=0, output_dict=True)
     print(classification_report(y_true, y_pred, target_names=class_names, zero_division=0))
     print("--- Confusion Matrix @ threshold ---")
     print(confusion_matrix(y_true, y_pred))
@@ -539,9 +541,15 @@ def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
                               path=os.path.join(out_dir_path, f"pr_curve_{split}.png"))
         _plot_roc_curve_binary(y_true, y_scores, pos_label, threshold,
                                path=os.path.join(out_dir_path, f"roc_curve_{split}.png"))
+    #get the balanced accuracy score from the classification report
+    balanced_acc = report["macro avg"]["recall"]
+    f1_positive  = report["PD"]["f1-score"]
+    precision_positive = report["PD"]["precision"]
+    accuracy = report["accuracy"]
     return {"threshold": threshold, "y_pred": y_pred,
             "sensitivity": sens, "specificity": spec, "youden_j": sens + spec - 1,
-            "pr_auc": pr_auc, "roc_auc": roc_auc, "prevalence": prevalence}
+            "pr_auc": pr_auc, "roc_auc": roc_auc, "prevalence": prevalence, "balanced_acc": balanced_acc, "f1_positive": f1_positive,
+            "precision_positive": precision_positive, "accuracy": accuracy}
 # ======================================================================
 # multiclass path -- used when C > 2
 # ======================================================================

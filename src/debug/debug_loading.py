@@ -44,7 +44,7 @@ params = {
     'selected_problem': "PD",#"PD", # "handedness"
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
     'pre_training': False,
-    'debug': True,
+    'debug': False,
 
     'pre_filter_csv': False,
     'integrate_csv': False,
@@ -56,7 +56,7 @@ params = {
                                'case_grid_pattern','q_5_num_X',
                                'synth_label'],
 
-    "data_modality": ['X_window','digit_window','text_window'],
+    "data_modality": ['X_window','digit_window','text_window']+['X_window','digit_window','text_window']+['X_window','digit_window','text_window'],
     #['X_window' for _ in range(2)]+['digit_window' for _ in range(2)]+['text_window' for _ in range(2)],
     #['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     "num_tiles": 3,
@@ -125,8 +125,8 @@ VERBOSE = True
 
 
 def main(params,run_random_samples_from_loader=False, 
-         run_study_loader = True, show_grids=False, 
-         run_compute_time = False, run_debug_from_shards=False,
+         run_study_loader = False, show_grids=False, 
+         run_compute_time = True, run_debug_from_shards=False,
          run_explore_files=False):
     args = get_args()
     random.seed(params['seed'])

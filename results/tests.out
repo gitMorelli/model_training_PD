@@ -1,20 +1,18 @@
-Normalization values:
-Mean: 0.0610334410445247
-Std: 0.23933505962649537
+Number of unique_id with split==val: 7653
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5107239
+Job ID: 5149303
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n20
+Nodelist: n09
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-07-26 01:55:14
-Job ended at:   2026-07-26 01:55:21
-Job Wall-clock time: 00:00:07
+Job started at: 2026-07-29 23:21:45
+Job ended at:   2026-07-29 23:21:58
+Job Wall-clock time: 00:00:13
 CPU Utilized: 00:00:05
-CPU Efficiency: 17.86% of 00:00:28 core-walltime
-Memory Utilized: 3.23 MB
-Memory Efficiency: 0.02% of 16.00 GB
+CPU Efficiency: 9.62% of 00:00:52 core-walltime
+Memory Utilized: 547.34 MB
+Memory Efficiency: 3.34% of 16.00 GB
