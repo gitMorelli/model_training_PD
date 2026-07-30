@@ -281,6 +281,31 @@ class GRUMixer(nn.Module):
         h = h.view(-1, self.dirs, B, self.hidden)[-1]      # last layer: (dirs, B, H)
         summary = torch.cat(list(h), dim=-1)               # (B, H*dirs)
         return summary * (lengths > 0).unsqueeze(-1).to(summary.dtype), None
+
+class CausalGRUMixer(nn.Module):
+    needs_compact, wants_raw_values = True, False
+
+    def __init__(self, d, hidden=None, n_layers=1, dropout=0.1):
+        super().__init__()
+        hidden = hidden or d // 2
+        self.rnn = nn.GRU(d, hidden, num_layers=n_layers, batch_first=True,
+                          bidirectional=False,
+                          dropout=dropout if n_layers > 1 else 0.0)
+        self.dirs = 1
+        self.hidden = hidden
+        self.out_dim = hidden * self.dirs
+        self.per_step = True  # flag to indicate that this mixer produces per-step outputs
+
+    def forward(self, x, pad_mask, lengths, values=None):
+        B, L = x.shape[:2]
+        packed = nn.utils.rnn.pack_padded_sequence(
+            x, lengths.clamp(min=1).cpu(), batch_first=True, enforce_sorted=False)
+        out, h = self.rnn(packed)
+
+        seq, _ = nn.utils.rnn.pad_packed_sequence(
+            out, batch_first=True, total_length=L)          # (B, L, H)
+        return seq * (~pad_mask).unsqueeze(-1).to(seq.dtype), None
+
 class TransformerMixer(nn.Module):
     """Rung 5: your original encoder + CLS readout."""
     needs_compact, wants_raw_values = False, False
@@ -309,6 +334,9 @@ MIXERS = {
                                          n_layers=c.get('n_layers', 1),
                                          dropout=c.get('dropout', 0.1),
                                          bidirectional=c.get('bidirectional', True)),
+    'causal_gru': lambda d, c: CausalGRUMixer(d, hidden=c.get('hidden', None),
+                                                n_layers=c.get('n_layers', 1),
+                                                dropout=c.get('dropout', 0.1)),
     'transformer': lambda d, c: TransformerMixer(d, n_heads=c.get('n_heads', 8),
                                                  n_layers=c.get('n_layers', 4),
                                                  ff_mult=c.get('ff_mult', 4),
@@ -1108,6 +1136,14 @@ class SequenceFlexibleClassifierHead(nn.Module):
 
         pooled, slot_attn = self.mixer(buf, pad_mask, lens, values=values)
         logits = self.head(self.drop(self.norm(pooled)))
+
+        if getattr(self.mixer, 'per_step', False):
+            n_tok = seq_ids.numel()
+            idx = order if order is not None else torch.arange(n_tok, device=dev)
+            tok_logits = logits.new_zeros(n_tok, logits.size(-1))
+            tok_logits[idx] = logits[rows, cols]                    # input token order
+            last = logits[torch.arange(B, device=dev), (lens - 1).clamp(min=0)]
+            logits = (tok_logits, last)
 
         if not (return_view_attn or return_slot_attn):
             return logits
