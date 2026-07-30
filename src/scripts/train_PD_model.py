@@ -76,10 +76,10 @@ def get_input_modality(name):
         return ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)]
 
 RESTORE = False
-version_override =  28
+version_override =  2
 
 exp_params = {
-    'problem': 'PD', #handedness, PD, pre_training
+    'problem': 'PD', #handedness, PD, 
     'class_col': 'diag_park_final1_quest',
     'debug': False,
 
@@ -100,9 +100,9 @@ exp_params = {
     'num_tiles': 3,
     'use_grid': True,
     'use_balanced_weights': False,
-    'balancing_factor': 1, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': True, #note that this and balace_validation are independent
-    'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
+    'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
+    'balanced_data': False, #note that this and balace_validation are independent
+    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
@@ -119,7 +119,7 @@ exp_params = {
     'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
     'norm_std': 'PD_window',
     'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
-    'val_check_interval': 0.1, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
+    'val_check_interval': 0.2, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
     'align_train_metrics_to_val': True, 
     'min_window_steps': 50,
     'model_parameters': {
@@ -132,7 +132,7 @@ exp_params = {
         'use_spread': False, #add a variance feature of dimension d_model to the average d_model feature
         'use_count_feature': False,
         'use_attention_pool': False, #if true overrides use_spread and use_count_feature 
-        'seq_model':'gru', 
+        'seq_model':'gru', #causal_gru (bidirectional has no impact, predictions are returned per_step)
         'bidirectional':True,
     },
 
@@ -149,10 +149,10 @@ exp_params = {
     'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
-    'num_epochs': 2,
-    'max_steps': 700, #N or -1
+    'num_epochs': 3,
+    'max_steps': -1, #N or -1
     'patience': 2, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
-    'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
+    'stopping_metric': 'val/loss',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
     'eta_min_cosine': 1e-6,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
@@ -164,13 +164,13 @@ exp_params = {
     'precision': "16-mixed", #None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
     'gradient_clip_val': 1.0, #1.0, None
 
-    'prefetch_factor': 2,
+    'prefetch_factor': 4,
 }
 
 def get_source_path():
     if exp_params['problem'] == 'PD' and not exp_params['pre_training']:
-        #return "/home/a_morelli/models/model_training_logs/PD/"
-        return "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
+        return "/home/a_morelli/models/model_training_logs/PD/"
+        #return "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
     elif exp_params['problem'] == 'PD' and exp_params['pre_training']:
         return "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N"
         #return "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
@@ -299,6 +299,7 @@ def main(exp_params):
     with open(os.path.join(CHECKPOINT_PATH,f'v_{current_version}', 'exp_params.pkl'), 'wb') as f:
         pickle.dump(exp_params, f)
 
+#### test functions ######
 
 
 #### HELPER FUCNTIONS #### 

@@ -50,16 +50,17 @@ from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDC
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.scripts.train_PD_model import model_initialization
 
-SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
-model_name = 'resnet18' #"FiveStageResidualStridedConvNet"
-CHECKPOINT_PATH = f"/mnt/beegfs02/scratch/a_morelli/model_training/PD/{model_name}_model_results/checkpoints"
-version='31'
+experiment = "PD"#"pre_trained_models/E3N" # "PD"
+SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
+model_name = 'resnet18'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
+version='36'
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-32-0.4072.ckpt"
+checkpoint_to_load=f"v_{version}/best-51-015340-0.3795.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
-    exp_params = pd.read_pickle(f)
+    exp_params = pd.read_pickle(f) 
 
 #exp_params['filter_missing']='all'
 #exp_params['censor_time']='all'
@@ -69,7 +70,10 @@ exp_params['balance_validation'] = False
 exp_params['batch_size'] = 1
 #'precision': "16-mixed",
 
-exp_params['matched_validation'] = True
+if exp_params['pre_training']:
+    exp_params['matched_validation'] = False
+else:
+    exp_params['matched_validation'] = True 
 
 #PATHS
 SOURCE_PATTERN = os.path.join(SOURCE_PATH,exp_params['data_folder'])
@@ -152,6 +156,16 @@ def main(exp_params):
             analyze_results(all_probs_matched, all_labels_matched, results_df_matched, split="matched_validation",
                             pos_label=1, threshold=None, strategy="youden",
                             target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
+        
+        if lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
+            print("#" * 50)
+            print(f"Evaluating model on per_step predictions")
+            results_df_per_step = get_per_step_results(outputs, train_df)
+            plot_probability_trajectories(results_df_per_step, n_steps=20, ax=None,
+                                  class_names=("negative", "positive"),
+                                  min_count=1, save_path=os.path.dirname(ckpt_path))
+            #save the per_step results in a csv file
+            results_df_per_step.to_csv(os.path.join(os.path.dirname(ckpt_path), f"per_step_predictions.csv"), index=False)
 
         if exp_params['predict_on_train']:
             outputs = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
@@ -229,6 +243,133 @@ def tee_stdout(path, mode="w"):
             yield
         finally:
             sys.stdout = old
+
+def get_per_step_results(outputs, train_df,class_names=None):
+    """Per-timestep predictions from a per_step=True run.
+
+    Returns one row per (subject, slot), sorted subject-major then by slot.
+    Empty if the run wasn't per-step (nothing to assemble).
+    """
+    if not outputs or "tok_probs" not in outputs[0]:
+        return pd.DataFrame()
+
+    tok_probs = torch.cat([b["tok_probs"] for b in outputs]).cpu().numpy()
+    tok_preds = torch.cat([b["tok_preds"] for b in outputs]).cpu().numpy()
+
+    # seq_ids index into each batch's subject_ids list, so map them per-batch
+    # before concatenating — a global cat would collide across batches.
+    subj, label, slot = [], [], []
+    for b in outputs:
+        sids = b["subject_ids"]                            # list, len = B_batch
+        labels_b = b["labels"].cpu().numpy()               # (B_batch,)
+        seq_b  = b["tok_seq_ids"].cpu().numpy()            # (n_tok_batch,)
+        slot_b = b["tok_slot_ids"].cpu().numpy()
+        subj.extend(sids[i] for i in seq_b)
+        label.extend(labels_b[i] for i in seq_b)
+        slot.extend(slot_b.tolist())
+
+    n_classes = tok_probs.shape[1]
+    if class_names is None:
+        class_names = list(range(n_classes))
+    assert len(class_names) == n_classes
+
+    df = pd.DataFrame({
+        "unique_id":       subj,
+        "slot":            slot,
+        "true_label":      label,
+        "predicted_label": tok_preds,
+    })
+    for i, name in enumerate(class_names):
+        df[f"probability_{name}"] = tok_probs[:, i]
+    
+    def add_case_dt(result_df, train_df, n_slots=13):
+        """Attach case_dt to result_df by matching (unique_id, slot=i) to
+        train_df's case_dt_dateq{i+1}. Missing pairs get NaN."""
+        cols = [f"case_dt_dateq{i}" for i in range(1, n_slots + 1)]
+
+        long = (train_df[["unique_id", *cols]]
+                .melt(id_vars="unique_id", value_vars=cols,
+                    var_name="_col", value_name="case_dt"))
+        long["slot"] = long["_col"].str.removeprefix("case_dt_dateq").astype(int) - 1
+
+        return result_df.merge(long[["unique_id", "slot", "case_dt"]],
+                            on=["unique_id", "slot"], how="left")
+    
+    result_df = add_case_dt(df, train_df)
+
+    return result_df.sort_values(["unique_id", "slot"]).reset_index(drop=True)
+
+
+def plot_probability_trajectories(df, n_steps=20, ax=None,
+                                  class_names=("negative", "positive"),
+                                  min_count=1, show_points=True,
+                                  point_alpha=0.15, save_path=None):
+    """Average probability_1 across subjects on a binned case_dt axis.
+    Rows are binned to N equal-width steps between min and max case_dt.
+    Each class (true_label 0 / 1) gets a mean curve with a ±SEM band.
+    Bins with fewer than `min_count` subjects are dropped from that class.
+    """
+    d = df.dropna(subset=["case_dt", "probability_1", "true_label"]).copy()
+    if d.empty:
+        raise ValueError("no rows with case_dt, probability_1, and true_label")
+
+    lo, hi = d["case_dt"].min(), d["case_dt"].max()
+    edges = np.linspace(lo, hi, n_steps + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    d["_bin"] = np.clip(np.digitize(d["case_dt"], edges) - 1, 0, n_steps - 1)
+
+    grp = d.groupby(["true_label", "_bin"])["probability_1"]
+    stats = grp.agg(mean="mean", std="std", n="count").reset_index()
+    stats["sem"] = stats["std"] / np.sqrt(stats["n"])
+    stats = stats[stats["n"] >= min_count]
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(9, 5))
+
+    palette = {0: "#3B8BD4", 1: "#D85A30"}
+    for label, name in zip((0, 1), class_names):
+        s = stats[stats["true_label"] == label].sort_values("_bin")
+        if s.empty:
+            continue
+        x = centers[s["_bin"].to_numpy()]
+        m = s["mean"].to_numpy()
+        e = s["sem"].fillna(0).to_numpy()
+        color = palette[label]
+
+        # raw rows behind the curve — jittered horizontally within each bin
+        if show_points:
+            raw = d[d["true_label"] == label]
+            if not raw.empty:
+                bin_w = edges[1] - edges[0]
+                rng = np.random.default_rng(label)
+                jitter = rng.uniform(-0.3, 0.3, len(raw)) * bin_w
+                ax.scatter(centers[raw["_bin"].to_numpy()] + jitter,
+                           raw["probability_1"], s=8, color=color,
+                           alpha=point_alpha, linewidths=0, zorder=1)
+
+        # ±SEM band with a visible edge, then the mean line, then the markers
+        ax.fill_between(x, m - e, m + e, color=color, alpha=0.25,
+                        edgecolor=color, linewidth=1.2, zorder=2)
+        ax.errorbar(x, m, yerr=e, fmt="o", color=color, ecolor=color,
+                    elinewidth=1.4, capsize=3, markersize=6,
+                    markeredgecolor="white", markeredgewidth=1,
+                    label=f"true_label = {label} ({name})", zorder=3)
+        ax.plot(x, m, color=color, lw=1.8, zorder=3)
+
+    ax.axhline(0.5, color="gray", lw=0.7, ls="--", alpha=0.6)
+    ax.set_xlabel("case_dt (binned)")
+    ax.set_ylabel("probability_1")
+    pad = 0.02 * (d["probability_1"].max() - d["probability_1"].min() or 1)
+    ax.set_ylim(d["probability_1"].min() - pad,
+                d["probability_1"].max() + pad)
+    ax.grid(True, axis="y", alpha=0.25, linewidth=0.5)
+    ax.legend(loc="best", frameon=False)
+
+    if save_path:
+        fig_path = os.path.join(save_path, "probability_trajectories.png")
+        plt.savefig(fig_path, dpi=300, bbox_inches="tight")
+        print(f"Saved probability trajectories plot to {fig_path}")
+    return stats
 
 def get_result_df(outputs, class_names=None):
     all_probs = torch.cat([batch["probs"] for batch in outputs]).detach().cpu()

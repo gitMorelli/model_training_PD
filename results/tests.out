@@ -1,18 +1,26 @@
-Number of unique_id with split==val: 7653
+Column: unique_id
+Column: slot
+Column: true_label
+Column: predicted_label
+Column: probability_0
+Column: probability_1
+Column: case_dt
+Unique values for column 'slot': [ 0  1  2  4  5  6  7  8  9 10  3 11 12]
+Saved probability trajectories plot to /home/a_morelli/vscode_projects/model_training/results/tests/probability_trajectories.png
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5149303
+Job ID: 5158257
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n09
+Nodelist: n02
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-07-29 23:21:45
-Job ended at:   2026-07-29 23:21:58
-Job Wall-clock time: 00:00:13
-CPU Utilized: 00:00:05
-CPU Efficiency: 9.62% of 00:00:52 core-walltime
-Memory Utilized: 547.34 MB
-Memory Efficiency: 3.34% of 16.00 GB
+Job started at: 2026-07-30 18:11:55
+Job ended at:   2026-07-30 18:12:24
+Job Wall-clock time: 00:00:29
+CPU Utilized: 00:00:16
+CPU Efficiency: 13.79% of 00:01:56 core-walltime
+Memory Utilized: 2.99 MB
+Memory Efficiency: 0.02% of 16.00 GB

@@ -16,6 +16,7 @@ import time
 
 
 from src.utils.data_loading_utils import pre_load_grid_data,prepare_pre_training
+from src.debug.PD_model_evaluation import plot_probability_trajectories
 
 def test_read_json(tar_path="/mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A0C5I2D5.tar"):
 
@@ -308,8 +309,8 @@ def prepare_pre_training_data():
     print(f"Pre-training data saved to {save_path}")
 
 def inspect_columns(): 
-    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet"
-    csv_data = pd.read_parquet(load_path)
+    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_35/per_step_predictions.csv"
+    csv_data = pd.read_csv(load_path)
     columns = csv_data.columns
     for col in columns:
         print(f"Column: {col}")
@@ -685,25 +686,13 @@ def get_normalization_values():
     print(f"Mean: {mean}")
     print(f"Std: {std}")
 if __name__ == "__main__":
-    import io, os, time, torch
-
-    sd = trainer.strategy.lightning_module_state_dict()
-    sd = {k: v.cpu() for k, v in sd.items()}
-
-    for tgt in ["/dev/shm/t.ckpt", "/tmp/t.ckpt",
-                "/mnt/beegfs02/scratch/a_morelli/t.ckpt"]:
-        try:
-            t = time.time(); torch.save(sd, tgt); d = time.time() - t
-            mb = os.path.getsize(tgt) / 1e6
-            print(f"{tgt:50s} {d:6.2f}s  {mb/d:7.1f} MB/s")
-            os.remove(tgt)
-        except Exception as e:
-            print(f"{tgt}: {e}")
-
-    # same payload, one large buffered write instead of torch.save's chunked writes
-    buf = io.BytesIO(); torch.save(sd, buf)
-    t = time.time()
-    with open("/mnt/beegfs02/scratch/a_morelli/t2.ckpt", "wb", buffering=8 << 20) as f:
-        f.write(buf.getbuffer())
-    print(f"beegfs buffered: {time.time()-t:.2f}s")
+    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_35/per_step_predictions.csv"
+    csv_data = pd.read_csv(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
+    #print unique values for the column slot
+    unique_slots = csv_data['slot'].unique()
+    print(f"Unique values for column 'slot': {unique_slots}")
+    plot_probability_trajectories(csv_data, save_path="/home/a_morelli/vscode_projects/model_training/results/tests")
     
