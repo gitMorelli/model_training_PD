@@ -59,8 +59,8 @@ def pre_trained_weights(name):
         out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_2',
                     'best-02-0.2264.ckpt')
     elif name == 'pre_trained_E3N_custom_window':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_1',
-                    'best-00-0.8068.ckpt')
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_4',
+                    'best-00-001708-0.3423.ckpt')
     '''os.path.join(
         '/home/a_morelli/models/model_training_logs/pre_trained_models/mnist',
         'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
@@ -74,6 +74,14 @@ def get_input_modality(name):
         return ['X_crop', 'digit_full', 'digit_crop', 'digit', 'digit', 'digit', 'text_full', 'text_crop', 'text', 'text', 'text']
     elif name=='window_view':
         return ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)]
+    elif name=='window_view_minimal':
+        return ['X_window']+['text_window']+ ['digit_window']
+    elif name=='window_view_2':
+        n=2
+        return ['X_window' for _ in range(n)]+['text_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
+    elif name=='window_no_text':
+        n=3
+        return ['X_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
 
 RESTORE = False
 version_override =  2
@@ -96,7 +104,7 @@ exp_params = {
 
 
     #experiment parameters
-    'data_modality': get_input_modality('window_view'), #mixed_view, window_view
+    'data_modality': get_input_modality('window_view_minimal'), #mixed_view, window_view
     'num_tiles': 3,
     'use_grid': True,
     'use_balanced_weights': False,
@@ -112,7 +120,7 @@ exp_params = {
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':"FiveStageResidualStridedConvNet",#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':'resnet50',#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     #or
@@ -144,23 +152,23 @@ exp_params = {
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
     
     #Training params definition
-    'use_opt_groups': False,
+    'use_opt_groups': True,
     'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 4,
-    'num_epochs': 3,
+    'batch_size': 16,
+    'num_epochs': 4,
     'max_steps': -1, #N or -1
     'patience': 2, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/loss',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-6,
+    'eta_min_cosine': 1e-7,
     'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
     'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
-    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 2,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "16-mixed", #None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
     'gradient_clip_val': 1.0, #1.0, None
 
@@ -434,10 +442,9 @@ def trainer_definition(current_version, exp_params, lit_model, cv=None):
         shutil.rmtree(tb_logger.log_dir)
 
     ckpt_dir = os.path.join(exp_params['CHECKPOINT_PATH'], f'v_{current_version}')
-    if cv is not None:
-        ckpt_dir = os.path.join(ckpt_dir, f'run_{cv}')
-    if exp_params.get('wipe_checkpoints', True) and os.path.exists(ckpt_dir):
-        shutil.rmtree(ckpt_dir)                    # FIX 6: no stale "best" files
+    if exp_params.get('wipe_checkpoints', True) and os.path.isdir(ckpt_dir):
+        for f in glob.glob(os.path.join(ckpt_dir, '*.ckpt')):
+            os.remove(f)                   
 
     # ---- checkpointing -------------------------------------------------------
     checkpoint_callback = ModelCheckpoint(

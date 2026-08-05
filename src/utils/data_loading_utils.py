@@ -26,6 +26,7 @@ import gc
 import glob
 
 from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform, place_patches, get_grid_sample
+from src.utils.image_processing import extract_image_properties
 
 #Datasets and dataloaders for speed tests
 class InMemoryWdsDataset(torch.utils.data.Dataset):
@@ -840,6 +841,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         to_grayscale = exp_params.get('to_grayscale', False) if exp_params else False
         num_channels = 1 if to_grayscale else 3
 
+        feature_extraction = (exp_params or {}).get('feature_extraction', False)
+
         for current_mode in ALL_MODALITIES:
             num, grid = grid_lookup(grid_dict, original_id, 'q' + str(X), current_mode)
 
@@ -866,7 +869,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 img = synth_transform(img, X-1)
             
 
-            if debug:
+            if debug and feature_extraction==False:
+                #if feature_extraction is true i don't want the original modality
                 selected_transforms = [('original',None)] + selected_transforms
                 selected_modality_names = ([selected_modality_names[0].split('_')[0] + '_original']
                                            + selected_modality_names)
@@ -936,13 +940,16 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 else:
                     img_tensor = T.ToTensor()(img_view)
 
-                if debug:
+                if debug and feature_extraction==False:
                     if augmentation_transform[0] == 'original':
                         metadata = debug_image_properties(img_view)
                     else:
                         metadata = debug_image_properties(img_tensor)
                     metadata['selected_transform'] = selected_transforms[k]
                     metadata['imputed'] = imputed
+                    list_of_views.append(metadata)
+                elif debug and feature_extraction==True:
+                    metadata = extract_image_properties(img_tensor)
                     list_of_views.append(metadata)
                 else:
                     list_of_views.append(img_tensor)
@@ -1022,7 +1029,24 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
         raise ValueError("train_df must be provided for censor_time other than 'pre_diagnosis' ")
     else:
         grid_pattern = train_df.loc[train_df['unique_id']==subject_id,'grid_pattern'].values[0]
+        if {'rempli_pattern', 'case_pattern'}.issubset(train_df.columns):
+            # if the questionnaire is marked as unavailable but was actually extracted ->
+            # consider the document unreliable and exclude it
+            rempli_pattern = train_df.loc[train_df['unique_id'] == subject_id, 'rempli_pattern'].values[0]
+            case_pattern = train_df.loc[train_df['unique_id'] == subject_id, 'case_pattern'].values[0]
 
+            case_chars = list(case_grid_pattern)
+            grid_chars = list(grid_pattern)
+
+            for q in range(13):
+                if case_chars[q] == '1' and case_pattern[q] == '0':
+                    case_chars[q] = '0'
+                if grid_chars[q] == '1' and rempli_pattern[q] == '0':
+                    grid_chars[q] = '0'
+
+            case_grid_pattern = ''.join(case_chars)
+            grid_pattern = ''.join(grid_chars)
+    
     def filter_grid_pattern(case_grid_pattern, selected_questionnaires):
         new_list = []
         for q in selected_questionnaires:
@@ -1193,9 +1217,11 @@ def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_tr
             for subject_id, meta in json_data["subjects"].items():
                 if subject_id in exclusion_set:
                     continue
+
+                rempli_seulq12 = 1  #i ignore the rempli_seul problem for now
                 result = build_sequence(subject_id, meta["last_q"],
                                         meta["questionnaire_info"],
-                                        image_pool.get(subject_id, {}),meta['case_grid_pattern'])
+                                        image_pool.get(subject_id, {}),meta['case_grid_pattern'], rempli_seulq12)
                 if result is None:
                     continue
                 sequence, questionnaires, modalities, resized = result
@@ -1625,7 +1651,6 @@ def debug_image_properties(img_source):
     }
     return img_properties
 
-
 def explore_data(shard_pattern, load_in_memory=False, 
                                split_workers=True, batch_size=4):
     def create_df():
@@ -1913,6 +1938,59 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
 
     return exclusion_set, val_exclusion_set, counts
 
+def prepare_test_exclusion_set(exp_params,verbose=True,class_col='', pre_computed_csv=None, exclude_cases=False):
+    '''returns the num_0 and num_1 in the training set after considering the exclusion -> the true class numerosity'''
+    exclusion_set = set()
+    
+    if pre_computed_csv is not None:
+        original_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+        csv_data = pre_computed_csv.copy()
+    else:
+        original_data = pd.read_parquet(exp_params['list_of_ids_paths'])
+        csv_data = original_data.copy()
+    if verbose:
+        print("Initial CSV data loaded. First row example:")
+        for col in csv_data.columns:
+            print(f"{col}: {csv_data[col].iloc[0]}")
+        print('#' * 50)
+        print("Unique subjects in the dataset:", csv_data['unique_id'].nunique())
+        print("Unique subjects in test set:", csv_data[csv_data['split'] == 'test']['unique_id'].nunique())
+        print('#' * 50)
+        if class_col in csv_data.columns:
+            print("Class distribution in the entire dataset:\n", csv_data[class_col].value_counts())
+            print("Class distribution in the test set:\n", csv_data[csv_data['split'] == 'test'][class_col].value_counts())
+            print('#' * 50)
+
+    
+    exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='test',original_data=original_data, exclude_cases=exclude_cases, 
+                                              class_col=class_col) 
+    
+    if verbose:
+        print(len(exclusion_set), "samples will be excluded from the test set to achieve balancing.")
+        print('#' * 50)
+    
+    filtered_csv_data_train = csv_data[~csv_data['unique_id'].isin(exclusion_set)]
+    train = filtered_csv_data_train[filtered_csv_data_train['split'] == 'test']
+    #compute the number of samples for each class in the training set
+    if class_col in train.columns:
+        counts = (
+            train[class_col]
+            .value_counts()
+            .reindex(range(train[class_col].max() + 1), fill_value=0)
+            .sort_index()
+        )
+    else:
+        counts = [0,0]  # Default counts if class_col is not present (eg when i iterate in debug mode on pre_training dataset)
+
+    if verbose:
+        print("After applying the exclusion set, the test set has:")
+        print(f"Class 0: {counts[0]} samples")
+        print(f"Class 1: {counts[1]} samples")
+        print(f"Ratio of Class 1 to Class 0: {counts[1] / counts[0] if counts[0] > 0 else 'undefined'}")
+
+    return exclusion_set, counts
+
+
 #Merging data from the full dataset 
 def merge_properties_from_full_dataset_PD(exp_params, csv_data, properties_to_add, verbose=True):
     if 'full_dataset' not in exp_params:
@@ -2106,4 +2184,8 @@ def return_file_paths(problem,grouped,pre_training):
         list_of_ids_paths = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet"
         data_folder = "/mnt/beegfs02/scratch/a_morelli/model_training/shards/PDpretraining/final_png_whitebg_21_07_26"
         grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26"
+    elif problem == 'PD' and grouped and not pre_training:
+        list_of_ids_paths = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
+        data_folder = '/mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_grouped_03_08_26'
+        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5"
     return list_of_ids_paths, data_folder, grid_dict_path

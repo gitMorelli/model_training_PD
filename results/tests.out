@@ -1,26 +1,209 @@
 Column: unique_id
-Column: slot
-Column: true_label
-Column: predicted_label
-Column: probability_0
-Column: probability_1
-Column: case_dt
-Unique values for column 'slot': [ 0  1  2  4  5  6  7  8  9 10  3 11 12]
-Saved probability trajectories plot to /home/a_morelli/vscode_projects/model_training/results/tests/probability_trajectories.png
+Column: split
+Column: case_control
+Column: last_avail_q
+Column: rempli_pattern
+Column: case_pattern
+Column: grid_pattern
+Column: case_grid_pattern
+Column: diag_park_final1_quest
+Column: at_least_warning
+Column: case_dt_dateq1
+Column: case_dt_dateq2
+Column: case_dt_dateq3
+Column: case_dt_dateq4
+Column: case_dt_dateq5
+Column: case_dt_dateq6
+Column: case_dt_dateq7
+Column: case_dt_dateq8
+Column: case_dt_dateq9
+Column: case_dt_dateq10
+Column: case_dt_dateq11
+Column: case_dt_dateq12
+Column: case_dt_dateq13
+Column: q_1_num_X
+Column: q_2_num_X
+Column: q_3_num_X
+Column: q_4_num_X
+Column: q_5_num_X
+Column: q_6_num_X
+Column: q_7_num_X
+Column: q_8_num_X
+Column: q_9_num_X
+Column: q_10_num_X
+Column: q_11_num_X
+Column: q_12_num_X
+Column: q_13_num_X
+Column: q_1_num_text
+Column: q_2_num_text
+Column: q_3_num_text
+Column: q_4_num_text
+Column: q_5_num_text
+Column: q_6_num_text
+Column: q_7_num_text
+Column: q_8_num_text
+Column: q_9_num_text
+Column: q_10_num_text
+Column: q_11_num_text
+Column: q_12_num_text
+Column: q_13_num_text
+Column: q_1_num_digit
+Column: q_2_num_digit
+Column: q_3_num_digit
+Column: q_4_num_digit
+Column: q_5_num_digit
+Column: q_6_num_digit
+Column: q_7_num_digit
+Column: q_8_num_digit
+Column: q_9_num_digit
+Column: q_10_num_digit
+Column: q_11_num_digit
+Column: q_12_num_digit
+Column: q_13_num_digit
+Column: etudegp
+Column: profq2
+Column: lateralite
+Column: relative_age
+Column: birth_date
+Column: follow_up_time
+Column: rempli_seulq12
+Dataframe head:
+       unique_id  split  case_control  last_avail_q rempli_pattern  \
+0  A6K2W8Y9_0001  train             1             9  1111111111000   
+1  A8I0J0Q5_0001  train             0             9  1111111111110   
+2  M3B7N4R2_0001  train             0             9  1111111111100   
+3  C6B7M5Z8_0001  train             0             9  1111111111000   
+4  A2U0T8E9_0001  train             0             9  1111111111100   
+
+    case_pattern   grid_pattern case_grid_pattern  diag_park_final1_quest  \
+0  1111111111000  0100111111000     0100111111000                       1   
+1  1111111111000  1110111111110     0100111111000                       0   
+2  1111111111000  1111111111100     0100111111000                       0   
+3  1111111111000  0111111111000     0100111111000                       0   
+4  1111111111000  1111111111100     0100111111000                       0   
+
+   at_least_warning  case_dt_dateq1  case_dt_dateq2  case_dt_dateq3  \
+0                 0      -19.958932      -17.456537      -15.958932   
+1                 0      -19.958932      -17.456537      -15.958932   
+2                 0      -19.958932      -17.456537      -15.958932   
+3                 0      -19.958932      -17.456537      -15.958932   
+4                 0      -19.958932      -17.456537      -15.958932   
+
+   case_dt_dateq4  case_dt_dateq5  case_dt_dateq6  case_dt_dateq7  \
+0      -14.455852      -12.210815       -8.941821       -6.554415   
+1      -14.455852      -12.210815       -8.941821       -6.554415   
+2      -14.455852      -12.210815       -8.941821       -6.554415   
+3      -14.455852      -12.210815       -8.941821       -6.554415   
+4      -14.455852      -12.210815       -8.941821       -6.554415   
+
+   case_dt_dateq8  case_dt_dateq9  case_dt_dateq10  case_dt_dateq11  \
+0       -3.950719       -0.908966         2.505133              NaN   
+1       -3.950719       -0.908966         2.505133              NaN   
+2       -3.950719       -0.908966         2.505133              NaN   
+3       -3.950719       -0.908966         2.505133              NaN   
+4       -3.950719       -0.908966         2.505133              NaN   
+
+   case_dt_dateq12  case_dt_dateq13  q_1_num_X  q_2_num_X  q_3_num_X  \
+0              NaN              NaN       -1.0       75.0       -1.0   
+1              NaN              NaN       85.0       73.0       26.0   
+2              NaN              NaN      120.0       76.0       25.0   
+3              NaN              NaN       -1.0       96.0       26.0   
+4              NaN              NaN       85.0       83.0       23.0   
+
+   q_4_num_X  q_5_num_X  q_6_num_X  q_7_num_X  q_8_num_X  q_9_num_X  \
+0       -1.0       23.0       23.0       32.0       45.0       16.0   
+1       -1.0       23.0        6.0       17.0      469.0        4.0   
+2       29.0       29.0       27.0       32.0      455.0       16.0   
+3       19.0       16.0       17.0       22.0      344.0       17.0   
+4       26.0       24.0       18.0       26.0      465.0       26.0   
+
+   q_10_num_X  q_11_num_X  q_12_num_X  q_13_num_X  q_1_num_text  q_2_num_text  \
+0        63.0        -1.0        -1.0        -1.0          -1.0          38.0   
+1        73.0        71.0       128.0        -1.0          20.0           0.0   
+2       101.0        89.0        -1.0        -1.0          10.0          18.0   
+3        65.0        -1.0        -1.0        -1.0          -1.0          37.0   
+4        84.0        54.0        -1.0        -1.0          20.0          18.0   
+
+   q_3_num_text  q_4_num_text  q_5_num_text  q_6_num_text  q_7_num_text  \
+0          -1.0          -1.0          38.0          17.0          34.0   
+1           0.0          -1.0           0.0           0.0           0.0   
+2          14.0          24.0          65.0          59.0          45.0   
+3           4.0          10.0          19.0          31.0          20.0   
+4          25.0          78.0          34.0          40.0           9.0   
+
+   q_8_num_text  q_9_num_text  q_10_num_text  q_11_num_text  q_12_num_text  \
+0          62.0           0.0            1.0           -1.0           -1.0   
+1          14.0           0.0            3.0            5.0            2.0   
+2          89.0          41.0           96.0          160.0           -1.0   
+3          39.0          26.0            0.0           -1.0           -1.0   
+4          73.0          44.0           33.0           13.0           -1.0   
+
+   q_13_num_text  q_1_num_digit  q_2_num_digit  q_3_num_digit  q_4_num_digit  \
+0           -1.0           -1.0           22.0           -1.0           -1.0   
+1           -1.0           25.0           11.0            6.0           -1.0   
+2           -1.0           21.0           42.0           22.0           73.0   
+3           -1.0           -1.0           23.0           17.0           40.0   
+4           -1.0           21.0           20.0           16.0           49.0   
+
+   q_5_num_digit  q_6_num_digit  q_7_num_digit  q_8_num_digit  q_9_num_digit  \
+0           17.0           36.0           30.0           59.0           26.0   
+1           17.0           23.0           24.0           73.0           19.0   
+2           41.0           38.0           72.0          109.0          116.0   
+3           25.0           30.0           52.0          169.0           56.0   
+4           26.0           39.0           52.0           87.0           47.0   
+
+   q_10_num_digit  q_11_num_digit  q_12_num_digit  q_13_num_digit  etudegp  \
+0            10.0            -1.0            -1.0            -1.0        1   
+1            35.0            33.0            24.0            -1.0        1   
+2           120.0            78.0            -1.0            -1.0        1   
+3             9.0            -1.0            -1.0            -1.0        1   
+4            94.0            34.0            -1.0            -1.0        1   
+
+   profq2  lateralite  relative_age  birth_date  follow_up_time  \
+0       0           0             4  1928-04-01       19.958932   
+1       0           0             5  1928-11-01       28.542094   
+2       0           0             5  1929-08-01       28.043806   
+3       0           0             5  1929-07-01       21.418207   
+4       0           0             4  1928-06-01       28.459959   
+
+   rempli_seulq12  
+0             NaN  
+1             1.0  
+2             NaN  
+3             NaN  
+4             NaN  
+Split: train
+Total unique IDs: 9503
+Case IDs: 865
+Diagnosis 1 IDs: 930
+Control IDs: 8638
+Diagnosis 0 IDs: 8573
+Split: test
+Total unique IDs: 1507
+Case IDs: 139
+Diagnosis 1 IDs: 157
+Control IDs: 1368
+Diagnosis 0 IDs: 1350
+Split: val
+Total unique IDs: 1033
+Case IDs: 99
+Diagnosis 1 IDs: 112
+Control IDs: 934
+Diagnosis 0 IDs: 921
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5158257
+Job ID: 5198188
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n02
+Nodelist: n01
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-07-30 18:11:55
-Job ended at:   2026-07-30 18:12:24
-Job Wall-clock time: 00:00:29
+Job started at: 2026-08-04 09:05:16
+Job ended at:   2026-08-04 09:05:42
+Job Wall-clock time: 00:00:26
 CPU Utilized: 00:00:16
-CPU Efficiency: 13.79% of 00:01:56 core-walltime
-Memory Utilized: 2.99 MB
-Memory Efficiency: 0.02% of 16.00 GB
+CPU Efficiency: 15.38% of 00:01:44 core-walltime
+Memory Utilized: 5.09 MB
+Memory Efficiency: 0.03% of 16.00 GB

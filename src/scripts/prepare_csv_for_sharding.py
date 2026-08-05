@@ -26,7 +26,7 @@ params={
     'LIST_OF_IDS_PD_PRE_MATCHING_PATH': "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv",
     'seed': 42,
 }
-save_path = "/home/a_morelli/datasets/shards"
+save_path = "/mnt/beegfs02/scratch/a_morelli/model_training/shards"
 
 def main():
     random.seed(params['seed'])
@@ -44,7 +44,7 @@ def main():
         split_data = data[data['split'] == train_split].copy()
         split_data['group_id'] = split_data['unique_id'].apply(lambda x: x.split('_')[1]) #extract the group id from the unique_id 
 
-        lists_of_ids['for_PD_grouped'][train_split] = split_data['group_id'].astype(str).tolist()[:] #unique_id is in the form XXXXX_YY with YY the matching group,
+        lists_of_ids['for_PD_grouped'][train_split] = list(set(split_data['group_id'].astype(str).tolist()[:])) #unique_id is in the form XXXXX_YY with YY the matching group,
 
         id_list = split_data['unique_id'].astype(str).tolist()[:] #unique_id is in the form XXXXX_YY with YY the matching group,
         random.shuffle(id_list)

@@ -1206,91 +1206,221 @@ class ModelPDClassification(ModelPDBase):
                        tok_seq_ids=seq_ids.detach().cpu(),
                        tok_slot_ids=slot_ids.detach().cpu())
         return out
+
 # Grouped regime: conditional-logistic (within-group softmax) training
 class ModelPDGrouped(ModelPDBase):
     """Case/control matched-set training. Expects the grouped collate:
     (frames, seq_ids, slot_ids, lengths, labels, resized, subject_ids,
      modalities, group_ids), where group_ids is per-subject with within-batch
     indices 0..G-1 and each group contains exactly one positive.
- 
+
     The model must output one logit per subject (n_classes=1); an unweighted
     BCE auxiliary term (bce_aux_weight) keeps the logit calibrated so
     sigmoid(score) > 0.5 remains a meaningful standalone 0/1 prediction.
     `total_units` passed to the base must be the number of GROUPS (batch_size
-    in the grouped loader counts groups)."""
- 
+    in the grouped loader counts groups).
+
+    ALIGNMENT WITH THE BASE / CLASSIFICATION REGIME
+    -----------------------------------------------
+    * Log names use the "stage/metric" convention ("train/loss", not
+      "train_loss") so the base's "train_window/..." rewrite and the
+      "{key}/balanced_accuracy" line from `_log_class_metrics` land in the
+      same TensorBoard groups.
+    * `_update_metrics` (not the bare `_update_class_counts`) is used, so
+      per-class recall and balanced accuracy are actually populated — the old
+      call passed no preds, which left every `correct_k` at zero.
+    * `train_metrics` / `val_metrics` MetricCollections exist here too
+      (pr_auc / f1_pos / mcc on the standalone sigmoid score). The base's
+      `_flush_train_window` picks up `self.train_metrics` by name, so in
+      aligned mode this class must NOT hand the train collection to
+      `log_dict` — same single-ownership rule as ModelPDClassification.
+    * Group accuracy is the headline metric of this regime, so on top of the
+      Lightning epoch reduction it gets a windowed series
+      ("train_window/group_acc") emitted at each validation point, matching
+      what the base does for the class-count metrics.
+    """
+
     def __init__(self, write_log, model, bce_aux_weight=0.3,
-                 **base_kwargs):
+                 drop_train_pr_auc=True, **base_kwargs):
         base_kwargs.pop('num_classes', None)   # grouped regime is always 1-logit
-        super().__init__(write_log, model,
-                         num_classes=1, **base_kwargs)
+        super().__init__(write_log, model, num_classes=1, **base_kwargs)
         self.save_hyperparameters(ignore=['model', 'write_log'])
- 
+
         self.bce_aux_weight = bce_aux_weight
         self.criterion_bce = nn.BCEWithLogitsLoss()   # unweighted, calibration only
- 
+
+        # kept for backward compatibility (macro recall == balanced accuracy)
         self.val_balanced_acc = MulticlassRecall(num_classes=2, average="macro")
- 
-    # ---- loss + metrics ---------------------------------------------------------
+
+        # ---- pr-auc / f1(pos) / mcc, always the binary flavour -------------
+        # Mirrors _build_metrics in ModelPDClassification; the multiclass
+        # branch is dropped because n_eff is always 2 here.
+        def _build_metrics(prefix, include_pr_auc=True):
+            metrics = {}
+            if include_pr_auc:
+                metrics["pr_auc"] = BinaryAveragePrecision()
+            metrics["f1_pos"] = BinaryF1Score()
+            metrics["mcc"] = BinaryMatthewsCorrCoef()
+            return MetricCollection(metrics, prefix=prefix)
+
+        self.drop_train_pr_auc = drop_train_pr_auc
+        self.train_metrics = _build_metrics("train/",
+                                            include_pr_auc=not drop_train_pr_auc)
+        self.val_metrics = _build_metrics("val/", include_pr_auc=True)
+
+        # ===== FRACTIONAL LOGGING: windowed group accuracy =====
+        # [correct_groups, total_groups] since the last window flush. Only
+        # touched in aligned mode; the epoch-level value comes from Lightning's
+        # on_epoch reduction of "train/group_acc".
+        self._win_grp = [0, 0]
+
+    # ---- helpers ---------------------------------------------------------
+    def _subject_scores(self, outputs):
+        """One score per subject. Tolerates a (token_logits, subject_logits)
+        tuple from a per-step mixer by taking the subject-level element: the
+        conditional-logistic loss is defined over subjects within a group, so
+        token-level logits have no group to be normalised in."""
+        if isinstance(outputs, (tuple, list)):
+            outputs = outputs[-1]
+        return outputs.squeeze(-1)
+
+    @staticmethod
+    def _group_hits(scores, labels, group_ids):
+        """Number of groups whose maximum score belongs to the true case.
+
+        Assumes exactly one positive per group. Exact ties at the maximum
+        count as a hit; with float scores that is vanishingly rare, and the
+        alternative (counting them as misses) would make the metric depend on
+        subject ordering.
+        """
+        s = scores.detach()
+        m = group_max(s, group_ids)
+        hit = (s == m[group_ids]) & labels.detach().bool().view(-1)
+        return int(hit.sum().item())
+
+    # ===== FRACTIONAL LOGGING: extend the base window flush ================
+    def on_train_epoch_start(self):
+        super().on_train_epoch_start()
+        self._win_grp = [0, 0]
+
+    def _flush_train_window(self, force=False):
+        """Base behaviour + the windowed group-accuracy point.
+
+        The gate below intentionally duplicates the one in
+        `ModelPDBase._flush_train_window` because `super()` mutates
+        `_last_flush_step`; it must be evaluated *before* the super call.
+        Like the base gate it reads only `global_step`, which is identical on
+        every rank, so the `_sum_across_ranks` collective underneath is
+        reached by all ranks or none. (If you ever change the base gate,
+        change it here too — or factor it into a shared predicate.)
+        """
+        step = self.trainer.global_step
+        flushing = (step > self._last_flush_step
+                    and (force or step - self._last_flush_step >= self.min_window_steps))
+
+        super()._flush_train_window(force=force)
+
+        if not flushing:
+            return
+        correct, total = self._sum_across_ranks(self._win_grp)   # collective
+        self._win_grp = [0, 0]                                   # all ranks
+        if total > 0 and self.logger is not None and self.trainer.is_global_zero:
+            self.logger.log_metrics({"train_window/group_acc": correct / total},
+                                    step=step)
+
+    # ---- loss + metrics ---------------------------------------------------
     def compute_loss_and_metrics(self, batch, stage):
         frames, seq_ids, slot_ids, lengths, labels, \
             resized, subject_ids, modalities, group_ids = batch
         bsz = labels.size(0)                          # subjects in batch
         n_groups = int(group_ids.max().item()) + 1
- 
-        scores = self(frames, seq_ids, slot_ids, lengths).squeeze(-1)   # (B,)
- 
+
+        scores = self._subject_scores(self(frames, seq_ids, slot_ids, lengths))
+
         if stage == "train" and not self._guard_finite(scores, "outputs"):
             return None
- 
+
         loss_grp = grouped_ce_loss(scores, labels, group_ids)
         loss_bce = self.criterion_bce(scores, labels.float())
         loss = loss_grp + self.bce_aux_weight * loss_bce
- 
+
         if stage == "train" and not self._guard_finite(loss, "loss"):
             return None
- 
+
         with torch.no_grad():
-            grp_acc = group_accuracy(scores, labels, group_ids)
+            hits = self._group_hits(scores, labels, group_ids)
+            grp_acc = hits / n_groups
             preds = (scores > 0.0).long()             # standalone 0/1
-            acc = (preds == labels.long()).float().mean()
- 
-        self._update_class_counts(labels, stage)
-        self.log(f"{stage}_loss",      loss,     on_epoch=True, prog_bar=True, batch_size=bsz)
-        self.log(f"{stage}_loss_grp",  loss_grp, on_epoch=True, batch_size=bsz)
-        self.log(f"{stage}_loss_bce",  loss_bce, on_epoch=True, batch_size=bsz)
-        self.log(f"{stage}_group_acc", grp_acc,  on_epoch=True, prog_bar=True, batch_size=n_groups)
-        self.log(f"{stage}_acc",       acc,      on_epoch=True, batch_size=bsz)
- 
+            acc = (preds == labels.long().view(-1)).float().mean()
+
+        # class counts + per-class recall + balanced accuracy (base bookkeeping).
+        # `_update_metrics` derives preds from the logits exactly as above
+        # (num_classes == 1 -> sigmoid > 0.5, i.e. score > 0).
+        self._update_metrics(scores, labels, stage)
+
+        if stage == "train" and self.align_train_metrics_to_val:
+            self._win_grp[0] += hits
+            self._win_grp[1] += n_groups
+
+        # ===== FRACTIONAL LOGGING: per-step train curves =====
+        # loss / acc / group_acc need none of the windowing machinery — on_step
+        # gives a dense curve that already reads against the mid-epoch val
+        # points; the windowed group_acc series above is the smoothed twin.
+        on_step = (stage == "train")
+        self.log(f"{stage}/loss", loss, on_step=on_step, on_epoch=True,
+                 prog_bar=True, batch_size=bsz)
+        self.log(f"{stage}/loss_grp", loss_grp, on_step=on_step, on_epoch=True,
+                 batch_size=bsz)
+        self.log(f"{stage}/loss_bce", loss_bce, on_step=on_step, on_epoch=True,
+                 batch_size=bsz)
+        self.log(f"{stage}/group_acc", grp_acc, on_step=on_step, on_epoch=True,
+                 prog_bar=True, batch_size=n_groups)
+        self.log(f"{stage}/acc", acc, on_step=on_step, on_epoch=True,
+                 batch_size=bsz)
+
+        # torchmetrics on the standalone (group-agnostic) score
+        probs = torch.sigmoid(scores).reshape(-1)
+        tgt = labels.long().view(-1)
+        mcoll = self.train_metrics if stage == "train" else self.val_metrics
+        mcoll.update(probs, tgt)
+        # ===== FRACTIONAL LOGGING: single ownership of the train collection =====
+        # In aligned mode `_flush_train_window` owns compute()/reset() for
+        # train_metrics; handing it to log_dict as well would let Lightning
+        # reset it at epoch end underneath us.
+        if stage == "val" or not self.align_train_metrics_to_val:
+            self.log_dict(mcoll, on_step=False, on_epoch=True, batch_size=bsz)
+
         if stage == "train":
             self.train_sample_count += bsz
             self._log_lrs()
             return loss
         else:
-            self.val_balanced_acc.update(preds, labels.long().view(-1))
-            self.log("val_balanced_acc", self.val_balanced_acc, on_epoch=True,
+            self.val_balanced_acc.update(preds.view(-1), tgt)
+            self.log("val/balanced_acc", self.val_balanced_acc, on_epoch=True,
                      prog_bar=True, batch_size=bsz)
             return None
- 
+
     def _log_epoch_summary_extras(self):
         self.write_log(f"BCE auxiliary weight: {self.bce_aux_weight}\n")
- 
-    # ---- prediction --------------------------------------------------------------
+        self.write_log(f"Expected groups per epoch: {self.total_units}\n")
+        self.write_log(f"Train PR-AUC dropped: {self.drop_train_pr_auc}\n")
+
+    # ---- prediction -------------------------------------------------------
     def predict_step(self, batch, batch_idx):
         frames, seq_ids, slot_ids, lengths, labels, \
             resized, subject_ids, modalities, group_ids = batch
- 
-        scores = self(frames, seq_ids, slot_ids, lengths).squeeze(-1)
- 
+
+        scores = self._subject_scores(self(frames, seq_ids, slot_ids, lengths))
+
         # (a) standalone probability / 0-1 per subject
         p1 = torch.sigmoid(scores)
         probs = torch.stack([1 - p1, p1], dim=1)
         preds_standalone = (scores > 0.0).long()
- 
-        # (b) within-group prediction: the argmax of each group is flagged as the case
+
+        # (b) within-group prediction: the argmax of each group is the case
         m = group_max(scores, group_ids)
         preds_group = (scores == m[group_ids]).long()
- 
+
         return {
             "scores": scores.detach().cpu(),
             "probs": probs.detach().cpu(),
@@ -1714,10 +1844,12 @@ def get_optimization_groups(model_name,exp_params):
     if exp_params['use_opt_groups'] == False:
         return None
     if 'resnet' in model_name:
+        decay = 0.9
         define_optimization_groups = [
-            {'names': ['layer1','vision_model.conv1','vision_model.bn1'],'lr': exp_params['lr_backbone']*0.005, 'lr_name': 'lr_1'},
-            {'names': ['layer2'],'lr': exp_params['lr_backbone']*0.01, 'lr_name': 'lr_2'},
-            {'names': ['layer3'],'lr': exp_params['lr_backbone']*0.1, 'lr_name': 'lr_3'},
+            {'names': ['vision_model.conv1','vision_model.bn1'],'lr': exp_params['lr_backbone']*decay**4, 'lr_name': 'lr_stem'},
+            {'names': ['layer1'],'lr': exp_params['lr_backbone']*decay**3, 'lr_name': 'lr_1'},
+            {'names': ['layer2'],'lr': exp_params['lr_backbone']*decay**2, 'lr_name': 'lr_2'},
+            {'names': ['layer3'],'lr': exp_params['lr_backbone']*decay, 'lr_name': 'lr_3'},
             {'names': ['layer4'],'lr': exp_params['lr_backbone'], 'lr_name': 'lr_4'},
             {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
         ] # or None or other configurations fo other models
@@ -1734,6 +1866,8 @@ def get_optimization_groups(model_name,exp_params):
 
 #Set hyperparameters / metadata
 def set_automatic_hyperparameters(exp_params):
+    if exp_params.get('feature_extraction', False):
+        exp_params['debug']=True
     if exp_params['grouped'] or exp_params['pre_training']:
         exp_params['balance_validation'] = False
         exp_params['balanced_data'] = False
@@ -1750,7 +1884,7 @@ def set_automatic_hyperparameters(exp_params):
     huggingface_transform=True if exp_params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
     exp_params['huggingface_transform'] = huggingface_transform
     if exp_params['debug']:
-        exp_params['custom_transform'] = 'pad_resize_pil'
+        exp_params['custom_transform'] = 'pad_resize_pil' 
     return exp_params
 
 #-------- others ----------------

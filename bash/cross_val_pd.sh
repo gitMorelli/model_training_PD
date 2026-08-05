@@ -4,17 +4,15 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/cross_val_PD.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=28              # Number of CPU cores per task
+#SBATCH --cpus-per-task=32              # Number of CPU cores per task
 #SBATCH --mem=64G                      # Job memory request
-#SBATCH --time=24:00:00                # Time limit hrs:min:sec
+#SBATCH --time=32:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #SBATCH --partition=visuq,gpgpuq
-#--gres=gpu:1
+#SBATCH --gres=gpu:1
 #--gres=gpu:h100:1
-#SBATCH --gres=gpu:v100:1
-#--gres=gpu:p40:1
-#--nodelist=gpu04
 #--gres=gpu:t4:1
+#SBATCH --exclude=gpu01,gpu04
 
 # --- Environment Setup ---
 #source ~/anaconda3/etc/profile.d/conda.sh
@@ -34,4 +32,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.debug.cross_val_pd \
-    --num_workers 26
+    --num_workers 30

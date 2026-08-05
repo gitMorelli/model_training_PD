@@ -18,6 +18,43 @@ import cv2
 import numpy as np
 from PIL import Image
 
+# ------------ Feature extraction -------------------
+def extract_image_properties(img_source):
+    #compute mean intensity
+    img = img_source.convert('L') #convert to grayscale
+    arr=np.array(img)
+    #i convert to float to avoid the values baing converted to torch tensors via the default_collate in the data loader
+    
+    #compute ink density
+    threshold = 128                                # pixels darker than this = ink
+
+    # cast once, in float64, to avoid uint8 overflow in the squared sum
+    arr_f = arr.astype(np.float64) / 255.0   # drop the /255.0 if you want 0-255 stats
+    
+
+    img_properties = {
+        'format': img_source.format, #img format theimage was loaded from
+        'num_channels_original': len(img_source.getbands()), #number of channels in the original image before conversion
+        'mode': img_source.mode, #the color mode (e.g., RGB, RGBA, L)
+        'size': img.size, #width, height
+        'width': img.size[0],
+        'height': img.size[1],
+        'memory_size_bytes': arr.nbytes,
+        #'area': img.size[0] * img.size[1],
+        #'ratio': img.size[0] / img.size[1] if img.size[1] != 0 else None, #aspect ratio
+        'ink_density': ink_density(arr,threshold), #fraction of pixels that are ink (binary threshold)
+        #'sharpness': sharpness(arr), #sharpness of the image
+        'is_uniform': is_uniform_image(img_source, tol=3),
+
+        # accumulators for dataset-level mean/std
+        'pixel_sum': float(arr_f.sum()),
+        'pixel_sq_sum': float((arr_f ** 2).sum()),
+        'num_pixels': int(arr_f.size),
+    }
+    return img_properties
+
+# --------------------------------------------
+
 def convert_background_to_white(image):
     img = image.copy()
     #convert the image to grayscale

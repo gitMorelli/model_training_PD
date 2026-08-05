@@ -54,13 +54,17 @@ experiment = "PD"#"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
 model_name = 'resnet18'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='36'
+version='40'
+override_parameters=True
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-51-015340-0.3795.ckpt"
+checkpoint_to_load=f"v_{version}/best-44-013185-0.3887.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f) 
+
+if override_parameters:
+    exp_params['censor_time'] = 'pre_diagnosis' #you can test models trained on all also on partial sequences
 
 #exp_params['filter_missing']='all'
 #exp_params['censor_time']='all'
@@ -116,6 +120,8 @@ def main(exp_params):
     model, transform = model_initialization(None,exp_params,verbose=VERBOSE,val=True, **exp_params['model_parameters'])
     
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
+    val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
+
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict, transform, 
                                                     SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df)
     
@@ -157,7 +163,7 @@ def main(exp_params):
                             pos_label=1, threshold=None, strategy="youden",
                             target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
         
-        if lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
+        if hasattr(lit_model, 'per_step') and lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
             print("#" * 50)
             print(f"Evaluating model on per_step predictions")
             results_df_per_step = get_per_step_results(outputs, train_df)
@@ -178,6 +184,20 @@ def main(exp_params):
     
     store_results(csv_data, results_df, ckpt_path,exp_params)
 
+
+def override_val_exclusion(train_df, val_exclusion_set, exp_params):
+    if exp_params['pre_training']:
+        N=2000
+        #reduce the number of samples in the validation set to 1000 for pre-training
+        #identify the remaining ids after filtering for val_exclusion_set
+        val_df = train_df[train_df['split']=='val']
+        all_val_ids = set(val_df['unique_id'].unique())
+        remaining_ids = set(val_df[~val_df['unique_id'].isin(val_exclusion_set)]['unique_id'].unique())
+        #randomly sample N ids from the remaining ids
+        sampled_ids = random.sample(list(remaining_ids), N)
+        val_exclusion_set = all_val_ids - set(sampled_ids)
+        print(f"Reduced the number of samples in the validation set from {len(all_val_ids)} to {N} for pre-training. Excluded {len(val_exclusion_set)} samples.", flush=True)
+    return val_exclusion_set
 
 def return_model_info(params):
     print(f"Model properties:")
@@ -202,6 +222,7 @@ def return_model_info(params):
     print(f"  eta_min_cosine: {params['eta_min_cosine']}")
     print(f"  weight_decay: {params['weight_decay']}")
     print(f"  warmup_fraction: {params['warmup_fraction']}")
+    print(f"Head parameters: {params['model_parameters']}")
 
 def prepare_balanced_validation(worker,prefetch_factor,exp_params, grid_dict, transform):
     exp_params_temp=exp_params.copy()
@@ -430,7 +451,7 @@ def litmodel_initialization_from_checkpoint(model, ckpt_path, exp_params):
         model_class=ModelPDGrouped
     else:
         model_class=ModelPDClassification
-    lit_model = model_class.load_from_checkpoint(ckpt_path, write_log=False, model=model)
+    lit_model = model_class.load_from_checkpoint(ckpt_path, write_log=False, model=model, strict=False)
     return lit_model
 # ======================================================================
 # score helpers

@@ -28,15 +28,14 @@ params={
     'resize': None,
     'padded': False,
     'convert_to_white': True,
-    'grouped': False,
+    'grouped': True,
     'scale_tolerance': 0.1,
     'hd5_FILE_PATH': "/mnt/beegfs01/scratch/a_morelli/extraction/final/results_aggregated/final_aggregated_data.h5",
     'questionnaire_templates_PATH':"/home/a_morelli/datasets/others/template_sizes.json",
     'SOURCE_folder': "/mnt/beegfs01/scratch/a_morelli/extraction/final/data",
     'LIST_OF_IDS_PD_PATH': "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet",
     'LIST_OF_IDS_PD_PRE_MATCHING_PATH': "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv",
-    'pre_computed_lists': "/home/a_morelli/datasets/shards/pre_computed_lists_21_07_26.json",
-    
+    'pre_computed_lists': "/mnt/beegfs02/scratch/a_morelli/model_training/shards/pre_computed_lists_03_08_26.json",
 }
 
 LIST_OF_IDS_PD_TEST_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/progress.csv"
@@ -74,7 +73,7 @@ def generate_output_name(source,code_to_run, params,current_date):
     output_path = os.path.join(output_path,name)
     
     return output_path,folder_name,name
-OUTPUT_PATH, folder_name, name = generate_output_name("/home/a_morelli/datasets/shards", CODE_TO_RUN, params, current_date)
+OUTPUT_PATH, folder_name, name = generate_output_name("/mnt/beegfs02/scratch/a_morelli/model_training/shards", CODE_TO_RUN, params, current_date)
 
 
 MAX_SHARD_SIZE = 1e9 # 1e9 ~1 GB per shard
@@ -120,7 +119,8 @@ def main():
             #while ident_projet is just XXXXX
             output_path = os.path.join(OUTPUT_PATH,train_split)
             if params['grouped']:
-                convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD_grouped,num_test_ids=None,data=split_data)
+                convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD_grouped,modalities_to_shard=modalities_to_shard,
+                                        num_test_ids=None,data=split_data)
             else:
                 convert_to_wds_parallel(output_path,id_list,function=process_chunk_PD,modalities_to_shard=modalities_to_shard,
                                         num_test_ids=None,data=split_data) 
@@ -351,12 +351,12 @@ def process_chunk_PD(output_path, worker_id, id_chunk, modalities_to_shard, data
     )
     _run_flat(output_path, worker_id, id_chunk, spec, data)
 
-def process_chunk_PD_grouped(output_path, worker_id, id_chunk, data=None):
+def process_chunk_PD_grouped(output_path, worker_id, id_chunk, modalities_to_shard,data=None):
     spec = ShardSpec(
-        modalities={"hand", "number_random", "X"},
+        modalities=set(modalities_to_shard),
         source_id=lambda sid: sid.split("_")[0],
         prefix_subject_in_key=True,
-        skip_questionnaire=lambda row, q: row['case_grid_pattern'][int(q) - 1] == '0',
+        #skip_questionnaire=lambda row, q: row['case_grid_pattern'][int(q) - 1] == '0',
         q_info_extra=_case_dt,
         subject_meta=_pd_meta,
     )

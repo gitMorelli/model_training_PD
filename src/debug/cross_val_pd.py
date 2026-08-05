@@ -43,12 +43,11 @@ from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augme
 from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader, get_optimization_groups
 from src.utils.training_utils import set_automatic_hyperparameters, MemMonitor, BatchTimer, ThroughputMonitor
 from src.scripts.train_PD_model import *
-from src.debug.PD_model_evaluation import get_result_df, litmodel_initialization_from_checkpoint
+from src.debug.PD_model_evaluation import get_result_df, litmodel_initialization_from_checkpoint, get_per_step_results
 
 
-SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
-CHECKPOINT_PATH_SOURCE = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints"
-version='26'
+CHECKPOINT_PATH_SOURCE = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints"
+version='36'
 params_path = os.path.join(CHECKPOINT_PATH_SOURCE,f"v_{version}", "exp_params.pkl")
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f)
@@ -60,9 +59,9 @@ if 'stopping_metric' not in exp_params:
 
 def get_source_path():
     if exp_params['problem'] == 'PD' and not exp_params['pre_training']:
-        return "/mnt/beegfs02/scratch/a_morelli/model_training/PD/cross_val"
+        return "/home/a_morelli/models/model_training_logs/PD/cross_val"
     elif exp_params['problem'] == 'PD' and exp_params['pre_training']:
-        return "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
+        return "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N"
     else:
         raise ValueError(f"Unknown problem type: {exp_params['problem']}")
 SOURCE_PATH = get_source_path()
@@ -87,7 +86,7 @@ exp_params['SOURCE_PATH'] = SOURCE_PATH
 DEBUG_IMGS = False
 VERBOSE = True
 
-print(exp_params['model'])
+#print(exp_params['model'])
     
 def main(exp_params):
     args = get_args()
@@ -177,11 +176,11 @@ def main(exp_params):
         
         lit_model = litmodel_initialization(model,counts,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
 
-        trainer, metrics_tracker = trainer_definition(current_version, exp_params, cv=fold)
+        trainer, metrics_tracker = trainer_definition(current_version, exp_params, lit_model, cv=fold)
         
         trainer.fit(lit_model, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
-        results_df = evaluate_best_model_on_fold(current_version, exp_params, val_loader, model)
+        results_df = evaluate_best_model_on_fold(current_version, exp_params, val_loader, model, train_df_global)
         results_df.to_csv(os.path.join(CHECKPOINT_PATH,f'v_{current_version}', f'fold_{fold}_results.csv'), index=False)
 
         if fold == exp_params['n_folds'] - 1:
@@ -200,7 +199,7 @@ def main(exp_params):
         pickle.dump(exp_params, f)
 
 
-def evaluate_best_model_on_fold(current_version, exp_params, val_loader, model):
+def evaluate_best_model_on_fold(current_version, exp_params, val_loader, model, train_df):
     folder = Path(os.path.join(CHECKPOINT_PATH,f'v_{current_version}'))
     best_ckpt = next(folder.glob("best*.ckpt"), None)
     lit_model = litmodel_initialization_from_checkpoint(model, best_ckpt, exp_params)
@@ -214,8 +213,12 @@ def evaluate_best_model_on_fold(current_version, exp_params, val_loader, model):
     ) 
 
     outputs = trainer.predict(lit_model, dataloaders=val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
-    results_df, all_probs, all_preds, all_labels = get_result_df(outputs)
-    return results_df
+
+    if lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
+        results_df = get_per_step_results(outputs, train_df)
+    else:
+        results_df, all_probs, all_preds, all_labels = get_result_df(outputs)
+    return results_df 
 
 def initialize_fold(dirpath):
     #clean memory

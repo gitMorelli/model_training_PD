@@ -309,11 +309,37 @@ def prepare_pre_training_data():
     print(f"Pre-training data saved to {save_path}")
 
 def inspect_columns(): 
-    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_35/per_step_predictions.csv"
-    csv_data = pd.read_csv(load_path)
+    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet" 
+    csv_data = pd.read_parquet(load_path)
     columns = csv_data.columns
     for col in columns:
         print(f"Column: {col}")
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(f"Dataframe head:\n{csv_data.head()}")
+
+def inspect_matched_data(): 
+    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet" 
+    csv_data = pd.read_parquet(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(f"Dataframe head:\n{csv_data.head()}")
+    #get the number of unique_ids in each split, specifying how many are case_control==1 and ==0
+    for split in csv_data['split'].unique():
+        split_data = csv_data[csv_data['split'] == split]
+        unique_ids = split_data['unique_id'].nunique()
+        case_control_1 = split_data[split_data['case_control'] == 1]['unique_id'].nunique()
+        case_control_0 = split_data[split_data['case_control'] == 0]['unique_id'].nunique()
+        diag_1 = split_data[split_data['diag_park_final1_quest'] == 1]['unique_id'].nunique()
+        diag_0 = split_data[split_data['diag_park_final1_quest'] == 0]['unique_id'].nunique()
+        print(f"Split: {split}")
+        print(f"Total unique IDs: {unique_ids}")
+        print(f"Case IDs: {case_control_1}")
+        print(f"Diagnosis 1 IDs: {diag_1}")
+        print(f"Control IDs: {case_control_0}")
+        print(f"Diagnosis 0 IDs: {diag_0}")
+    
 
 def view_params():
     load_path = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints/v_21/exp_params.pkl"
@@ -685,8 +711,10 @@ def get_normalization_values():
     print("Normalization values:")
     print(f"Mean: {mean}")
     print(f"Std: {std}")
-if __name__ == "__main__":
-    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_35/per_step_predictions.csv"
+
+
+def inspect_fold_per_step():
+    load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/fold_0_results.csv"
     csv_data = pd.read_csv(load_path)
     columns = csv_data.columns
     for col in columns:
@@ -694,5 +722,136 @@ if __name__ == "__main__":
     #print unique values for the column slot
     unique_slots = csv_data['slot'].unique()
     print(f"Unique values for column 'slot': {unique_slots}")
-    plot_probability_trajectories(csv_data, save_path="/home/a_morelli/vscode_projects/model_training/results/tests")
+    #plot_probability_trajectories(csv_data, save_path="/home/a_morelli/vscode_projects/model_training/results/tests")
+    #check the Nans for the case_dt column
+    nan_case_dt = csv_data['case_dt'].isna().sum()
+    print(f"Number of NaN values in column 'case_dt': {nan_case_dt}")
+    #show rows where case_dt is NaN
+    nan_case_dt_rows = csv_data[csv_data['case_dt'].isna()]
+    #print(f"Rows where 'case_dt' is NaN:\n{nan_case_dt_rows}")
+    #i can drop the nans cause a timestep is na only if the grid_pattern was 1 and the rempli_pattern was 0 (which is unreliable)
+    csv_data = csv_data.dropna(subset=['case_dt'])
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(csv_data.head())
+
+    return
+
+    load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/PD_training_set_20_07_26.parquet"
+    metadata = pd.read_parquet(load_path)
+    columns = metadata.columns
+    for col in columns:
+        print(f"Column: {col}")
+    
+    #add the case_control, rempli_pattern, case_pattern, grid_pattern, case_grid_pattern columns to the nan_case_dt_rows dataframe by merging with the metadata dataframe on the unique_id column
+    nan_case_dt_rows = nan_case_dt_rows.merge(metadata[['unique_id', 'case_control', 'rempli_pattern', 'case_pattern', 'grid_pattern', 'case_grid_pattern']], on='unique_id', how='left')
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(f"Rows where 'case_dt' is NaN after merging with metadata:\n{nan_case_dt_rows}")
+    
+
+def examine_rempli_pattern_grid_pattern():
+    load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/PD_training_set_20_07_26.parquet" 
+    csv_data = pd.read_parquet(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
+    #count the number of rows for which i have a mismatch
+    mask = csv_data.apply(
+        lambda row: any(g == '1' and r == '0' for g, r in zip(row['grid_pattern'], row['rempli_pattern'])),
+        axis=1
+    )
+
+    count = mask.sum()
+    print(f"Number of rows with mismatch: {count}")
+
+    sample_indices = csv_data[mask].index[:5].tolist()
+    sample_ids = csv_data.loc[sample_indices, 'unique_id'].tolist()
+    print(f"Unique IDs of 5 mismatched rows: {sample_ids}")
+
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(csv_data[mask].head(5))
+
+    #load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet" #Number of rows with mismatch(pattern/grid_pattern): 85; case_pattern/case_grid_pattern: 254
+    #load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/PD_training_set_20_07_26.parquet"  ; (p/g)85
+
+def debug_GRID_PATTERN_REMPLI_PATTERN():
+    print("Patterns in training df")
+    load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/PD_training_set_20_07_26.parquet" 
+    csv_data = pd.read_parquet(load_path)
+    #create an ident_projet column by taking the characters of unique_id before '_'
+    csv_data['ident_projet'] = csv_data['unique_id'].str.split('_').str[0]
+    sample_ids = ['N4I7V1L9']
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(csv_data[csv_data['ident_projet'].isin(sample_ids)][['unique_id','rempli_pattern','grid_pattern']])
+
+    print("Patterns in original df")
+    load_path = "/home/a_morelli/datasets/id_lists/final_table_with_all_info_8_7_26.csv" 
+    csv_data = pd.read_csv(load_path,encoding='cp1252')
+    avail_columns = [f"q_{q}_avail" for q in range(1, 14)]
+    avail_ref_columns = [f"q_{q}_avail_ref" for q in range(1, 14)]
+    avail_cens_columns = [f"q_{q}_avail_cens" for q in range(1, 14)]
+    grid_file_avail_columns = [f"q_{q}_grid_file_avail" for q in range(1, 14)]
+    #slecte the indet_projet==selected_id, print the avai_ref_coumns and the grid_file_avail columns for that row (avail_ref_columns[i], grid_file_avail_columns[i]) for i in range(13)
+    selected_row = csv_data[csv_data['ident_projet'].isin(sample_ids)]
+    if not selected_row.empty:
+        print(f"Selected row for ident_projet={sample_ids[0]}:")
+        for i in range(13):
+            avail = selected_row[avail_columns[i]].values[0]
+            avail_ref = selected_row[avail_ref_columns[i]].values[0]
+            grid_file_avail = selected_row[grid_file_avail_columns[i]].values[0]
+            print(f"Questionnaire {i+1}: avail={avail}, avail_ref={avail_ref}, grid_file_avail={grid_file_avail}")
+    
+    print("Patterns in prematched df (full)")
+    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26.csv"
+    csv_data = pd.read_csv(load_path)
+    #csv_data['ident_projet'] = csv_data['unique_id'].str.split('_').str[0]
+    selected_row = csv_data[csv_data['ident_projet'].isin(sample_ids)]
+    avail_columns = [f"q_{q}_avail" for q in range(1, 14)]
+    grid_columns = [f"q_{q}_grid_file_avail" for q in range(1, 14)]
+    if not selected_row.empty:
+        print(f"Selected row for ident_projet={sample_ids[0]}:")
+        for i in range(13):
+            avail = selected_row[avail_columns[i]].values[0]
+            grid_file_avail = selected_row[grid_columns[i]].values[0]
+            print(f"Questionnaire {i+1}: avail={avail}, grid_file_avail={grid_file_avail}")
+
+if __name__ == "__main__":
+    inspect_matched_data()
+    assert 1==0
+    path="/mnt/beegfs02/scratch/a_morelli/model_training/shards/pre_computed_lists_03_08_26.json"
+    pre_computed_lists = json.load(open(path, "r"))
+    print(f"Pre-computed lists loaded from {path}. Keys: {list(pre_computed_lists.keys())}")
+    id_list_grouped = pre_computed_lists['for_PD_grouped']['train']
+    print(f"Number of unique IDs in 'for_PD_grouped' train list: {len(id_list_grouped)}")
+    id_list = pre_computed_lists['for_PD']['train']
+    print(f"Number of unique IDs in 'for_PD' train list: {len(id_list)}")
+    print(f"First 5 unique IDs in 'for_PD' train list: {id_list[:5]}")
+    print(f"First 5 unique IDs in 'for_PD_grouped' train list: {id_list_grouped[:5]}")
+
+    assert 1==0
+
+    load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/fold_0_results.csv"
+    csv_data = pd.read_csv(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
+    #i can drop the nans cause a timestep is na only if the grid_pattern was 1 and the rempli_pattern was 0 (which is unreliable)
+    csv_data = csv_data.dropna(subset=['case_dt'])
+
+    load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/PD_training_set_20_07_26.parquet"
+    metadata = pd.read_parquet(load_path)
+    columns = metadata.columns
+    for col in columns:
+        print(f"Column: {col}")
+    
+    #add the case_control, rempli_pattern, case_pattern, grid_pattern, case_grid_pattern columns to the nan_case_dt_rows dataframe by merging with the metadata dataframe on the unique_id column
+    csv_data = csv_data.merge(metadata[['unique_id', 'last_avail_q']], on='unique_id', how='left')
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(f"csv_data after merging with metadata:\n{csv_data.head()}")
+    
+    filtered = (csv_data[csv_data["slot"] <= csv_data["last_avail_q"] - 1]
+         .sort_values("slot")
+         .groupby("unique_id", as_index=False)
+         .tail(1)
+         .sort_index())
+
     
