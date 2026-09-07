@@ -28,14 +28,18 @@ from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 
 def main():
-    model_name ='FiveStageResidualStridedConvNet'
+    model_name ='convnext_tiny'
     num_channels = 1 #1 for grayscale, 3 for RGB
+    if num_channels == 1:
+        grayscale = True
+    else:
+        grayscale = False
     classifier_name='linear'
     output_path=f"data/model_structures/{model_name}_structure.txt"
     if not os.path.exists(output_path):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    backbone,transform = get_model(name=model_name, pretrained=True)
+    backbone,transform = get_model(name=model_name, pretrained=True, grayscale=grayscale)
     out=test_output(224, backbone, channels=num_channels) #test the output of the backbone to determine the number of features for the classification head
     in_features = out.shape[1]
     classificaton_head = get_classification_head(name=classifier_name,in_features=in_features)
