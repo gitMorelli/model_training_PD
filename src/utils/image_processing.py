@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image
 
 # ------------ Feature extraction -------------------
-def extract_image_properties(img_source):
+def debug_image_properties(img_source):
     #compute mean intensity
     img = img_source.convert('L') #convert to grayscale
     arr=np.array(img)
@@ -52,8 +52,6 @@ def extract_image_properties(img_source):
         'num_pixels': int(arr_f.size),
     }
     return img_properties
-
-# --------------------------------------------
 
 def convert_background_to_white(image):
     img = image.copy()
@@ -697,8 +695,18 @@ def get_mu_std(exp_params,verbose=False):
             mu = (0.1307,0.1307,0.1307)
             std = (0.3081,0.3081,0.3081)
         elif exp_params['norm_mu']=='imagenet':
-            mu = (0.485,0.456,0.406)
-            std = (0.229,0.224,0.225)
+            if exp_params['num_channels']==1: #to manage the grayscale case
+                mu = (0.459,0.459,0.459)
+                std = (0.226,0.226,0.226)
+                '''
+                PIL uses ITU-R 601 luma weights (0.299 R, 0.587 G, 0.114 B). Since the conversion is linear, 
+                the mean of the converted dataset is the same weighted combination of the channel means: 0.299·0.485 + 0.587·0.456 + 0.114·0.406 = 0.459.
+                
+                imagenet mean and std should become mean=[0.459], std=[0.226]
+                '''
+            else:
+                mu = (0.485,0.456,0.406)
+                std = (0.229,0.224,0.225)
         elif exp_params['norm_mu']=='handedness':
             mu = [0.06040578708052635, 0.06040578708052635, 0.06040578708052635]
             std = [0.23823712766170502, 0.23823712766170502, 0.23823712766170502]

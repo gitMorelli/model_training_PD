@@ -31,6 +31,7 @@ from pympler import asizeof
 import numpy as np
 import psutil
 import math
+from peft import LoraConfig, get_peft_model
 
 from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict, synthetic_data_override
 from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
@@ -52,12 +53,15 @@ def pre_trained_weights(name):
     elif name == 'pre_trained_E3N_resnet18_window':
         out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_4',
                     'best-02-0.2222.ckpt')
+    elif name == 'pre_trained_E3N_from_scratch_resnet18_window':
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_5',
+                    'best-03-008299-0.1090.ckpt')
     elif name == 'pre_trained_E3N_resnet50':
         out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_1',
                     'best-epoch=00-val_loss=0.30.ckpt')
     elif name == 'pre_trained_E3N_resnet50_window':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_2',
-                    'best-02-0.2264.ckpt')
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_3',
+                    'best-03-008086-0.1167.ckpt')
     elif name == 'pre_trained_E3N_custom_window':
         out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_4',
                     'best-00-001708-0.3423.ckpt')
@@ -84,7 +88,7 @@ def get_input_modality(name):
         return ['X_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
 
 RESTORE = False
-version_override =  2
+version_override =  11
 
 exp_params = {
     'problem': 'PD', #handedness, PD, 
@@ -97,17 +101,17 @@ exp_params = {
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'pre_training': True,
+    'pre_training': False,
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': ALL_SYNTHETIC_TRANSFORMS, # ALL_SYNTHETIC_TRANSFORMS or None
+    'synthetic': None, # ALL_SYNTHETIC_TRANSFORMS or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
 
     #experiment parameters
-    'data_modality': get_input_modality('window_view_minimal'), #mixed_view, window_view
+    'data_modality': get_input_modality('window_view_2'), #mixed_view, window_view
     'num_tiles': 3,
     'use_grid': True,
-    'use_balanced_weights': False,
+    'use_balanced_weights': True,
     'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
     'balanced_data': False, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
@@ -116,19 +120,19 @@ exp_params = {
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':'resnet50',#"FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
-    #or
+    'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
     'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
     'norm_std': 'PD_window',
     'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
-    'val_check_interval': 0.2, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
-    'align_train_metrics_to_val': True, 
+    'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
+    'align_train_metrics_to_val': False,  
     'min_window_steps': 50,
     'model_parameters': {
         'd_model': 128, 
@@ -145,31 +149,34 @@ exp_params = {
     },
 
     #Transforms definitions
-    'custom_transform': 'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+    'custom_transform': None,#'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
     
     #Training params definition
+    'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
+    'lr_decay': 0.5, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
     'lr_backbone': 1e-4,
-    'lr_classifier_head': 1e-3,
+    'lr_classifier_head': 3e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 16,
-    'num_epochs': 4,
+    'batch_size': 4,
+    'num_epochs': 50,
     'max_steps': -1, #N or -1
-    'patience': 2, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
-    'stopping_metric': 'val/loss',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-7,
-    'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet)
+    'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
+    'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
+    'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
+    'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
     'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
-    'accumulate_grad_batches': 2,#8,   # effective batch = batch_size * accumulate_grad_batches or None
-    'precision': "16-mixed", #None, #"16-mixed",        # AMP: autocast + GradScaler handled for you or None
+    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'precision': "16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
+    #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None
 
     'prefetch_factor': 4,
@@ -550,17 +557,27 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
                          opt_groups=define_optimization_groups, num_epochs=exp_params['num_epochs'], lr_scheduling=exp_params['lr_scheduling'],
                          weight_decay=exp_params['weight_decay'], warmup_fraction=exp_params['warmup_fraction'], 
                          eta_min_cosine=exp_params['eta_min_cosine'], batch_size=exp_params['batch_size'],
-                         accumulate_grad_batches=exp_params['accumulate_grad_batches'], world_size=1,**additional_kwargs)
+                         accumulate_grad_batches=exp_params['accumulate_grad_batches'], world_size=1,
+                         lora_tuning=exp_params['lora_tuning'], lora_lr_decay=exp_params['lr_decay'],
+                         **additional_kwargs)
     return lit_model
 
 #model loading
 def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs):
-    backbone,transform = get_model(name=exp_params['model'], pretrained=True, 
+    backbone,transform = get_model(name=exp_params['model'], pretrained=exp_params['pretrained'], 
                                    custom_pre_trained_weights=exp_params['custom_pre_trained_weights'],grayscale=exp_params['to_grayscale'])
     print("############# Model backbone loaded! #############")
     transform = get_transforms(exp_params, transform)
     out=test_output(exp_params['input_size'], backbone, channels=exp_params['num_channels']) #test the output of the backbone to determine the number of features for the classification head
     in_features = out.shape[1]  
+
+    if exp_params['lora_tuning']:
+        cfg = LoraConfig(
+            r=8, lora_alpha=16, lora_dropout=0.05, bias="none",
+            target_modules=r"blocks\.\d+\.attn\.(qkv|proj)",   # regex, fullmatch
+        )
+        backbone = get_peft_model(backbone, cfg)
+        #model.print_trainable_parameters()
     
     if exp_params['model_structure'] == 'SequenceQuestionnaireModel':
         n_slots = 13  # This is a fixed value based on your description
@@ -579,7 +596,7 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
     if val:
         return model, transform
     
-    unfreeze_layers(model,layer_names=exp_params['layers_to_unfreeze'])
+    unfreeze_layers(model,layer_names=exp_params['layers_to_unfreeze'], keep_lora = exp_params['lora_tuning'])
 
     if verbose:
         write_log(f"Size of extracted representation: {in_features}") # <-- ADD THIS LINE

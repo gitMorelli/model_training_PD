@@ -1,56 +1,391 @@
---- GPU DIAGNOSTICS ---
-Active GPU: Tesla V100-PCIE-16GB
-CUDA_VISIBLE_DEVICES: 0
-Reading from /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_no_grids_png_whitebg/train/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/handedness/all_no_grids_png_whitebg/val/worker*_shard-*.tar with decode approach 'pil' and load_in_memory=False
-Removing keys: []
-Missing keys: ['conv1.weight', 'bn1.weight', 'bn1.bias', 'bn1.running_mean', 'bn1.running_var', 'layer1.0.conv1.weight', 'layer1.0.bn1.weight', 'layer1.0.bn1.bias', 'layer1.0.bn1.running_mean', 'layer1.0.bn1.running_var', 'layer1.0.conv2.weight', 'layer1.0.bn2.weight', 'layer1.0.bn2.bias', 'layer1.0.bn2.running_mean', 'layer1.0.bn2.running_var', 'layer1.1.conv1.weight', 'layer1.1.bn1.weight', 'layer1.1.bn1.bias', 'layer1.1.bn1.running_mean', 'layer1.1.bn1.running_var', 'layer1.1.conv2.weight', 'layer1.1.bn2.weight', 'layer1.1.bn2.bias', 'layer1.1.bn2.running_mean', 'layer1.1.bn2.running_var', 'layer2.0.conv1.weight', 'layer2.0.bn1.weight', 'layer2.0.bn1.bias', 'layer2.0.bn1.running_mean', 'layer2.0.bn1.running_var', 'layer2.0.conv2.weight', 'layer2.0.bn2.weight', 'layer2.0.bn2.bias', 'layer2.0.bn2.running_mean', 'layer2.0.bn2.running_var', 'layer2.0.downsample.0.weight', 'layer2.0.downsample.1.weight', 'layer2.0.downsample.1.bias', 'layer2.0.downsample.1.running_mean', 'layer2.0.downsample.1.running_var', 'layer2.1.conv1.weight', 'layer2.1.bn1.weight', 'layer2.1.bn1.bias', 'layer2.1.bn1.running_mean', 'layer2.1.bn1.running_var', 'layer2.1.conv2.weight', 'layer2.1.bn2.weight', 'layer2.1.bn2.bias', 'layer2.1.bn2.running_mean', 'layer2.1.bn2.running_var', 'layer3.0.conv1.weight', 'layer3.0.bn1.weight', 'layer3.0.bn1.bias', 'layer3.0.bn1.running_mean', 'layer3.0.bn1.running_var', 'layer3.0.conv2.weight', 'layer3.0.bn2.weight', 'layer3.0.bn2.bias', 'layer3.0.bn2.running_mean', 'layer3.0.bn2.running_var', 'layer3.0.downsample.0.weight', 'layer3.0.downsample.1.weight', 'layer3.0.downsample.1.bias', 'layer3.0.downsample.1.running_mean', 'layer3.0.downsample.1.running_var', 'layer3.1.conv1.weight', 'layer3.1.bn1.weight', 'layer3.1.bn1.bias', 'layer3.1.bn1.running_mean', 'layer3.1.bn1.running_var', 'layer3.1.conv2.weight', 'layer3.1.bn2.weight', 'layer3.1.bn2.bias', 'layer3.1.bn2.running_mean', 'layer3.1.bn2.running_var', 'layer4.0.conv1.weight', 'layer4.0.bn1.weight', 'layer4.0.bn1.bias', 'layer4.0.bn1.running_mean', 'layer4.0.bn1.running_var', 'layer4.0.conv2.weight', 'layer4.0.bn2.weight', 'layer4.0.bn2.bias', 'layer4.0.bn2.running_mean', 'layer4.0.bn2.running_var', 'layer4.0.downsample.0.weight', 'layer4.0.downsample.1.weight', 'layer4.0.downsample.1.bias', 'layer4.0.downsample.1.running_mean', 'layer4.0.downsample.1.running_var', 'layer4.1.conv1.weight', 'layer4.1.bn1.weight', 'layer4.1.bn1.bias', 'layer4.1.bn1.running_mean', 'layer4.1.bn1.running_var', 'layer4.1.conv2.weight', 'layer4.1.bn2.weight', 'layer4.1.bn2.bias', 'layer4.1.bn2.running_mean', 'layer4.1.bn2.running_var', 'fc.weight', 'fc.bias']
-Unexpected keys: ['class_weights', 'pos_weight', 'vision_model.conv1.weight', 'vision_model.bn1.weight', 'vision_model.bn1.bias', 'vision_model.bn1.running_mean', 'vision_model.bn1.running_var', 'vision_model.bn1.num_batches_tracked', 'vision_model.layer1.0.conv1.weight', 'vision_model.layer1.0.bn1.weight', 'vision_model.layer1.0.bn1.bias', 'vision_model.layer1.0.bn1.running_mean', 'vision_model.layer1.0.bn1.running_var', 'vision_model.layer1.0.bn1.num_batches_tracked', 'vision_model.layer1.0.conv2.weight', 'vision_model.layer1.0.bn2.weight', 'vision_model.layer1.0.bn2.bias', 'vision_model.layer1.0.bn2.running_mean', 'vision_model.layer1.0.bn2.running_var', 'vision_model.layer1.0.bn2.num_batches_tracked', 'vision_model.layer1.1.conv1.weight', 'vision_model.layer1.1.bn1.weight', 'vision_model.layer1.1.bn1.bias', 'vision_model.layer1.1.bn1.running_mean', 'vision_model.layer1.1.bn1.running_var', 'vision_model.layer1.1.bn1.num_batches_tracked', 'vision_model.layer1.1.conv2.weight', 'vision_model.layer1.1.bn2.weight', 'vision_model.layer1.1.bn2.bias', 'vision_model.layer1.1.bn2.running_mean', 'vision_model.layer1.1.bn2.running_var', 'vision_model.layer1.1.bn2.num_batches_tracked', 'vision_model.layer2.0.conv1.weight', 'vision_model.layer2.0.bn1.weight', 'vision_model.layer2.0.bn1.bias', 'vision_model.layer2.0.bn1.running_mean', 'vision_model.layer2.0.bn1.running_var', 'vision_model.layer2.0.bn1.num_batches_tracked', 'vision_model.layer2.0.conv2.weight', 'vision_model.layer2.0.bn2.weight', 'vision_model.layer2.0.bn2.bias', 'vision_model.layer2.0.bn2.running_mean', 'vision_model.layer2.0.bn2.running_var', 'vision_model.layer2.0.bn2.num_batches_tracked', 'vision_model.layer2.0.downsample.0.weight', 'vision_model.layer2.0.downsample.1.weight', 'vision_model.layer2.0.downsample.1.bias', 'vision_model.layer2.0.downsample.1.running_mean', 'vision_model.layer2.0.downsample.1.running_var', 'vision_model.layer2.0.downsample.1.num_batches_tracked', 'vision_model.layer2.1.conv1.weight', 'vision_model.layer2.1.bn1.weight', 'vision_model.layer2.1.bn1.bias', 'vision_model.layer2.1.bn1.running_mean', 'vision_model.layer2.1.bn1.running_var', 'vision_model.layer2.1.bn1.num_batches_tracked', 'vision_model.layer2.1.conv2.weight', 'vision_model.layer2.1.bn2.weight', 'vision_model.layer2.1.bn2.bias', 'vision_model.layer2.1.bn2.running_mean', 'vision_model.layer2.1.bn2.running_var', 'vision_model.layer2.1.bn2.num_batches_tracked', 'vision_model.layer3.0.conv1.weight', 'vision_model.layer3.0.bn1.weight', 'vision_model.layer3.0.bn1.bias', 'vision_model.layer3.0.bn1.running_mean', 'vision_model.layer3.0.bn1.running_var', 'vision_model.layer3.0.bn1.num_batches_tracked', 'vision_model.layer3.0.conv2.weight', 'vision_model.layer3.0.bn2.weight', 'vision_model.layer3.0.bn2.bias', 'vision_model.layer3.0.bn2.running_mean', 'vision_model.layer3.0.bn2.running_var', 'vision_model.layer3.0.bn2.num_batches_tracked', 'vision_model.layer3.0.downsample.0.weight', 'vision_model.layer3.0.downsample.1.weight', 'vision_model.layer3.0.downsample.1.bias', 'vision_model.layer3.0.downsample.1.running_mean', 'vision_model.layer3.0.downsample.1.running_var', 'vision_model.layer3.0.downsample.1.num_batches_tracked', 'vision_model.layer3.1.conv1.weight', 'vision_model.layer3.1.bn1.weight', 'vision_model.layer3.1.bn1.bias', 'vision_model.layer3.1.bn1.running_mean', 'vision_model.layer3.1.bn1.running_var', 'vision_model.layer3.1.bn1.num_batches_tracked', 'vision_model.layer3.1.conv2.weight', 'vision_model.layer3.1.bn2.weight', 'vision_model.layer3.1.bn2.bias', 'vision_model.layer3.1.bn2.running_mean', 'vision_model.layer3.1.bn2.running_var', 'vision_model.layer3.1.bn2.num_batches_tracked', 'vision_model.layer4.0.conv1.weight', 'vision_model.layer4.0.bn1.weight', 'vision_model.layer4.0.bn1.bias', 'vision_model.layer4.0.bn1.running_mean', 'vision_model.layer4.0.bn1.running_var', 'vision_model.layer4.0.bn1.num_batches_tracked', 'vision_model.layer4.0.conv2.weight', 'vision_model.layer4.0.bn2.weight', 'vision_model.layer4.0.bn2.bias', 'vision_model.layer4.0.bn2.running_mean', 'vision_model.layer4.0.bn2.running_var', 'vision_model.layer4.0.bn2.num_batches_tracked', 'vision_model.layer4.0.downsample.0.weight', 'vision_model.layer4.0.downsample.1.weight', 'vision_model.layer4.0.downsample.1.bias', 'vision_model.layer4.0.downsample.1.running_mean', 'vision_model.layer4.0.downsample.1.running_var', 'vision_model.layer4.0.downsample.1.num_batches_tracked', 'vision_model.layer4.1.conv1.weight', 'vision_model.layer4.1.bn1.weight', 'vision_model.layer4.1.bn1.bias', 'vision_model.layer4.1.bn1.running_mean', 'vision_model.layer4.1.bn1.running_var', 'vision_model.layer4.1.bn1.num_batches_tracked', 'vision_model.layer4.1.conv2.weight', 'vision_model.layer4.1.bn2.weight', 'vision_model.layer4.1.bn2.bias', 'vision_model.layer4.1.bn2.running_mean', 'vision_model.layer4.1.bn2.running_var', 'vision_model.layer4.1.bn2.num_batches_tracked', 'classifier.model.0.weight', 'classifier.model.0.bias']
-Length of melted df before filtering: 429936
-Length of melted df after filtering: 366814
-Sample 0: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
-        1, 1, 1, 1, 1, 1, 1, 0]), Key ['E7C7W5R4', 'E7C7W5R4', 'E7C7W5R4', 'E7C7W5R4', 'E7C7W5R4', 'E7C7W5R4', 'E7C7W5R4', 'E7C7W5R4', 'E7C7W5R4', 'E7C7W5R4', 'O1I1G4S8', 'O1I1G4S8', 'O1I1G4S8', 'O1I1G4S8', 'O1I1G4S8', 'O1I1G4S8', 'O1I1G4S8', 'O1I1G4S8', 'O1I1G4S8', 'O1I1G4S8', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'E3U1G0L6', 'B8L3X7V7']
-Sample 1: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 1, 1, 1, 1]), Key ['B8L3X7V7', 'B8L3X7V7', 'B8L3X7V7', 'B8L3X7V7', 'B8L3X7V7', 'B8L3X7V7', 'B8L3X7V7', 'D9U7K9Z6', 'D9U7K9Z6', 'D9U7K9Z6', 'D9U7K9Z6', 'D9U7K9Z6', 'D9U7K9Z6', 'D9U7K9Z6', 'D9U7K9Z6', 'D9U7K9Z6', 'D9U7K9Z6', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'E2S1L3Z4', 'B5W3O9A5', 'B5W3O9A5', 'B5W3O9A5', 'B5W3O9A5']
-Sample 2: Label tensor([1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 1, 1, 1, 1, 1, 1]), Key ['B5W3O9A5', 'B5W3O9A5', 'B5W3O9A5', 'B5W3O9A5', 'B5W3O9A5', 'B5W3O9A5', 'K5Z6E3L7', 'K5Z6E3L7', 'K5Z6E3L7', 'K5Z6E3L7', 'K5Z6E3L7', 'K5Z6E3L7', 'K5Z6E3L7', 'K5Z6E3L7', 'K5Z6E3L7', 'K5Z6E3L7', 'A0F9T1I2', 'A0F9T1I2', 'A0F9T1I2', 'A0F9T1I2', 'A0F9T1I2', 'A0F9T1I2', 'A0F9T1I2', 'A0F9T1I2', 'A0F9T1I2', 'A0F9T1I2', 'A9N8D1S9', 'A9N8D1S9', 'A9N8D1S9', 'A9N8D1S9', 'A9N8D1S9', 'A9N8D1S9']
-Sample 3: Label tensor([1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0]), Key ['A9N8D1S9', 'A9N8D1S9', 'A9N8D1S9', 'A9N8D1S9', 'A9N8D1S9', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'B5S2E3M2', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C8E1G0R0', 'C4B4O2A6', 'C4B4O2A6', 'C4B4O2A6', 'C4B4O2A6', 'C4B4O2A6']
-Sample 4: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0]), Key ['C4B4O2A6', 'C4B4O2A6', 'C4B4O2A6', 'C4B4O2A6', 'C4B4O2A6', 'C4B4O2A6', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B2I3D0K4', 'B6H7H4D2', 'B6H7H4D2', 'B6H7H4D2', 'B6H7H4D2', 'B6H7H4D2', 'B6H7H4D2', 'B6H7H4D2', 'B6H7H4D2', 'B6H7H4D2', 'B6H7H4D2', 'I5A3U7N9', 'I5A3U7N9', 'I5A3U7N9', 'I5A3U7N9', 'I5A3U7N9']
-Sample 5: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-        1, 1, 0, 0, 0, 0, 0, 0]), Key ['I5A3U7N9', 'I5A3U7N9', 'I5A3U7N9', 'I5A3U7N9', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'B4Q6Z2X4', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'A2D9P5M2', 'H4B0X8M1', 'H4B0X8M1', 'H4B0X8M1', 'H4B0X8M1', 'H4B0X8M1', 'H4B0X8M1']
-Sample 6: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0]), Key ['H4B0X8M1', 'H4B0X8M1', 'H4B0X8M1', 'H4B0X8M1', 'C9O4Z8Z8', 'C9O4Z8Z8', 'C9O4Z8Z8', 'C9O4Z8Z8', 'C9O4Z8Z8', 'C9O4Z8Z8', 'C9O4Z8Z8', 'C9O4Z8Z8', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'C7Y2J8F3', 'D9V3M3P2', 'D9V3M3P2', 'D9V3M3P2', 'D9V3M3P2', 'D9V3M3P2', 'D9V3M3P2', 'D9V3M3P2', 'D9V3M3P2', 'D9V3M3P2']
-Sample 7: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0]), Key ['D9V3M3P2', 'D9V3M3P2', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'L0T7B3W1', 'D1L2Q0B1', 'D1L2Q0B1', 'D1L2Q0B1', 'D1L2Q0B1', 'D1L2Q0B1', 'D1L2Q0B1', 'D1L2Q0B1', 'D1L2Q0B1', 'D1L2Q0B1', 'C3Q1I1X1', 'C3Q1I1X1', 'C3Q1I1X1', 'C3Q1I1X1', 'C3Q1I1X1', 'C3Q1I1X1', 'C3Q1I1X1', 'C3Q1I1X1', 'G5E5J3Q2', 'G5E5J3Q2']
-Sample 8: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0]), Key ['G5E5J3Q2', 'G5E5J3Q2', 'G5E5J3Q2', 'G5E5J3Q2', 'G5E5J3Q2', 'G5E5J3Q2', 'G5E5J3Q2', 'G5E5J3Q2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'D9R2F2V2', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'B6Q7O2Y5', 'C3I0H0D2', 'C3I0H0D2']
-Sample 9: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0]), Key ['C3I0H0D2', 'C3I0H0D2', 'C3I0H0D2', 'C3I0H0D2', 'C3I0H0D2', 'C3I0H0D2', 'C3I0H0D2', 'C3I0H0D2', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'B3W9N8X4', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'A0O8C7R3', 'F9W8A7M3', 'F9W8A7M3']
-Sample 10: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0]), Key ['F9W8A7M3', 'F9W8A7M3', 'F9W8A7M3', 'F9W8A7M3', 'F9W8A7M3', 'F9W8A7M3', 'F9W8A7M3', 'F9W8A7M3', 'F9W8A7M3', 'D5L5H5C2', 'D5L5H5C2', 'D5L5H5C2', 'D5L5H5C2', 'D5L5H5C2', 'D5L5H5C2', 'D5L5H5C2', 'D5L5H5C2', 'D5L5H5C2', 'D5L5H5C2', 'C3D4V1V1', 'C3D4V1V1', 'C3D4V1V1', 'C3D4V1V1', 'C3D4V1V1', 'C3D4V1V1', 'C3D4V1V1', 'C3D4V1V1', 'C3D4V1V1', 'D0D5J7S6', 'D0D5J7S6', 'D0D5J7S6', 'D0D5J7S6']
-Sample 11: Label tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0]), Key ['D0D5J7S6', 'D0D5J7S6', 'D0D5J7S6', 'D0D5J7S6', 'D0D5J7S6', 'D0D5J7S6', 'F1R1B0L2', 'F1R1B0L2', 'F1R1B0L2', 'F1R1B0L2', 'F1R1B0L2', 'F1R1B0L2', 'F1R1B0L2', 'F1R1B0L2', 'F1R1B0L2', 'F1R1B0L2', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'C0E8N5N9', 'F1G7J8Z6', 'F1G7J8Z6', 'F1G7J8Z6', 'F1G7J8Z6', 'F1G7J8Z6']
-Raccolta di 16 immagini dal WebDataset...
-Dimensione del batch di immagini raccolte: torch.Size([16, 3, 224, 224])
-Valori pixel prima del clamp: min=-0.2536, max=3.9439
-Anteprima salvata con successo in: data/anteprima_dataset.png
-Extracting representations for train set...
-Extracting representations for val set...
+Initial CSV data loaded. First row example:
+unique_id: A6K2W8Y9_0001
+split: train
+case_control: 1
+last_avail_q: 9
+rempli_pattern: 1111111111000
+case_pattern: 1111111111000
+grid_pattern: 0100111111000
+case_grid_pattern: 0100111111000
+diag_park_final1_quest: 1
+at_least_warning: 0
+case_dt_dateq1: -19.958932238193018
+case_dt_dateq2: -17.456536618754278
+case_dt_dateq3: -15.958932238193018
+case_dt_dateq4: -14.455852156057494
+case_dt_dateq5: -12.210814510609172
+case_dt_dateq6: -8.941820670773442
+case_dt_dateq7: -6.55441478439425
+case_dt_dateq8: -3.9507186858316223
+case_dt_dateq9: -0.9089664613278576
+case_dt_dateq10: 2.5051334702258727
+case_dt_dateq11: nan
+case_dt_dateq12: nan
+case_dt_dateq13: nan
+q_1_num_X: -1.0
+q_2_num_X: 75.0
+q_3_num_X: -1.0
+q_4_num_X: -1.0
+q_5_num_X: 23.0
+q_6_num_X: 23.0
+q_7_num_X: 32.0
+q_8_num_X: 45.0
+q_9_num_X: 16.0
+q_10_num_X: 63.0
+q_11_num_X: -1.0
+q_12_num_X: -1.0
+q_13_num_X: -1.0
+q_1_num_text: -1.0
+q_2_num_text: 38.0
+q_3_num_text: -1.0
+q_4_num_text: -1.0
+q_5_num_text: 38.0
+q_6_num_text: 17.0
+q_7_num_text: 34.0
+q_8_num_text: 62.0
+q_9_num_text: 0.0
+q_10_num_text: 1.0
+q_11_num_text: -1.0
+q_12_num_text: -1.0
+q_13_num_text: -1.0
+q_1_num_digit: -1.0
+q_2_num_digit: 22.0
+q_3_num_digit: -1.0
+q_4_num_digit: -1.0
+q_5_num_digit: 17.0
+q_6_num_digit: 36.0
+q_7_num_digit: 30.0
+q_8_num_digit: 59.0
+q_9_num_digit: 26.0
+q_10_num_digit: 10.0
+q_11_num_digit: -1.0
+q_12_num_digit: -1.0
+q_13_num_digit: -1.0
+etudegp: 1
+profq2: 0
+lateralite: 0
+relative_age: 4
+birth_date: 1928-04-01
+follow_up_time: 19.958932238193015
+rempli_seulq12: nan
+##################################################
+Unique subjects in the dataset: 12043
+Unique subjects in training set: 9503
+Unique subjects in validation set: 1033
+##################################################
+Class distribution in the entire dataset:
+ diag_park_final1_quest
+0    10844
+1     1199
+Name: count, dtype: int64
+Class distribution in the training set:
+ diag_park_final1_quest
+0    8573
+1     930
+Name: count, dtype: int64
+##################################################
+Initial number of samples in train set: 9503
+Initial number of unique subjects with case_control==1 in train set: 865
+Number of samples in train set after filtering for 000.. string: 9451
+Number of unique subjects with case_control==1 in train set after filtering for 000.. string: 863
+Initial number of samples in val set: 1033
+Initial number of unique subjects with case_control==1 in val set: 99
+Number of samples in val set after filtering for 000.. string: 1031
+Number of unique subjects with case_control==1 in val set after filtering for 000.. string: 99
+52 samples will be excluded from the training set to achieve balancing.
+##################################################
+After applying the exclusion set, the training set has:
+Class 0: 8524 samples
+Class 1: 927 samples
+Ratio of Class 1 to Class 0: 0.10875175973721257
+Initial CSV data loaded. First row example:
+unique_id: A6K2W8Y9_0001
+split: train
+case_control: 1
+last_avail_q: 9
+rempli_pattern: 1111111111000
+case_pattern: 1111111111000
+grid_pattern: 0100111111000
+case_grid_pattern: 0100111111000
+diag_park_final1_quest: 1
+at_least_warning: 0
+case_dt_dateq1: -19.958932238193018
+case_dt_dateq2: -17.456536618754278
+case_dt_dateq3: -15.958932238193018
+case_dt_dateq4: -14.455852156057494
+case_dt_dateq5: -12.210814510609172
+case_dt_dateq6: -8.941820670773442
+case_dt_dateq7: -6.55441478439425
+case_dt_dateq8: -3.9507186858316223
+case_dt_dateq9: -0.9089664613278576
+case_dt_dateq10: 2.5051334702258727
+case_dt_dateq11: nan
+case_dt_dateq12: nan
+case_dt_dateq13: nan
+q_1_num_X: -1.0
+q_2_num_X: 75.0
+q_3_num_X: -1.0
+q_4_num_X: -1.0
+q_5_num_X: 23.0
+q_6_num_X: 23.0
+q_7_num_X: 32.0
+q_8_num_X: 45.0
+q_9_num_X: 16.0
+q_10_num_X: 63.0
+q_11_num_X: -1.0
+q_12_num_X: -1.0
+q_13_num_X: -1.0
+q_1_num_text: -1.0
+q_2_num_text: 38.0
+q_3_num_text: -1.0
+q_4_num_text: -1.0
+q_5_num_text: 38.0
+q_6_num_text: 17.0
+q_7_num_text: 34.0
+q_8_num_text: 62.0
+q_9_num_text: 0.0
+q_10_num_text: 1.0
+q_11_num_text: -1.0
+q_12_num_text: -1.0
+q_13_num_text: -1.0
+q_1_num_digit: -1.0
+q_2_num_digit: 22.0
+q_3_num_digit: -1.0
+q_4_num_digit: -1.0
+q_5_num_digit: 17.0
+q_6_num_digit: 36.0
+q_7_num_digit: 30.0
+q_8_num_digit: 59.0
+q_9_num_digit: 26.0
+q_10_num_digit: 10.0
+q_11_num_digit: -1.0
+q_12_num_digit: -1.0
+q_13_num_digit: -1.0
+etudegp: 1
+profq2: 0
+lateralite: 0
+relative_age: 4
+birth_date: 1928-04-01
+follow_up_time: 19.958932238193015
+rempli_seulq12: nan
+##################################################
+Unique subjects in the dataset: 12043
+Unique subjects in test set: 1507
+##################################################
+Class distribution in the entire dataset:
+ diag_park_final1_quest
+0    10844
+1     1199
+Name: count, dtype: int64
+Class distribution in the test set:
+ diag_park_final1_quest
+0    1350
+1     157
+Name: count, dtype: int64
+##################################################
+Initial number of samples in test set: 1507
+Initial number of unique subjects with case_control==1 in test set: 139
+Number of samples in test set after filtering for 000.. string: 1471
+Number of unique subjects with case_control==1 in test set after filtering for 000.. string: 136
+36 samples will be excluded from the test set to achieve balancing.
+##################################################
+After applying the exclusion set, the test set has:
+Class 0: 1317 samples
+Class 1: 154 samples
+Ratio of Class 1 to Class 0: 0.11693242217160213
+Reading from /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26/train/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26/val/worker*_shard-*.tar..
+Multiple data modalities detected. Applying augmentation transforms based on modality:
+Augmentation transform: [('window', Compose(
+)), ('window', Compose(
+)), ('window', Compose(
+))]
+MEMORY TEST --------------> mean sample: 1.0 MB, max: 2.1 MB
+Using device: cuda, autocast: True (torch.bfloat16)
+Processed 0 batches, total rows collected: 489
+##################################################
+Processed 10 batches, total rows collected: 5456
+##################################################
+Processed 20 batches, total rows collected: 10468
+##################################################
+Processed 30 batches, total rows collected: 15462
+##################################################
+Processed 40 batches, total rows collected: 20347
+##################################################
+Processed 50 batches, total rows collected: 25561
+##################################################
+Processed 60 batches, total rows collected: 30620
+##################################################
+Processed 70 batches, total rows collected: 35674
+##################################################
+Processed 80 batches, total rows collected: 40685
+##################################################
+Processed 90 batches, total rows collected: 45729
+##################################################
+Processed 100 batches, total rows collected: 50770
+##################################################
+Processed 110 batches, total rows collected: 55702
+##################################################
+Processed 120 batches, total rows collected: 60562
+##################################################
+Processed 130 batches, total rows collected: 65533
+##################################################
+Processed 140 batches, total rows collected: 70548
+##################################################
+Processed 150 batches, total rows collected: 75665
+##################################################
+Processed 160 batches, total rows collected: 80701
+##################################################
+Processed 170 batches, total rows collected: 85736
+##################################################
+Processed 180 batches, total rows collected: 90622
+##################################################
+Processed 190 batches, total rows collected: 95741
+##################################################
+Processed 200 batches, total rows collected: 100881
+##################################################
+Processed 210 batches, total rows collected: 105831
+##################################################
+Processed 220 batches, total rows collected: 111043
+##################################################
+Processed 230 batches, total rows collected: 116279
+##################################################
+Processed 240 batches, total rows collected: 121263
+##################################################
+Processed 250 batches, total rows collected: 126500
+##################################################
+Processed 260 batches, total rows collected: 131200
+##################################################
+Processed 270 batches, total rows collected: 136225
+##################################################
+Processed 280 batches, total rows collected: 141274
+##################################################
+Processed 290 batches, total rows collected: 146456
+##################################################
+Processed 300 batches, total rows collected: 151619
+##################################################
+Processed 310 batches, total rows collected: 156637
+##################################################
+Processed 320 batches, total rows collected: 161769
+##################################################
+Processed 330 batches, total rows collected: 166890
+##################################################
+Processed 340 batches, total rows collected: 171979
+##################################################
+Processed 350 batches, total rows collected: 177140
+##################################################
+Processed 360 batches, total rows collected: 182231
+##################################################
+Processed 370 batches, total rows collected: 187469
+##################################################
+Processed 380 batches, total rows collected: 192653
+##################################################
+Processed 390 batches, total rows collected: 197851
+##################################################
+Processed 400 batches, total rows collected: 202745
+##################################################
+Processed 410 batches, total rows collected: 207667
+##################################################
+Processed 420 batches, total rows collected: 212640
+##################################################
+Processed 430 batches, total rows collected: 217776
+##################################################
+Processed 440 batches, total rows collected: 222928
+##################################################
+Processed 450 batches, total rows collected: 227768
+##################################################
+Processed 460 batches, total rows collected: 232926
+##################################################
+Processed 470 batches, total rows collected: 237865
+##################################################
+Processed 480 batches, total rows collected: 243005
+##################################################
+Processed 490 batches, total rows collected: 248148
+##################################################
+Processed 500 batches, total rows collected: 253345
+##################################################
+Processed 510 batches, total rows collected: 258358
+##################################################
+Processed 520 batches, total rows collected: 263390
+##################################################
+Processed 530 batches, total rows collected: 268520
+##################################################
+Processed 540 batches, total rows collected: 273521
+##################################################
+Processed 550 batches, total rows collected: 278578
+##################################################
+Processed 560 batches, total rows collected: 283685
+##################################################
+Processed 570 batches, total rows collected: 288745
+##################################################
+Processed 576 batches in 522.28 seconds, batches per second: 1.10
+Final counts per questionnaire: [8286, 7957, 7847, 6467, 7971, 8785, 8751, 7980, 7862, 7778, 7038, 5993, 4424]
+##################################################
+Reading from /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26/val/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26/val/worker*_shard-*.tar..
+Multiple data modalities detected. Applying augmentation transforms based on modality:
+Augmentation transform: [('window', Compose(
+)), ('window', Compose(
+)), ('window', Compose(
+))]
+MEMORY TEST --------------> mean sample: 1.1 MB, max: 2.8 MB
+Using device: cuda, autocast: True (torch.bfloat16)
+Processed 0 batches, total rows collected: 516
+##################################################
+Processed 10 batches, total rows collected: 5559
+##################################################
+Processed 20 batches, total rows collected: 10676
+##################################################
+Processed 30 batches, total rows collected: 15776
+##################################################
+Processed 40 batches, total rows collected: 20924
+##################################################
+Processed 48 batches in 53.46 seconds, batches per second: 0.90
+Final counts per questionnaire: [673, 664, 672, 583, 658, 741, 727, 675, 657, 661, 588, 497, 346]
+##################################################
+Reading from /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26/test/worker*_shard-*.tar and /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26/test/worker*_shard-*.tar..
+Multiple data modalities detected. Applying augmentation transforms based on modality:
+Augmentation transform: [('window', Compose(
+)), ('window', Compose(
+)), ('window', Compose(
+))]
+MEMORY TEST --------------> mean sample: 1.2 MB, max: 3.5 MB
+Using device: cuda, autocast: True (torch.bfloat16)
+Processed 0 batches, total rows collected: 519
+##################################################
+Processed 10 batches, total rows collected: 5527
+##################################################
+Processed 20 batches, total rows collected: 10516
+##################################################
+Processed 30 batches, total rows collected: 15685
+##################################################
+Processed 40 batches, total rows collected: 20878
+##################################################
+Processed 50 batches, total rows collected: 25999
+##################################################
+Processed 60 batches, total rows collected: 31259
+##################################################
+Processed 70 batches, total rows collected: 36230
+##################################################
+Processed 76 batches in 80.35 seconds, batches per second: 0.95
+Final counts per questionnaire: [1083, 1051, 1050, 911, 1051, 1166, 1165, 1078, 1033, 1038, 943, 784, 569]
+##################################################
+(1024,) float32
+rep
+(1024,)    354335
+Name: count, dtype: int64
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 4702682
+Job ID: 5476473
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: gpu02
+Nodelist: gpu03
 Nodes: 1
-Cores per node: 32
-Job started at: 2026-06-17 19:09:46
-Job ended at:   2026-06-17 19:14:34
-Job Wall-clock time: 00:04:48
-CPU Utilized: 01:38:48
-CPU Efficiency: 64.32% of 02:33:36 core-walltime
-Memory Utilized: 7.32 GB
-Memory Efficiency: 11.43% of 64.00 GB
+Cores per node: 30
+Job started at: 2026-08-27 16:13:31
+Job ended at:   2026-08-27 16:25:18
+Job Wall-clock time: 00:11:47
+CPU Utilized: 01:22:47
+CPU Efficiency: 23.42% of 05:53:30 core-walltime
+Memory Utilized: 48.80 GB
+Memory Efficiency: 76.25% of 64.00 GB

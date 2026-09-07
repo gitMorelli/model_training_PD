@@ -4,14 +4,14 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/extract_representations.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=32              # Number of CPU cores per task
+#SBATCH --cpus-per-task=30              # Number of CPU cores per task
 #SBATCH --mem=64G                      # Job memory request
-#SBATCH --time=04:00:00                # Time limit hrs:min:sec
+#SBATCH --time=01:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #SBATCH --partition=visuq,gpgpuq
 #--gres=gpu:h100:1
-#SBATCH --gres=gpu:1
-#--gres=gpu:p40:1
+#--gres=gpu:1
+#SBATCH --gres=gpu:a100:1
 #--nodelist=gpu04
 #--gres=gpu:t4:1
 
@@ -22,6 +22,12 @@ ENV_PYTHON="/home/a_morelli/.conda/envs/torch_gpu/bin/python"
 
 # Add this line to resolve the libiomp5 conflict
 export KMP_DUPLICATE_LIB_OK=TRUE
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export PYTHONUNBUFFERED=1  
 
 # --- Execution ---
 # You can run the script from any location using its full path
@@ -32,5 +38,5 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 
 cd $HOME_DIR
 # --- Execution ---
-$ENV_PYTHON -m src.scripts.extract_and_store_representations \
-    --num_workers 30
+$ENV_PYTHON -m src.scripts.representation_extraction \
+    --num_workers 28

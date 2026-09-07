@@ -26,7 +26,8 @@ import gc
 import glob
 
 from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform, place_patches, get_grid_sample
-from src.utils.image_processing import extract_image_properties
+from src.utils.image_processing import debug_image_properties
+from src.utils.handwriting_features import extract_image_properties
 
 #Datasets and dataloaders for speed tests
 class InMemoryWdsDataset(torch.utils.data.Dataset):
@@ -874,11 +875,19 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 selected_transforms = [('original',None)] + selected_transforms
                 selected_modality_names = ([selected_modality_names[0].split('_')[0] + '_original']
                                            + selected_modality_names)
+            elif debug and feature_extraction==True: #for feature extraction i want only the original modality, no augmentation
+                selected_transforms = [('original',None)] 
+                selected_modality_names = ([selected_modality_names[0].split('_')[0] + '_original'])
 
             if num>0:
                 x_coords = [0] + sorted(list(grid[0, :] * rescale_factor[0])) + [img.width]
                 n_x = len(x_coords) - 1
                 y_coords = [0] + sorted(list(grid[1, :] * rescale_factor[1])) + [img.height]
+            else:
+                x_coords = [0, img.width]
+                n_x = 1
+                y_coords = [0, img.height]
+            
             #if i have a window modality i need to prepare some data
             n_elements_window = n_elements_window_dict.get(current_mode, 9)
             if num>0 and 'window' in [t[0] for t in selected_transforms]:
@@ -933,7 +942,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     img_view = T.Grayscale(num_output_channels=1)(img_view)
 
                 if transform_func is not None:
-                    if huggingface_transform:
+                    if huggingface_transform: 
                         img_tensor = transform_func(images=img_view, return_tensors="pt")['pixel_values'][0]
                     else:
                         img_tensor = transform_func(img_view)
@@ -949,7 +958,17 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     metadata['imputed'] = imputed
                     list_of_views.append(metadata)
                 elif debug and feature_extraction==True:
-                    metadata = extract_image_properties(img_tensor)
+                    metadata = extract_image_properties(img_view,
+                             x_coords,
+                             y_coords,
+                             threshold=128,
+                             ink_is_bright=True,
+                             use_otsu=False,
+                             min_ink_pixels=12,
+                             min_component_area=8,
+                             compute_slant=True,
+                             trend_keys=("bbox_height", "stroke_width_mean"),  #"ink_area", "fill_ratio"
+                             reductions=("mean", "std"))
                     list_of_views.append(metadata)
                 else:
                     list_of_views.append(img_tensor)
@@ -1548,7 +1567,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
 
 #pipelines
 def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, 
-                       SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None, cross_val=False):
+                       SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None, cross_val=False, one_only=False, persistent_workers=True):
     def worker_init_fn(worker_id):
         # Force OpenCV to use a single thread per DataLoader worker process
         cv2.setNumThreads(0)
@@ -1589,11 +1608,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         val_input   = SHARD_PATTERN_val
 
     train_dataset = prepare_PD_dataset(train_input, exclusion_set=exclusion_set,train_df=train_df, exp_params=exp_params, 
-                                       partial_batch=False, **common_kwargs)
-    val_dataset   = prepare_PD_dataset(val_input, exclusion_set=val_exclusion_set,train_df=train_df,exp_params=exp_params, 
-                                       partial_batch=True, **common_kwargs)
-    
-    val_workers = worker//2 
+                                       partial_batch=False, **common_kwargs) 
     train_loader = DataLoader(
         train_dataset, 
         num_workers=worker, 
@@ -1601,56 +1616,32 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
         pin_memory=False,
         worker_init_fn=worker_init_fn,
-        persistent_workers=True
+        persistent_workers=persistent_workers
     ) #add collate_fn=lambda x: x,  if you want to bypass thedefault converter (default converter converts numpy to tensors)
-    val_loader = DataLoader(
-        val_dataset, 
-        num_workers=val_workers, 
-        batch_size=None, 
-        prefetch_factor=min(2, prefetch_factor) if val_workers > 0 else None,
-        pin_memory=False, #creates a stall when true and variable size batches (eg custom collate)
-        worker_init_fn=worker_init_fn,
-        persistent_workers=True
-    )
+
+
+    if not one_only: #if i use this funtion for building a single dataloader for training, i don't need to build the validation dataloader
+        val_dataset   = prepare_PD_dataset(val_input, exclusion_set=val_exclusion_set,train_df=train_df,exp_params=exp_params, 
+                                        partial_batch=True, **common_kwargs)
+        
+        val_workers = worker//2
+
+        val_loader = DataLoader(
+            val_dataset, 
+            num_workers=val_workers, 
+            batch_size=None, 
+            prefetch_factor=min(2, prefetch_factor) if val_workers > 0 else None,
+            pin_memory=False, #creates a stall when true and variable size batches (eg custom collate)
+            worker_init_fn=worker_init_fn,
+            persistent_workers=persistent_workers
+        )
+    else:
+        val_loader = None
+        val_dataset = None
     return train_loader, val_loader, train_dataset, val_dataset
 ####################################################################################################################
 
 # Functions and datasets for extracting debug information
-
-def debug_image_properties(img_source):
-    #compute mean intensity
-    img = img_source.convert('L') #convert to grayscale
-    arr=np.array(img)
-    #i convert to float to avoid the values baing converted to torch tensors via the default_collate in the data loader
-    
-    #compute ink density
-    threshold = 128                                # pixels darker than this = ink
-
-    # cast once, in float64, to avoid uint8 overflow in the squared sum
-    arr_f = arr.astype(np.float64) / 255.0   # drop the /255.0 if you want 0-255 stats
-    
-
-    img_properties = {
-        'format': img_source.format, #img format theimage was loaded from
-        'num_channels_original': len(img_source.getbands()), #number of channels in the original image before conversion
-        'mode': img_source.mode, #the color mode (e.g., RGB, RGBA, L)
-        'size': img.size, #width, height
-        'width': img.size[0],
-        'height': img.size[1],
-        'memory_size_bytes': arr.nbytes,
-        #'area': img.size[0] * img.size[1],
-        #'ratio': img.size[0] / img.size[1] if img.size[1] != 0 else None, #aspect ratio
-        'ink_density': ink_density(arr,threshold), #fraction of pixels that are ink (binary threshold)
-        #'sharpness': sharpness(arr), #sharpness of the image
-        'is_uniform': is_uniform_image(img_source, tol=3),
-
-        # accumulators for dataset-level mean/std
-        'pixel_sum': float(arr_f.sum()),
-        'pixel_sq_sum': float((arr_f ** 2).sum()),
-        'num_pixels': int(arr_f.size),
-    }
-    return img_properties
-
 def explore_data(shard_pattern, load_in_memory=False, 
                                split_workers=True, batch_size=4):
     def create_df():

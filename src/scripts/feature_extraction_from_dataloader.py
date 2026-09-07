@@ -1,6 +1,8 @@
 import tarfile
 import time
 import io
+
+import psutil
 import torch
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset, DataLoader
@@ -31,6 +33,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import pickle
 import numpy as np
 import json
+import gc
 
 from src.utils.data_loading_utils import prepare_loaders_PD, prepare_exclusion_sets_PD
 from src.utils.data_loading_utils import explore_data, return_file_paths, load_grid_dict, prepare_test_exclusion_set
@@ -41,11 +44,14 @@ from src.utils.image_processing import get_augmentation_transform, get_transform
 from src.utils.training_utils import LitModel, set_automatic_hyperparameters
 from src.scripts.train_PD_model import get_input_modality
 
+proc = psutil.Process(os.getpid())
+
 
 params = {
     'selected_problem': "PD",#"PD", # "handedness"
+    'pre_training': False, #True if you want to use the pre-trained model on E3N dataset, False if you want to train from scratch
 
-    "data_modality": get_input_modality('window_view'), 
+    "data_modality": get_input_modality('window_view_minimal'), 
     "num_tiles": 3,
 
     'model': 'resnet18', 
@@ -55,6 +61,7 @@ params = {
     "apply_augmentation": 'random_crop_half',#'random_crop_half', #None, 
     "invert_color": True, #even if set to true it is ignored when debug == True
     "use_grid": True,
+    "to_grayscale": True,
 
     "seed": 42, 
     "balanced_data": False,
@@ -74,18 +81,19 @@ params = {
 
 
     #dataloader params
-    "batch_size": 2,
-    "prefetch_factor": 4,
+    "batch_size": 16,
+    "prefetch_factor": 2,
     "decode_approach": "pil",
     "load_in_memory": False,
     "split_workers": True,
 
     "debug": False,
     "feature_extraction": True, #this True forces the debug mode true
-    "add_to_existing": None, #None if you want to create a new feature extraction table, path if you want to append
+    "add_to_existing": None, #None if you want to create a new feature extraction table, path if you want to append (it will add columns)
 }
 
-params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths(params['problem'], params['grouped'], params['pre_training'])
+params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths(params['selected_problem'], 
+                                                                                                 params['grouped'], params['pre_training'])
 params = set_automatic_hyperparameters(params)
 
 if 'pil' not in params['custom_transform']:
@@ -108,40 +116,66 @@ CLASS_COL='diag_park_final1_quest'
 
 def main(params):
     args = get_args()
-
-    max_batches=300
-    train_loader, val_loader, test_loader = get_dataloader(args,params)
-
-    result_df_train = read_loader(train_loader, create_row, max_batches=max_batches) 
-    result_df_train['split'] = 'train'
-    result_df_val = read_loader(val_loader, create_row, max_batches=max_batches)
-    result_df_val['split'] = 'val'
-    result_df_test = read_loader(test_loader, create_row, max_batches=max_batches)
-    result_df_test['split'] = 'test'
-
-    df = pd.concat([result_df_train, result_df_val, result_df_test], ignore_index=True)
-
-    save_results(params)
-########## PD ################
-def get_dataloader(args,params):
-    worker = args.num_workers
-
+    max_batches = None
     grid_dict = load_grid_dict(params)
-
     transform = get_transforms(params, None)
-
-    #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
-    exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(params,verbose=VERBOSE,class_col=CLASS_COL)
-    test_exclusion_set, test_counts = prepare_test_exclusion_set(params,verbose=VERBOSE,class_col=CLASS_COL)
-
+    exclusion_set, val_exclusion_set, _ = prepare_exclusion_sets_PD(
+        params, verbose=VERBOSE, class_col=CLASS_COL)
+    test_exclusion_set, _ = prepare_test_exclusion_set(
+        params, verbose=VERBOSE, class_col=CLASS_COL)
     train_df = pd.read_parquet(params['list_of_ids_paths'])
 
-    train_loader,val_loader,_,_= prepare_loaders_PD(worker,params['prefetch_factor'],params, exclusion_set, val_exclusion_set,
-                                                        grid_dict, transform, SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=train_df)
-    test_loader,_,_,_= prepare_loaders_PD(worker,params['prefetch_factor'],params, test_exclusion_set, test_exclusion_set,
-                                                        grid_dict, transform, SHARD_PATTERN_test, SHARD_PATTERN_test, train_df=train_df)
+    common = dict(worker=args.num_workers,
+                  prefetch_factor=params['prefetch_factor'],
+                  exp_params=params, grid_dict=grid_dict,
+                  transform=transform, train_df=train_df, persistent_workers=False, one_only=True)
 
-    return train_loader, val_loader, test_loader
+    specs = {
+        'train': lambda: prepare_loaders_PD(
+            exclusion_set=exclusion_set, val_exclusion_set=val_exclusion_set,
+            SHARD_PATTERN_train=SHARD_PATTERN_train,
+            SHARD_PATTERN_val=SHARD_PATTERN_val, **common)[0],
+        'val':   lambda: prepare_loaders_PD(
+            exclusion_set=val_exclusion_set, val_exclusion_set=val_exclusion_set,
+            SHARD_PATTERN_train=SHARD_PATTERN_val,
+            SHARD_PATTERN_val=SHARD_PATTERN_val, **common)[0],
+        'test':  lambda: prepare_loaders_PD(
+            exclusion_set=test_exclusion_set, val_exclusion_set=test_exclusion_set,
+            SHARD_PATTERN_train=SHARD_PATTERN_test,
+            SHARD_PATTERN_val=SHARD_PATTERN_test, **common)[0],
+    }
+    '''
+    'val':   lambda: prepare_loaders_PD(
+            exclusion_set=val_exclusion_set, val_exclusion_set=val_exclusion_set,
+            SHARD_PATTERN_train=SHARD_PATTERN_val,
+            SHARD_PATTERN_val=SHARD_PATTERN_val, **common)[0],
+        'test':  lambda: prepare_loaders_PD(
+            exclusion_set=test_exclusion_set, val_exclusion_set=test_exclusion_set,
+            SHARD_PATTERN_train=SHARD_PATTERN_test,
+            SHARD_PATTERN_val=SHARD_PATTERN_test, **common)[0],
+    '''
+
+    frames = [_read_and_release(fn, create_row, max_batches, split)
+              for split, fn in specs.items()]
+    save_results(params, pd.concat(frames, ignore_index=True))
+########## PD ################
+def _read_and_release(make_loader, create_row, max_batches, split):
+    """Build a loader, read it, then fully tear down its workers."""
+    loader = make_loader()
+    try:
+        df = read_loader(loader, create_row, max_batches=max_batches)
+        df['split'] = split
+        return df
+    finally:
+        # the iterator owns the worker processes; drop it first
+        it = getattr(loader, "_iterator", None)
+        if it is not None:
+            loader._iterator = None
+            del it
+        del loader
+        gc.collect()
+
+
 
 def create_row(qs,sid, smodalities, smeta):
     row = {
@@ -158,12 +192,9 @@ def create_row(qs,sid, smodalities, smeta):
             return modality 
     for i, q in enumerate(qs):
         for modality, meta in zip(smodalities[i], smeta[i]):
-            if 'original' in modality:
-                row[f'q_{q}_width_{modality}'] = meta['width']
-                row[f'q_{q}_height_{modality}'] = meta['height']
-            row[f'q_{q}_InkDensity_{modality}'] = meta['ink_density'] #don't use underscores for the property name
-            #row[f'q_{q}_sharpness_{map_modality(modality)}'] = meta['sharpness']
-            #row[f'q_{q}_imputed_{modality}'] = meta['imputed'] #never imputed for any questionnaire -> irrelevant
+            #get the keys from meta and add them to the row with the prefix q_{q}_num_{modality}_
+            for key, value in meta.items():
+                row[f'q{q}_{modality}_{key}'] = value
     return row
 def read_loader(loader, create_row, slot_to_q=None, max_batches=None):
     list_of_rows = []
@@ -176,6 +207,9 @@ def read_loader(loader, create_row, slot_to_q=None, max_batches=None):
         slot_name = slot_to_q
     else:
         slot_name = lambda s: slot_to_q.get(s, f"{s + 1}")
+
+    #get time to process the train_loader
+    start_time = time.time()
 
     for batch in loader:
         # unpack, tolerating the 5- or 6-element variant
@@ -221,30 +255,39 @@ def read_loader(loader, create_row, slot_to_q=None, max_batches=None):
                 list_of_rows.append(row)
         if n_batch % 10 == 0:
             print(f"Processed {n_batch} batches, total rows collected: {len(list_of_rows)}")
-            print(f"Current counts per questionnaire: {counters}", flush=True)
+            print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
+            #print(f"Current counts per questionnaire: {counters}", flush=True)
+            print(f"Memory usage: {proc.memory_info().rss / 1e9:5.2f}GB", flush=True)
             print("#"*50)
         
         n_batch += 1
         if max_batches is not None and n_batch >= max_batches:
             break
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Processed {n_batch} batches in {elapsed_time:.2f} seconds, batches per second: {n_batch/elapsed_time:.2f}")
+    print(f"Final counts per questionnaire: {counters}", flush=True)
+    print("#"*50)
     df = pd.DataFrame(list_of_rows)
     return df
 
-def save_results(params):
+def save_results(params, df):
     if params['add_to_existing'] is not None:
         #append to existing file
         df_existing = pd.read_csv(params['add_to_existing'])
         df = pd.concat([df_existing, df], ignore_index=True)
     else:
         timestamp = time.strftime("%d%m%Y")
-        os.makedirs(SAVE_FOLDER_PATH, exist_ok=True)
-        save_name = f"statistics_{params['selected_problem']}_{timestamp}.csv"
-        save_path = os.path.join(SAVE_FOLDER_PATH, save_name)
+        save_folder = os.path.join(SAVE_FOLDER_PATH, timestamp)
+        os.makedirs(save_folder, exist_ok=True)
+        save_name = f"statistics_{params['selected_problem']}.csv"
+        save_path = os.path.join(save_folder, save_name)
         #save params to a json file
-        params_save_name = f"metadata_{params['selected_problem']}_{timestamp}.json"
-        json_save_path = os.path.join(SAVE_FOLDER_PATH, params_save_name)
+        params_save_name = f"metadata_{params['selected_problem']}.json"
+        json_save_path = os.path.join(save_folder, params_save_name)
         json.dump(params, open(json_save_path, 'w'), indent=4)
         df.to_csv(save_path, index=False)
+    return
 
 ########## HANDEDNESS ###########
 def get_args():

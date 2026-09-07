@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=train_on_representations_handedness
+#SBATCH --job-name=train_on_representations
 #SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/t_on_representations.out
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/t_on_representations.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=4              # Number of CPU cores per task
 #SBATCH --mem=20G                      # Job memory request
-#SBATCH --time=00:15:00                # Time limit hrs:min:sec
+#SBATCH --time=01:00:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
 #--partition=visuq,gpgpuq
 #--gres=gpu:1

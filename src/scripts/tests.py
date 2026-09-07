@@ -815,43 +815,12 @@ def debug_GRID_PATTERN_REMPLI_PATTERN():
             print(f"Questionnaire {i+1}: avail={avail}, grid_file_avail={grid_file_avail}")
 
 if __name__ == "__main__":
-    inspect_matched_data()
-    assert 1==0
-    path="/mnt/beegfs02/scratch/a_morelli/model_training/shards/pre_computed_lists_03_08_26.json"
-    pre_computed_lists = json.load(open(path, "r"))
-    print(f"Pre-computed lists loaded from {path}. Keys: {list(pre_computed_lists.keys())}")
-    id_list_grouped = pre_computed_lists['for_PD_grouped']['train']
-    print(f"Number of unique IDs in 'for_PD_grouped' train list: {len(id_list_grouped)}")
-    id_list = pre_computed_lists['for_PD']['train']
-    print(f"Number of unique IDs in 'for_PD' train list: {len(id_list)}")
-    print(f"First 5 unique IDs in 'for_PD' train list: {id_list[:5]}")
-    print(f"First 5 unique IDs in 'for_PD_grouped' train list: {id_list_grouped[:5]}")
-
-    assert 1==0
-
-    load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/fold_0_results.csv"
-    csv_data = pd.read_csv(load_path)
-    columns = csv_data.columns
-    for col in columns:
-        print(f"Column: {col}")
-    #i can drop the nans cause a timestep is na only if the grid_pattern was 1 and the rempli_pattern was 0 (which is unreliable)
-    csv_data = csv_data.dropna(subset=['case_dt'])
-
-    load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/PD_training_set_20_07_26.parquet"
-    metadata = pd.read_parquet(load_path)
-    columns = metadata.columns
-    for col in columns:
-        print(f"Column: {col}")
-    
-    #add the case_control, rempli_pattern, case_pattern, grid_pattern, case_grid_pattern columns to the nan_case_dt_rows dataframe by merging with the metadata dataframe on the unique_id column
-    csv_data = csv_data.merge(metadata[['unique_id', 'last_avail_q']], on='unique_id', how='left')
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-        print(f"csv_data after merging with metadata:\n{csv_data.head()}")
-    
-    filtered = (csv_data[csv_data["slot"] <= csv_data["last_avail_q"] - 1]
-         .sort_values("slot")
-         .groupby("unique_id", as_index=False)
-         .tail(1)
-         .sort_index())
-
-    
+    df = pd.read_csv("/home/a_morelli/models/model_training_logs/PD/feature_extraction/27082026/statistics_PD.csv")
+    columns = list(df.columns)
+    print(f"Number of columns in the dataframe: {len(columns)}")
+    print(f"Columns in the dataframe: {columns}")
+    #only count the columns that start with 'q1_text_original'
+    q1_text_original_columns = [col for col in columns if col.startswith('q1_')]
+    print(f"Number of columns that start with 'q1_text_original': {len(q1_text_original_columns)}")
+    for col in q1_text_original_columns:
+        print(f"Column: {col}")   

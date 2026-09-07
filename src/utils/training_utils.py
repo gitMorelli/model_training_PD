@@ -454,12 +454,14 @@ class ModelPDBase(L.LightningModule):
                  # ===== FRACTIONAL LOGGING: new args =====
                  val_check_interval=None,          # None -> epoch end; float in (0,1]; int -> every N batches
                  align_train_metrics_to_val=False,  # also emit windowed train metrics at each val point
-                 min_window_steps=50, iterable_train_dataset=True):             # don't emit a window shorter than this many optimizer steps
+                 min_window_steps=50, iterable_train_dataset=True,
+                 lora_tuning=False, lora_lr_decay=0.75):             # don't emit a window shorter than this many optimizer steps
         super().__init__()
         self.write_log = write_log
         self.model = model
         self.opt_groups = opt_groups
-
+        self.lora_tuning = lora_tuning
+        self.lora_lr_decay = lora_lr_decay
         self.num_classes = num_classes
         self.lr_backbone = lr_backbone
         self.lr_classifier_head = lr_classifier_head
@@ -837,14 +839,26 @@ class ModelPDBase(L.LightningModule):
 
     # ---- optimizers ---------------------------------------------------------------
     def configure_optimizers(self):
+        NO_DECAY_KEYS = (
+            "layer_scale",                   # convnext (torchvision), [C,1,1]
+            "gamma",                         # convnext under timm / original naming
+            "relative_position_bias_table",  # swin v1
+            "cpb_mlp",                       # swin v2 continuous position bias MLP
+            "logit_scale",                   # swin v2
+            "pos_embed", "pos_embedding", "position_embedding",
+            "cls_token", "class_token", "dist_token",
+        )
 
-        def split_decay(named_params):
-            """(decay, no_decay): exclude bias and 1-D (BatchNorm/LayerNorm) params from weight decay."""
+
+        def split_decay(named_params, extra_no_decay=()):
+            """(decay, no_decay): exclude biases, 1-D norm params, and known
+            scale/position-bias tensors from weight decay."""
             decay, no_decay = [], []
+            keys = NO_DECAY_KEYS + tuple(extra_no_decay)
             for name, p in named_params:
                 if not p.requires_grad:
                     continue
-                if p.ndim <= 1 or name.endswith(".bias"):
+                if p.ndim <= 1 or name.endswith(".bias") or any(k in name for k in keys):
                     no_decay.append(p)
                 else:
                     decay.append(p)
@@ -886,6 +900,16 @@ class ModelPDBase(L.LightningModule):
                     f"matched no optimization group and would silently not be "
                     f"trained: {leftover}"
                 )
+        elif self.lora_tuning:
+            from timm.optim import param_groups_layer_decay
+
+            param_groups = param_groups_layer_decay(
+                self.model,
+                weight_decay=self.weight_decay,
+                no_weight_decay_list=self.model.no_weight_decay(),
+                layer_decay=self.lora_lr_decay,
+            )
+            optimizer = torch.optim.AdamW(param_groups, lr=self.lr_backbone)
         else:
             backbone, head = [], []
             for name, param in self.model.named_parameters():
@@ -898,7 +922,8 @@ class ModelPDBase(L.LightningModule):
             add_group(backbone, self.lr_backbone, 'lr_backbone')
             add_group(head, self.lr_classifier_head, 'lr_head')
 
-        optimizer = optim.AdamW(param_groups)
+        if not self.lora_tuning:
+            optimizer = optim.AdamW(param_groups)
 
         if self.lr_scheduling == 'cosine':
             try:
@@ -1844,7 +1869,7 @@ def get_optimization_groups(model_name,exp_params):
     if exp_params['use_opt_groups'] == False:
         return None
     if 'resnet' in model_name:
-        decay = 0.9
+        decay = exp_params.get('lr_decay', 0.9)
         define_optimization_groups = [
             {'names': ['vision_model.conv1','vision_model.bn1'],'lr': exp_params['lr_backbone']*decay**4, 'lr_name': 'lr_stem'},
             {'names': ['layer1'],'lr': exp_params['lr_backbone']*decay**3, 'lr_name': 'lr_1'},
@@ -1862,10 +1887,57 @@ def get_optimization_groups(model_name,exp_params):
             {'names': ['head', 'projector'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
             {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_classifier'},
         ]
+    elif 'convnext' in model_name:
+        decay = exp_params.get('lr_decay', 0.8)
+        lrb = exp_params['lr_backbone']
+        define_optimization_groups = [
+            {'names': ['vision_model.features.0'], 'lr': lrb*decay**4, 'lr_name': 'lr_stem'},
+            {'names': ['vision_model.features.1'], 'lr': lrb*decay**3, 'lr_name': 'lr_1'},
+            {'names': ['vision_model.features.2', 'vision_model.features.3'], 'lr': lrb*decay**2, 'lr_name': 'lr_2'},
+            {'names': ['vision_model.features.4', 'vision_model.features.5'], 'lr': lrb*decay,    'lr_name': 'lr_3'},
+            {'names': ['vision_model.features.6', 'vision_model.features.7',
+                    'vision_model.final_norm'], 'lr': lrb, 'lr_name': 'lr_4'},
+            {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'}, #classifier here matches also vision_model.classifier, but we keep it separate for logging purposes
+            # but it is ok since if one name matches more than on elayer only the first instance counts
+        ]
+    elif 'efficientnet_v2' in model_name:
+        decay = exp_params.get('lr_decay', 0.8)
+        lrb = exp_params['lr_backbone']
+        p = 'vision_model.features.'
+
+        # _s has 6 stages, _m and _l have 7; the last entry is the final 1x1 conv
+        n_stages = 6 if '_v2_s' in model_name else 7
+        last = [f'{p}{i}' for i in range(6, n_stages + 2)]  # stage6 [, stage7] + final conv
+
+        define_optimization_groups = [
+            # stem + stage1 both run at /2, stage1 is stride 1
+            {'names': [f'{p}0', f'{p}1'],       'lr': lrb*decay**4, 'lr_name': 'lr_stem'},
+            {'names': [f'{p}2'],                'lr': lrb*decay**3, 'lr_name': 'lr_1'},   # /4
+            {'names': [f'{p}3'],                'lr': lrb*decay**2, 'lr_name': 'lr_2'},   # /8
+            {'names': [f'{p}4', f'{p}5'],       'lr': lrb*decay,    'lr_name': 'lr_3'},   # /16, stage5 is stride 1
+            {'names': last,                     'lr': lrb,          'lr_name': 'lr_4'},   # /32
+            {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
+        ]
+    elif 'swin' in model_name:
+        decay = exp_params.get('lr_decay', 0.8)
+        lrb = exp_params['lr_backbone']
+        p = 'vision_model.features.'
+        define_optimization_groups = [
+            {'names': [f'{p}0'],          'lr': lrb*decay**4, 'lr_name': 'lr_stem'},
+            {'names': [f'{p}1'],          'lr': lrb*decay**3, 'lr_name': 'lr_1'},
+            {'names': [f'{p}2', f'{p}3'], 'lr': lrb*decay**2, 'lr_name': 'lr_2'},
+            {'names': [f'{p}4', f'{p}5'], 'lr': lrb*decay,    'lr_name': 'lr_3'},
+            {'names': [f'{p}6', f'{p}7',
+                       'vision_model.final_norm'], 'lr': lrb, 'lr_name': 'lr_4'},
+            {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
+        ]
     return define_optimization_groups
 
 #Set hyperparameters / metadata
 def set_automatic_hyperparameters(exp_params):
+    if exp_params.get('lora_tuning', False):
+        exp_params['layers_to_unfreeze'] = ['classifier']
+        exp_params['use_opt_groups'] = False
     if exp_params.get('feature_extraction', False):
         exp_params['debug']=True
     if exp_params['grouped'] or exp_params['pre_training']:

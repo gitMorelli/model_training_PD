@@ -52,13 +52,13 @@ from src.scripts.train_PD_model import model_initialization
 
 experiment = "PD"#"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'resnet18'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='40'
-override_parameters=True
+version='15'
+override_parameters=False
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-44-013185-0.3887.ckpt"
+checkpoint_to_load=f"v_{version}/best-06-002051-0.3792.ckpt"
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f) 
