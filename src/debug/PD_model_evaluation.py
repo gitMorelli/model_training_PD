@@ -50,15 +50,24 @@ from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDC
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.scripts.train_PD_model import model_initialization
 
+def get_last_best_checkpoint(checkpoint_dir,version):
+    checkpoint_files = glob.glob(os.path.join(checkpoint_dir,f"v_{version}", "*best*.ckpt"))
+    checkpoint_to_load = max(checkpoint_files, key=os.path.getctime) if checkpoint_files else None
+    checkpoint_name = os.path.basename(checkpoint_to_load) if checkpoint_to_load else None
+    checkpoint_to_load=f"v_{version}/{checkpoint_name}" if checkpoint_name else None
+    print(f"Checkpoint to load: {checkpoint_name}", flush=True)
+    return checkpoint_to_load
+
 experiment = "PD"#"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='15'
+version='1'
 override_parameters=False
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
-checkpoint_to_load=f"v_{version}/best-06-002051-0.3792.ckpt"
+#get the most recent ckpt file with best in the name 
+checkpoint_to_load = get_last_best_checkpoint(CHECKPOINT_PATH,version)
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f) 
@@ -183,7 +192,6 @@ def main(exp_params):
             results_df = results_complete.copy()
     
     store_results(csv_data, results_df, ckpt_path,exp_params)
-
 
 def override_val_exclusion(train_df, val_exclusion_set, exp_params):
     if exp_params['pre_training']:

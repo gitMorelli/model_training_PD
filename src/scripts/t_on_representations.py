@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 import numpy as np
 from pathlib import Path
 import json
+import pickle
 
 from sklearn.metrics import classification_report
 from sklearn.pipeline import Pipeline
@@ -39,9 +40,12 @@ from sklearn.model_selection import KFold, cross_val_score, StratifiedKFold
 from src.utils.data_loading_utils import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
 from src.utils.data_loading_utils import prepare_exclusion_sets_PD, return_file_paths
-
+from src.utils.data_loading_utils import questionnaires_to_keep
+from src.debug.PD_model_evaluation import  analyze_results
 
 params = {
+    'save_dir_root': '/home/a_morelli/models/model_training_logs/PD/feature_extraction/trained_models',
+
     "type_of_repr": "feature", # representation, feature
     "problem": "PD",
     "class_col": 'diag_park_final1_quest',
@@ -58,7 +62,7 @@ params = {
     "selected_pipeline":None,
 
     #for representation
-    "representation_type": "concat", #concat, mod, mean
+    "representation_type": "mean", #concat, mod, mean
     "use_pca": False,
     "n_components": 50,
     "n_splits": 5,
@@ -67,7 +71,14 @@ params = {
     "balanced_data": False,
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     "balancing_factor": 3,
+
+    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'filter_modality' : 'digit_original', #'X_original' 'digit_original' 'text_original'
 }
+'''
+Notes
+q is from 1 to 13 in the reshaped df, same for the list_of_ids_paths
+'''
 params["source_path"] = os.path.join("/home/a_morelli/models/model_training_logs",params["problem"],
                                      f"{params['type_of_repr']}_extraction")  
 if params["type_of_repr"] == "representation":
@@ -80,7 +91,7 @@ params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = r
 VERBOSE = True
 
 def main():
-    args = get_args()
+    start = time.time()
 
     #splits = ["train", "val", "test"]
     
@@ -88,12 +99,217 @@ def main():
 
     df = balance_data(df, params)
 
+    time_taken = time.time() - start
+    print(f"----- > Time taken to load and balance the data: {time_taken:.2f} seconds", flush=True)
+
+    #keep only 100 unique subject_ids for testing in the train and 20 in the validation and test sets
+    '''train_subjects = df[df['split'] == 'train']['subject_id'].unique()[:100]
+    val_subjects = df[df['split'] == 'val']['subject_id'].unique()[:20]
+    df = df[df['subject_id'].isin(train_subjects) | df['subject_id'].isin(val_subjects)]'''
+
     if params["type_of_repr"] == "feature": #i save in the same format as the representation file -> subj_id,q,mo,rep -> i can use the same logic
-        df,_ = reshape_features(df, keep_cols=["split"])
+        df,properties = reshape_features(df, keep_cols=["split"])
+    
+    time_taken = time.time() - start
+    print(f"----- > Time taken to reshape the data: {time_taken:.2f} seconds", flush=True)
+    
+    
+    df = mask_features(df, params) #masking features for the representation
+
+    time_taken = time.time() - start
+    print(f"----- > Time taken to mask the features: {time_taken:.2f} seconds", flush=True)
 
     df = add_info_to_df(df, params) #adding the class_col to the df
 
-    process_representation(df, params)
+    print(f"Completed preprocessing", flush=True)
+
+    results_df = process_representation(df, params, verbose=VERBOSE)
+
+    all_probs, all_labels = results_df["probability_0"].to_numpy(), results_df["true_label"].to_numpy()
+
+    save_dir = get_save_path(params)
+
+
+    analyze_results(all_probs, all_labels, results_df, split="validation",
+                        pos_label=1, threshold=None, strategy="youden",
+                        target_recall=0.90, plot=True, out_dir_path=save_dir)
+
+    save_results(save_dir, params, results_df)
+
+
+def get_save_path(params):
+    save_dir_model = os.path.join(params['save_dir_root'], params['model'])
+    os.makedirs(save_dir_model, exist_ok=True)
+
+    #get the subfolders, they are in the form v_{number}, get the last one and increment it by 1
+    subfolders = [f for f in os.listdir(save_dir_model) if os.path.isdir(os.path.join(save_dir_model, f)) and f.startswith('v_')]
+    if subfolders:
+        last_folder = max(subfolders, key=lambda x: int(x.split('_')[1]))
+        new_folder = f"v_{int(last_folder.split('_')[1]) + 1}"
+    else:
+        new_folder = "v_1"
+
+    save_dir = os.path.join(save_dir_model, new_folder)
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    return save_dir
+
+def save_results(save_dir, params, results_df):
+    #save the params in a pkl file
+    params_path = os.path.join(save_dir, "params.pkl")
+    with open(params_path, "wb") as f:
+        pickle.dump(params, f)
+    print(f"Params saved to {params_path}")
+
+    #save the results in a csv file
+    results_path = os.path.join(save_dir, "results.csv")
+    results_df.to_csv(results_path, index=False)
+    print(f"Results saved to {results_path}")
+
+def mask_features(df_source, params):
+    original_data = pd.read_parquet(params['list_of_ids_paths'])
+    original_id_column = 'unique_id'
+
+    def mask_if_modality_missing(
+            long_df,
+            required_modality,
+            id_col="subject_id",
+            q_col="q",
+            modality_col="modality",
+            rep_col="rep",
+            inplace=False,
+            verbose=True,
+        ):
+            """
+            For each (subject, q): if `required_modality`'s row is missing (either
+            absent entirely, or present but all-NaN, e.g. from an earlier masking
+            step), NaN-out the rep of every OTHER modality for that same (subject, q).
+
+            Parameters
+            ----------
+            long_df : output of reshape_features (optionally already passed through
+                mask_dropped_questionnaires).
+            required_modality : the modality whose presence gates the others,
+                e.g. "digit_original".
+            inplace : if False (default), operate on a copy.
+
+            Returns
+            -------
+            long_df with `rep` replaced by all-NaN on every non-`required_modality`
+            row of a (subject, q) group where `required_modality` was missing.
+            """
+            if not inplace:
+                long_df = long_df.copy()
+
+            D = len(long_df[rep_col].iloc[0])
+
+            def _is_missing(rep):
+                arr = np.asarray(rep, dtype=float)
+                return arr.size == 0 or np.isnan(arr).all()
+
+            n_masked = 0
+            n_groups_gated = 0
+
+            for (subject_id, q), idx in long_df.groupby([id_col, q_col]).groups.items():
+                rows = long_df.loc[idx]
+                req_rows = rows[rows[modality_col] == required_modality]
+
+                # missing = no such row at all, or the row exists but rep is all-NaN
+                required_missing = req_rows.empty or req_rows[rep_col].map(_is_missing).all()
+
+                if required_missing:
+                    other_idx = rows.index[rows[modality_col] != required_modality]
+                    if len(other_idx):
+                        n_groups_gated += 1
+                        n_masked += len(other_idx)
+                        long_df.loc[other_idx, rep_col] = pd.Series(
+                            [np.full(D, np.nan) for _ in range(len(other_idx))],
+                            index=other_idx,
+                        )
+
+            if verbose:
+                print(f"masked {n_masked} rows across {n_groups_gated} (subject, q) "
+                    f"groups missing modality {required_modality!r}")
+
+            return long_df
+
+    def mask_dropped_questionnaires(
+        long_df,
+        get_questionnaires_to_keep,
+        id_col="subject_id",
+        q_col="q",
+        rep_col="rep",
+        inplace=False,
+        verbose=True,
+        **kwargs,
+    ):
+        """
+        NaN-out rep rows whose `q` is not in that subject's keep-list.
+
+        Parameters
+        ----------
+        long_df : output of reshape_features (one row per subject/q/modality,
+            `rep_col` holding a fixed-length float array per row).
+        get_questionnaires_to_keep : callable
+            get_questionnaires_to_keep(subject_id, **kwargs) -> iterable of q's to KEEP
+            for that subject. Anything else is set to NaN. `**kwargs` lets you
+            pass through whatever extra arguments this function needs; they are
+            forwarded unchanged on every call.
+        id_col, q_col, rep_col : column names, matching reshape_features's output.
+        inplace : if False (default), operate on a copy.
+
+        Returns
+        -------
+        long_df with `rep` replaced by an all-NaN vector (same length as before)
+        on every row whose q was not in that subject's keep-list.
+        """
+        if not inplace:
+            long_df = long_df.copy()
+
+        D = len(long_df[rep_col].iloc[0])
+        n_masked = 0
+
+        for subject_id, idx in long_df.groupby(id_col).groups.items():
+            
+            #get the arguments for the current subject
+            subject_row = original_data.loc[original_data[original_id_column] == subject_id]
+            questionnaire_info = {}
+            for q in range(1,14):
+                questionnaire_info[q] = {
+                    'case_dt_dateq': subject_row[f'case_dt_dateq{q}'].iloc[0],
+                }
+            last_q = subject_row['last_avail_q'].iloc[0]
+            censor_time = params['censor_time']
+            subject_images = [i for i in range(1,14) ] #placeholder, subject_images was used to check in the tar file
+            case_grid_pattern = subject_row['case_grid_pattern'].iloc[0]
+            rempli_seulq12 = subject_row['rempli_seulq12'].iloc[0]
+            
+            keep = set(get_questionnaires_to_keep(last_q, censor_time, questionnaire_info, original_data,subject_id,subject_images, 
+                                                  case_grid_pattern, rempli_seulq12))
+            rows = long_df.loc[idx]
+            drop_mask = ~rows[q_col].isin(keep)
+
+            if drop_mask.any():
+                drop_idx = rows.index[drop_mask]
+                n_masked += len(drop_idx)
+                # one fresh NaN array per row, so nothing shares a reference
+                long_df.loc[drop_idx, rep_col] = pd.Series(
+                    [np.full(D, np.nan) for _ in range(len(drop_idx))],
+                    index=drop_idx,
+                )
+
+        if verbose:
+            print(f"masked {n_masked}/{len(long_df)} rows "
+                f"({long_df.groupby(id_col).ngroups} subjects checked)")
+
+        return long_df
+    
+    df = df_source.copy()  # don't overwrite the original
+    df = mask_if_modality_missing(df, required_modality=params['filter_modality'], inplace=True)
+    df = mask_dropped_questionnaires(df, get_questionnaires_to_keep=questionnaires_to_keep, inplace=True)
+
+    return df
 
 def reshape_features(
     df,
@@ -126,6 +342,9 @@ def reshape_features(
     long_df : one row per (subject, q, modality)
     props   : the property names, in rep-array order. Keep this - it is the only
               thing that maps a rep index back to a feature name.
+    
+    Missing properties in a (q, modality) block become NaN slots in the rep array
+    Missing (q, modality) blocks become NaN rows in the long_df. 
     """
     import re
 
@@ -247,152 +466,139 @@ def add_info_to_df(df, params):
                   left_on=id_column_df, right_on=id_column_original, how='left')
     return df
 
-def process_representation(df, params):
+def process_representation(df, params, verbose=False):
     REPRESENTATION = params["representation_type"]  # "concat", "mod", "mean"
-    USE_PCA        = params["use_pca"]     # True -> add PCA before the ridge
-    N_COMPONENTS   = params["n_components"]        # only used when USE_PCA (capped at n_subjects - 1)
-    COMPARE_ALL    = params["compare_all"]      # score all 6 combinations instead of just the one above
-    
+    USE_PCA        = params["use_pca"]              # True -> add PCA before the model
+    N_COMPONENTS   = params["n_components"]         # only used when USE_PCA (capped at n_train - 1)
+    COMPARE_ALL    = params["compare_all"]          # run every representation instead of just the one above
+
     D    = df["rep"].iloc[0].shape[0]  # e.g. 1024 for CLIP
     SEED = params["seed"]
 
-    n_splits = params.get("n_splits", 5)  # for KFold CV; not used if COMPARE_ALL
-    # =============================================================================
-    
-    df = df[df['split'].isin(['train','val'])]  # i am discarding the test split for performing the crossval
-    
-    
+    # .copy() avoids SettingWithCopyWarning when adding the "key" column below
+    df = df[df["split"].isin(["train", "val"])].copy()
+
     # ----------------------------------------------------------------------------
     # STEP 1 - long df -> one feature row per subject
     # ----------------------------------------------------------------------------
-    
-    # Collapse the two grouping axes (13 q x 3 modality) into one label, e.g. "eeg_q7".
     df["key"] = df["modality"].astype(str) + "_q" + df["q"].astype(str)
-    
-    # Sorted -> deterministic column order, stable across reruns and at predict time.
+
     keys     = sorted(df["key"].unique())
     subjects = np.sort(df["subject_id"].unique())
-    
-    # drop_duplicates guards against two rows for the same (subject, key), which would
-    # make the index non-unique and break the reindex below.
+
     s = (df.drop_duplicates(["subject_id", "key"])
-        .set_index(["subject_id", "key"])["rep"])
-    
-    # Force onto the COMPLETE subject x key grid: missing combos become NaN rather
-    # than silently shortening a row and shifting every later feature by 1024.
+           .set_index(["subject_id", "key"])["rep"])
     s = s.reindex(pd.MultiIndex.from_product([subjects, keys]))
-    
+
     blocks = np.stack([
         np.asarray(r, dtype=float) if isinstance(r, (np.ndarray, list)) else np.full(D, np.nan)
         for r in s.values
     ])
-    Bl = blocks.reshape(len(subjects), len(keys), D)      # (n, n_keys, D) block view
+    Bl = blocks.reshape(len(subjects), len(keys), D)
     n  = len(subjects)
-    
-    # One target per subject, reordered to match the row order of the features.
-    y = (df.drop_duplicates("subject_id")
-        .set_index("subject_id")
-        .loc[subjects, params["class_col"]]
-        .to_numpy())
 
-    
+    subj_info = (df.drop_duplicates("subject_id")
+                   .set_index("subject_id")
+                   .loc[subjects])
+    y = subj_info[params["class_col"]].to_numpy()
+
+    # ---- NEW: one split per subject, aligned with the feature rows ----
+    # A subject appearing in both train and val would leak information.
+    n_splits_per_subj = df.groupby("subject_id")["split"].nunique()
+    leaky = n_splits_per_subj[n_splits_per_subj > 1].index.tolist()
+    if leaky:
+        raise ValueError(f"{len(leaky)} subjects appear in both train and val, e.g. {leaky[:5]}")
+
+    split_of_subj = subj_info["split"].to_numpy()
+    train_mask = split_of_subj == "train"
+    val_mask   = split_of_subj == "val"
+    n_train    = int(train_mask.sum())
+    print(f"train subjects: {n_train} | val subjects: {int(val_mask.sum())}")
+
     mod_of_key = np.array([k.rsplit("_q", 1)[0] for k in keys])
-    
-    with np.errstate(invalid="ignore"):                  # all-NaN blocks -> NaN, imputed later
+
+    with np.errstate(invalid="ignore"):
         FEATURES = {
-            # keep every block separately: most information, hardest to fit
             "concat": blocks.reshape(n, len(keys) * D),
-            # keep the modality distinction, pool over q
             "mod":    np.concatenate(
-                        [np.nanmean(Bl[:, mod_of_key == m, :], axis=1)
-                        for m in np.unique(mod_of_key)], axis=1),
-            # pool everything: fewest features, strongest prior
+                          [np.nanmean(Bl[:, mod_of_key == m, :], axis=1)
+                           for m in np.unique(mod_of_key)], axis=1),
             "mean":   np.nanmean(Bl, axis=1),
         }
-    
+
     print(f"{n} subjects | {len(keys)} keys")
     for k, v in FEATURES.items():
         print(f"  {k:7s} -> {v.shape[1]:6d} features")
-    
+
     ########## CHECKS ###############
-    # 1. Is y sane? Constant, near-constant, or a weird dtype all produce this.
-    print("Checks ---- >")
-    print(pd.Series(y).describe())
-    print(pd.Series(y).nunique(), "unique values")
+    if verbose:
+        print("Checks ---- >")
+        print(pd.Series(y).describe())
+        print(pd.Series(y).nunique(), "unique values")
 
-    # 2. Are the features actually varying across subjects?
-    X = FEATURES["mod"]
-    print("NaN fraction:", np.isnan(X).mean())
-    print("per-column std - min/median/max:",
-        np.nanstd(X, 0).min(), np.median(np.nanstd(X, 0)), np.nanstd(X, 0).max())
-    print("duplicate rows:", len(X) - len(np.unique(np.round(X, 6), axis=0)))
+        X = FEATURES["mod"]
+        print("NaN fraction:", np.isnan(X).mean())
+        print("per-column std - min/median/max:",
+              np.nanstd(X, 0).min(), np.median(np.nanstd(X, 0)), np.nanstd(X, 0).max())
+        print("duplicate rows:", len(X) - len(np.unique(np.round(X, 6), axis=0)))
 
-    # 3. Is y aligned with X? This is the classic silent failure.
-    chk = df.drop_duplicates("subject_id").set_index("subject_id").loc[subjects, params["class_col"]]
-    print("aligned:", np.array_equal(chk.to_numpy(), y), "| index match:", (chk.index == subjects).all())
+        chk = df.drop_duplicates("subject_id").set_index("subject_id").loc[subjects, params["class_col"]]
+        print("aligned:", np.array_equal(chk.to_numpy(), y), "| index match:", (chk.index == subjects).all())
 
-    # 4. Does ANY single feature correlate with the target at all?
-    from scipy.stats import pearsonr
-    r = np.array([pearsonr(X[:, j], y)[0] for j in range(0, X.shape[1], 8)])
-    print("max |r| over sampled features:", np.nanmax(np.abs(r)).round(4), flush=True)
+        from scipy.stats import pearsonr
+        r = np.array([pearsonr(X[:, j], y)[0] for j in range(0, X.shape[1], 8)])
+        print("max |r| over sampled features:", np.nanmax(np.abs(r)).round(4), flush=True)
     ##################################
-    
+
     # ----------------------------------------------------------------------------
-    # STEP 2 - pipeline + subject-level CV
+    # STEP 2 - pipeline, fit on train, predict on val
     # ----------------------------------------------------------------------------
-    
-    def build_pipe(use_pca=False, n_components=50):
-        steps = [SimpleImputer(strategy="mean"), StandardScaler()]
+    def build_pipe(use_pca=False, n_components=50, model_name="logreg", model_params=None):
+        model = get_sklearn_model(model_name, **(model_params or {}))
+
+        steps = [
+            ("impute", SimpleImputer(strategy="mean")),
+            ("scale", StandardScaler()),
+        ]
         if use_pca:
-            steps.append(PCA(n_components=min(n_components, n - 1), random_state=SEED))
-        steps.append(LogisticRegressionCV(
-            Cs=np.logspace(-4, 2, 20), penalty="l2", scoring="roc_auc",
-            max_iter=2000, class_weight="balanced", n_jobs=-1, random_state=SEED))
-        return make_pipeline(*steps)
-    
-    # One row = one subject, so plain KFold is leakage-free. Splitting the original
-    # long df would put the same subject on both sides of the split.
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
-    
-    
-    SCORING = "roc_auc"   # chance level = 0.5 (R2's zero-baseline no longer applies)
+            # PCA is fit on the training subjects only, so cap by n_train, not n
+            steps.append(("pca", PCA(n_components=min(n_components, n_train - 1),
+                                     random_state=SEED)))
+        steps.append((model_name, model))
+        return Pipeline(steps)
 
-    def score(rep, use_pca, verbose=True):
-        X  = FEATURES[rep]
-        sc = cross_val_score(build_pipe(use_pca), X, y, cv=cv, scoring=SCORING)
-        if verbose:
-            tag = f"pca{N_COMPONENTS}" if use_pca else "no-pca"
-            print(f"{rep:7s} {tag:7s}  auc = {sc.mean():6.4f} +/- {sc.std():.4f}")
-        return sc.mean()
+    def fit_predict(rep_name):
+        X = FEATURES[rep_name]
+        X_train, y_train = X[train_mask], y[train_mask]
+        X_val,   y_val   = X[val_mask],   y[val_mask]
 
+        pipeline = build_pipe(use_pca=USE_PCA, n_components=N_COMPONENTS,
+                              model_name=params["selected_model"],
+                              model_params=params["sklearn_model_parameters"])
+        pipeline.fit(X_train, y_train)
+
+        y_pred = pipeline.predict(X_val)
+
+        if hasattr(pipeline, "predict_proba"):
+            proba   = pipeline.predict_proba(X_val)
+            classes = list(pipeline.classes_)
+            # probability of class 0 if it exists, otherwise of the first class
+            col = classes.index(0) if 0 in classes else 0
+            prob_0 = proba[:, col]
+        else:
+            print(f"[{rep_name}] model has no predict_proba -> probability_0 set to NaN")
+            prob_0 = np.full(len(X_val), np.nan)
+
+        return pd.DataFrame({
+            "unique_id":       subjects[val_mask],
+            "true_label":      y_val,
+            "predicted_label": y_pred,
+            "probability_0":   prob_0,
+        })
 
     if COMPARE_ALL:
-        print("\n5-fold stratified CV, identical folds:")
-        results = {(r, p): score(r, p) for r in FEATURES for p in (False, True)}
-        REPRESENTATION, USE_PCA = max(results, key=results.get)
-        best = results[(REPRESENTATION, USE_PCA)]
-        print(f"\nbest: {REPRESENTATION} / pca={USE_PCA}  auc = {best:.4f}"
-            f"  ({best - 0.5:+.4f} over chance)")
-    else:
-        result = score(REPRESENTATION, USE_PCA)
-
-    # Empirical chance level. Should land at ~0.50 - anything clearly above it means
-    # the pipeline is leaking, and the score above is not trustworthy either.
-    perm = np.random.default_rng(SEED).permutation(y)
-    print("permuted labels:", cross_val_score(
-        build_pipe(USE_PCA), FEATURES[REPRESENTATION], perm, cv=cv, scoring=SCORING).mean().round(4))
-
-
-    # Refit on all data; the CV score above is the generalisation estimate.
-    pipe = build_pipe(USE_PCA).fit(FEATURES[REPRESENTATION], y)
-
-    # Sanity checks worth reading:
-    #   C at either edge of the Cs grid -> widen np.logspace
-    #   low explained variance          -> PCA is discarding too much
-    print("\nC:", pipe[-1].C_[0])          # C_ is an array (one entry per class)
-    if USE_PCA:
-        print("explained variance:",
-            pipe.named_steps["pca"].explained_variance_ratio_.sum().round(3))
+        return {rep: fit_predict(rep) for rep in FEATURES}
+    return fit_predict(REPRESENTATION)
 
 def get_args():
     import argparse

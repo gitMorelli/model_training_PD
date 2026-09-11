@@ -1183,7 +1183,7 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         transform = get_clip_vit_transforms(name, **kwargs) 
     elif name.startswith('swin'):
         model = get_swin(name, mode, pretrained, **kwargs)
-        transform = get_swin_transforms(name, **kwargs)
+        transform = get_swin_transforms(**kwargs)
     elif name == 'custom_cnn':
         model = CustomBinaryCNN() 
         input_size = kwargs.get('input_size', 224)

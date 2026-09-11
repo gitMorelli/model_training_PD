@@ -1042,7 +1042,7 @@ def keep_questionnaire(last_q,censor_time, questionnaire_info, questionnaire_num
 def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id,subject_images, case_grid_pattern, rempli_seulq12):
     '''take case_grid_pattern, the case_dt_q for each questionnaire, the training_df and the filtering modality to decide
     which questionnaires to sample for training
-    case_grid_pattern is between 1 and 13
+    case_grid_pattern is between 1 and 13 ,
     case_dt can be missing (NaN) or numeric (remember is for the case only)'''
     if train_df is None and censor_time != 'pre_diagnosis':
         raise ValueError("train_df must be provided for censor_time other than 'pre_diagnosis' ")

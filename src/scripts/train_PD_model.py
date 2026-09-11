@@ -124,7 +124,7 @@ exp_params = {
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model':'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
@@ -159,8 +159,8 @@ exp_params = {
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
     'lr_decay': 0.5, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
-    'lr_backbone': 1e-4,
-    'lr_classifier_head': 3e-4,
+    'lr_backbone': 1e-5,
+    'lr_classifier_head': 2e-5,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
     'num_epochs': 50,
@@ -168,10 +168,11 @@ exp_params = {
     'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
     'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
-    'weight_decay': 1e-2, #0.05 (swi) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
+    'weight_decay': 1e-5, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['all'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
+    'layers_to_unfreeze': ['all'],
+    #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
     'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
@@ -571,7 +572,9 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
     out=test_output(exp_params['input_size'], backbone, channels=exp_params['num_channels']) #test the output of the backbone to determine the number of features for the classification head
     in_features = out.shape[1]  
 
-    if exp_params['lora_tuning']:
+    lora_tuning = exp_params.get('lora_tuning', False)
+
+    if lora_tuning:
         cfg = LoraConfig(
             r=8, lora_alpha=16, lora_dropout=0.05, bias="none",
             target_modules=r"blocks\.\d+\.attn\.(qkv|proj)",   # regex, fullmatch
@@ -596,7 +599,7 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
     if val:
         return model, transform
     
-    unfreeze_layers(model,layer_names=exp_params['layers_to_unfreeze'], keep_lora = exp_params['lora_tuning'])
+    unfreeze_layers(model,layer_names=exp_params['layers_to_unfreeze'], keep_lora = lora_tuning)
 
     if verbose:
         write_log(f"Size of extracted representation: {in_features}") # <-- ADD THIS LINE

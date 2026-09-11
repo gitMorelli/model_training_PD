@@ -33,4 +33,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 
 cd $HOME_DIR
 # --- Execution ---
-$ENV_PYTHON -m src.scripts.t_on_representations 
+$ENV_PYTHON -u -m src.scripts.t_on_representations

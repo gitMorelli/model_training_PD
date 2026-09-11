@@ -815,6 +815,8 @@ def debug_GRID_PATTERN_REMPLI_PATTERN():
             print(f"Questionnaire {i+1}: avail={avail}, grid_file_avail={grid_file_avail}")
 
 if __name__ == "__main__":
+    inspect_columns()
+    assert 1==0
     df = pd.read_csv("/home/a_morelli/models/model_training_logs/PD/feature_extraction/27082026/statistics_PD.csv")
     columns = list(df.columns)
     print(f"Number of columns in the dataframe: {len(columns)}")
