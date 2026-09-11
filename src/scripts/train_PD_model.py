@@ -101,17 +101,17 @@ exp_params = {
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'pre_training': False,
+    'pre_training': True,
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': None, # ALL_SYNTHETIC_TRANSFORMS or None
+    'synthetic': ALL_SYNTHETIC_TRANSFORMS, # ALL_SYNTHETIC_TRANSFORMS or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
 
     #experiment parameters
-    'data_modality': get_input_modality('window_view_2'), #mixed_view, window_view
+    'data_modality': get_input_modality('window_view_minimal'), #mixed_view, window_view
     'num_tiles': 3,
     'use_grid': True,
-    'use_balanced_weights': True,
+    'use_balanced_weights': False,
     'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
     'balanced_data': False, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
@@ -120,19 +120,19 @@ exp_params = {
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
-    'model':'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model': "convnext_tiny",#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
     'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
     'norm_std': 'PD_window',
     'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
-    'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
-    'align_train_metrics_to_val': False,  
+    'val_check_interval': 0.3, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
+    'align_train_metrics_to_val': True,  
     'min_window_steps': 50,
     'model_parameters': {
         'd_model': 128, 
@@ -149,7 +149,7 @@ exp_params = {
     },
 
     #Transforms definitions
-    'custom_transform': None,#'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+    'custom_transform': 'pad_resize_normalize',#'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
@@ -158,17 +158,18 @@ exp_params = {
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
-    'lr_decay': 0.5, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
-    'lr_backbone': 1e-5,
-    'lr_classifier_head': 2e-5,
+    'lr_decay': 0.75, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
+    'lr_backbone': 1e-4,
+    'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 4,
-    'num_epochs': 50,
+    'batch_size': 16,
+    'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
+    'num_epochs': 15,
     'max_steps': -1, #N or -1
     'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
     'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
-    'weight_decay': 1e-5, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
+    'weight_decay': 0.05, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
     'layers_to_unfreeze': ['all'],

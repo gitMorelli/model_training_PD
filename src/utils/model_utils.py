@@ -1210,7 +1210,16 @@ def get_sklearn_model(name='logreg', **kwargs):
         C=kwargs.get('C',1.0)
         solver=kwargs.get('solver','lbfgs')
         max_iter=kwargs.get('max_iter',5000)
-        return LogisticRegression(max_iter=max_iter, random_state=42, penalty=penalty, C=C, solver=solver)
+        class_weight=kwargs.get('class_weight',None)
+        return LogisticRegression(max_iter=max_iter, random_state=42, penalty=penalty, C=C, solver=solver, class_weight=class_weight)
+    elif name=='logreg_cv':
+        from sklearn.linear_model import LogisticRegressionCV
+        penalty=kwargs.get('penalty','l2')
+        Cs=kwargs.get('Cs',10)
+        solver=kwargs.get('solver','lbfgs')
+        max_iter=kwargs.get('max_iter',5000)
+        class_weight=kwargs.get('class_weight',None)
+        return LogisticRegressionCV(max_iter=max_iter, random_state=42, penalty=penalty, Cs=Cs, solver=solver, class_weight=class_weight)
     elif name=='gbm':
         # Define the models
         from sklearn.ensemble import GradientBoostingClassifier
@@ -1224,22 +1233,26 @@ def get_sklearn_model(name='logreg', **kwargs):
         import lightgbm as lgb
         from lightgbm import early_stopping, log_evaluation
         return lgb.LGBMClassifier(
-            n_estimators=1000,
-            learning_rate=0.05,
-            max_depth=5,
-            num_leaves=20,
-            min_child_samples=30,#Minimum number of data samples per leaf
-            subsample=0.8, #Randomness in row 
-            colsample_bytree=0.8, #and feature sampling respectively.
-            reg_alpha=1.0, # L1 regularization
-            reg_lambda=1.0, # L2 regularization
+            n_estimators=kwargs.get('n_estimators', 100),
+            learning_rate=kwargs.get('learning_rate', 0.1),
+            max_depth=kwargs.get('max_depth', 3),
+            num_leaves=kwargs.get('num_leaves', 31), #Maximum number of leaves in one tree
+            min_child_samples=kwargs.get('min_child_samples', 20),#Minimum number of data samples per leaf
+            subsample=kwargs.get('subsample', 0.8), #Randomness in row 
+            colsample_bytree=kwargs.get('colsample_bytree', 0.8), #and feature sampling respectively.
+            reg_alpha=kwargs.get('reg_alpha', 1.0), # L1 regularization
+            reg_lambda=kwargs.get('reg_lambda', 1.0), # L2 regularization
             random_state=42,
             n_jobs=-1,
-            min_split_gain=0.01,  # Minimum gain to make a split
+            min_split_gain=kwargs.get('min_split_gain', 0.01),  # Minimum gain to make a split
+            class_weight=kwargs.get('class_weight', None)
         )
     elif name=='xgb':
         from xgboost import XGBClassifier
-        return XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+        return XGBClassifier(n_estimators=kwargs.get('n_estimators', 100), learning_rate=kwargs.get('learning_rate', 0.1), 
+                             max_depth=kwargs.get('max_depth', 3), random_state=42,
+                             scale_pos_weight=kwargs.get('scale_pos_weight', 1), eval_metric=kwargs.get('eval_metric', 'logloss'), 
+                             max_delta_step=kwargs.get('max_delta_step', 0), min_child_weight=kwargs.get('min_child_weight', 1))
     #rf = RandomForestClassifier(n_estimators=100, max_depth=None, random_state=42)
     elif name=='rf':
         from sklearn.ensemble import RandomForestClassifier

@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=24             # Number of CPU cores per task
 #SBATCH --mem=86G                      # Job memory request
-#SBATCH --time=08:00:00                # Time limit hrs:min:sec
+#SBATCH --time=24:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq

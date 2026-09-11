@@ -1900,6 +1900,17 @@ def get_optimization_groups(model_name,exp_params):
             {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'}, #classifier here matches also vision_model.classifier, but we keep it separate for logging purposes
             # but it is ok since if one name matches more than on elayer only the first instance counts
         ]
+        '''
+        recommended for pre-training: 
+        lr_backbone: 1e-4 , range: 5e-5 to 2e-4
+        lr_decay 0.75, 0.65 to 0.85
+        lr_classifier_head: 1e-3, range: 5 to 10xbackbone
+        weight_decay: 0.05, range: 0.02 to 0.1
+
+        These assume an effective batch of roughly 128 to 256. 
+        Learning rate scales roughly linearly with batch size, so halve lr_backbone if your batch is about 64, and so on.
+
+        '''
     elif 'efficientnet_v2' in model_name:
         decay = exp_params.get('lr_decay', 0.8)
         lrb = exp_params['lr_backbone']
@@ -1935,6 +1946,16 @@ def get_optimization_groups(model_name,exp_params):
 
 #Set hyperparameters / metadata
 def set_automatic_hyperparameters(exp_params):
+    scale_lr_with_batch = exp_params.get('scale_lr_with_batch', False)
+    if scale_lr_with_batch:
+        effective_batch_size = exp_params['batch_size']*exp_params.get('accumulate_grad_batches', 1)
+        ref_size = 256
+        exp_params['lr_backbone'] *= effective_batch_size / ref_size
+        exp_params['lr_classifier_head'] *= effective_batch_size / ref_size
+        msg = (f"Scaling learning rates with effective batch size {effective_batch_size} (base {ref_size}): "
+                f"lr_backbone={exp_params['lr_backbone']}, lr_classifier_head={exp_params['lr_classifier_head']}")
+        bar = "=" * 80
+        print(f"\n{bar}\n>>> [LR SCALING] {msg}\n{bar}\n", flush=True)
     if exp_params.get('lora_tuning', False):
         exp_params['layers_to_unfreeze'] = ['classifier']
         exp_params['use_opt_groups'] = False

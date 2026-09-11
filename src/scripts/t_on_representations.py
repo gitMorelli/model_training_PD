@@ -44,9 +44,9 @@ from src.utils.data_loading_utils import questionnaires_to_keep
 from src.debug.PD_model_evaluation import  analyze_results
 
 params = {
-    'save_dir_root': '/home/a_morelli/models/model_training_logs/PD/feature_extraction/trained_models',
 
     "type_of_repr": "feature", # representation, feature
+
     "problem": "PD",
     "class_col": 'diag_park_final1_quest',
     #To put for compatibility with code
@@ -57,12 +57,11 @@ params = {
     "loaded_timestamp": "27082026",
     "seed": 42,
 
-    "selected_model": "logreg",
-    "sklearn_model_parameters": {},
+    "selected_model": "lgbm",
     "selected_pipeline":None,
 
     #for representation
-    "representation_type": "mean", #concat, mod, mean
+    "representation_type": "concat", #concat, mod, mean
     "use_pca": False,
     "n_components": 50,
     "n_splits": 5,
@@ -72,15 +71,40 @@ params = {
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     "balancing_factor": 3,
 
+    'mask_features': True, #if True it will mask the features according to the logic in the function mask_features
     'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit_original', #'X_original' 'digit_original' 'text_original'
 }
+
+if params["selected_model"] == "logreg":
+    params["sklearn_model_parameters"] = {
+            #logreg
+            "class_weight": "balanced", #None, 'balanced', {0: 1, 1: 3}
+            "C": 1.0,
+            "max_iter": 2000,
+        }
+elif params["selected_model"] == "xgb":
+    params["sklearn_model_parameters"] = {
+            #xgb
+            "scale_pos_weight": 10, 
+            "eval_metric": "aucpr", #auc, logloss
+            "max_delta_step": 1, #or 1
+            "min_child_weight": 1
+
+        }
+elif params["selected_model"] == "lgbm":
+    params["sklearn_model_parameters"] = {
+            #lgbm
+            "class_weight": "balanced", #None, 'balanced', {0: 1, 1: 3}
+        }
+
 '''
 Notes
 q is from 1 to 13 in the reshaped df, same for the list_of_ids_paths
 '''
 params["source_path"] = os.path.join("/home/a_morelli/models/model_training_logs",params["problem"],
                                      f"{params['type_of_repr']}_extraction")  
+
 if params["type_of_repr"] == "representation":
     params["source_path"] = os.path.join(params["source_path"], params['model'])
 params["source_path"] = os.path.join(params["source_path"], params["loaded_timestamp"])
@@ -114,7 +138,8 @@ def main():
     print(f"----- > Time taken to reshape the data: {time_taken:.2f} seconds", flush=True)
     
     
-    df = mask_features(df, params) #masking features for the representation
+    if params["mask_features"]:
+        df = mask_features(df, params) #masking features for the representation
 
     time_taken = time.time() - start
     print(f"----- > Time taken to mask the features: {time_taken:.2f} seconds", flush=True)
@@ -123,9 +148,7 @@ def main():
 
     print(f"Completed preprocessing", flush=True)
 
-    results_df = process_representation(df, params, verbose=VERBOSE)
-
-    all_probs, all_labels = results_df["probability_0"].to_numpy(), results_df["true_label"].to_numpy()
+    results_df, all_probs, all_labels = process_representation(df, params, verbose=VERBOSE)
 
     save_dir = get_save_path(params)
 
@@ -138,7 +161,7 @@ def main():
 
 
 def get_save_path(params):
-    save_dir_model = os.path.join(params['save_dir_root'], params['model'])
+    save_dir_model = os.path.join(params['source_path'], 'trained_models', params['selected_model'])
     os.makedirs(save_dir_model, exist_ok=True)
 
     #get the subfolders, they are in the form v_{number}, get the last one and increment it by 1
@@ -169,146 +192,46 @@ def save_results(save_dir, params, results_df):
 
 def mask_features(df_source, params):
     original_data = pd.read_parquet(params['list_of_ids_paths'])
-    original_id_column = 'unique_id'
+    # O(1) per-subject lookup instead of a full scan each time
+    orig = (original_data.drop_duplicates('unique_id')
+                         .set_index('unique_id')
+                         .to_dict('index'))
 
-    def mask_if_modality_missing(
-            long_df,
-            required_modality,
-            id_col="subject_id",
-            q_col="q",
-            modality_col="modality",
-            rep_col="rep",
-            inplace=False,
-            verbose=True,
-        ):
-            """
-            For each (subject, q): if `required_modality`'s row is missing (either
-            absent entirely, or present but all-NaN, e.g. from an earlier masking
-            step), NaN-out the rep of every OTHER modality for that same (subject, q).
+    df = df_source.copy()
+    reps = np.stack(df['rep'].to_numpy()).astype(float)   # (N, D)
+    row_missing = np.isnan(reps).all(axis=1)
 
-            Parameters
-            ----------
-            long_df : output of reshape_features (optionally already passed through
-                mask_dropped_questionnaires).
-            required_modality : the modality whose presence gates the others,
-                e.g. "digit_original".
-            inplace : if False (default), operate on a copy.
+    # --- 1) modality gate, fully vectorized ---
+    is_req = (df['modality'] == params['filter_modality']).to_numpy()
+    req_present = (pd.Series(is_req & ~row_missing, index=df.index)
+                     .groupby([df['subject_id'], df['q']])
+                     .transform('any')
+                     .to_numpy())
+    gate_mask = ~req_present & ~is_req
 
-            Returns
-            -------
-            long_df with `rep` replaced by all-NaN on every non-`required_modality`
-            row of a (subject, q) group where `required_modality` was missing.
-            """
-            if not inplace:
-                long_df = long_df.copy()
+    # --- 2) questionnaire keep-list: loop only over subjects, no pandas inside ---
+    per_subject = dict(tuple(original_data.groupby('unique_id', sort=False)))
+    censor_time = params['censor_time']
+    subject_images = list(range(1, 14))
+    keep_set = set()
+    for sid in df['subject_id'].unique():
+        sub = per_subject[sid]          # tiny DataFrame, O(1) lookup
+        r = sub.iloc[0]                 # scalar fields come from the same slice
+        questionnaire_info = {q: {'case_dt_dateq': r[f'case_dt_dateq{q}']} for q in range(1, 14)}
+        keep = questionnaires_to_keep(r['last_avail_q'], censor_time, questionnaire_info,
+                                      sub, sid, subject_images,
+                                      r['case_grid_pattern'], r['rempli_seulq12'])
+        keep_set.update((sid, q) for q in keep)
 
-            D = len(long_df[rep_col].iloc[0])
+    kept = np.fromiter(((s, q) in keep_set for s, q in zip(df['subject_id'], df['q'])),
+                       dtype=bool, count=len(df))
 
-            def _is_missing(rep):
-                arr = np.asarray(rep, dtype=float)
-                return arr.size == 0 or np.isnan(arr).all()
-
-            n_masked = 0
-            n_groups_gated = 0
-
-            for (subject_id, q), idx in long_df.groupby([id_col, q_col]).groups.items():
-                rows = long_df.loc[idx]
-                req_rows = rows[rows[modality_col] == required_modality]
-
-                # missing = no such row at all, or the row exists but rep is all-NaN
-                required_missing = req_rows.empty or req_rows[rep_col].map(_is_missing).all()
-
-                if required_missing:
-                    other_idx = rows.index[rows[modality_col] != required_modality]
-                    if len(other_idx):
-                        n_groups_gated += 1
-                        n_masked += len(other_idx)
-                        long_df.loc[other_idx, rep_col] = pd.Series(
-                            [np.full(D, np.nan) for _ in range(len(other_idx))],
-                            index=other_idx,
-                        )
-
-            if verbose:
-                print(f"masked {n_masked} rows across {n_groups_gated} (subject, q) "
-                    f"groups missing modality {required_modality!r}")
-
-            return long_df
-
-    def mask_dropped_questionnaires(
-        long_df,
-        get_questionnaires_to_keep,
-        id_col="subject_id",
-        q_col="q",
-        rep_col="rep",
-        inplace=False,
-        verbose=True,
-        **kwargs,
-    ):
-        """
-        NaN-out rep rows whose `q` is not in that subject's keep-list.
-
-        Parameters
-        ----------
-        long_df : output of reshape_features (one row per subject/q/modality,
-            `rep_col` holding a fixed-length float array per row).
-        get_questionnaires_to_keep : callable
-            get_questionnaires_to_keep(subject_id, **kwargs) -> iterable of q's to KEEP
-            for that subject. Anything else is set to NaN. `**kwargs` lets you
-            pass through whatever extra arguments this function needs; they are
-            forwarded unchanged on every call.
-        id_col, q_col, rep_col : column names, matching reshape_features's output.
-        inplace : if False (default), operate on a copy.
-
-        Returns
-        -------
-        long_df with `rep` replaced by an all-NaN vector (same length as before)
-        on every row whose q was not in that subject's keep-list.
-        """
-        if not inplace:
-            long_df = long_df.copy()
-
-        D = len(long_df[rep_col].iloc[0])
-        n_masked = 0
-
-        for subject_id, idx in long_df.groupby(id_col).groups.items():
-            
-            #get the arguments for the current subject
-            subject_row = original_data.loc[original_data[original_id_column] == subject_id]
-            questionnaire_info = {}
-            for q in range(1,14):
-                questionnaire_info[q] = {
-                    'case_dt_dateq': subject_row[f'case_dt_dateq{q}'].iloc[0],
-                }
-            last_q = subject_row['last_avail_q'].iloc[0]
-            censor_time = params['censor_time']
-            subject_images = [i for i in range(1,14) ] #placeholder, subject_images was used to check in the tar file
-            case_grid_pattern = subject_row['case_grid_pattern'].iloc[0]
-            rempli_seulq12 = subject_row['rempli_seulq12'].iloc[0]
-            
-            keep = set(get_questionnaires_to_keep(last_q, censor_time, questionnaire_info, original_data,subject_id,subject_images, 
-                                                  case_grid_pattern, rempli_seulq12))
-            rows = long_df.loc[idx]
-            drop_mask = ~rows[q_col].isin(keep)
-
-            if drop_mask.any():
-                drop_idx = rows.index[drop_mask]
-                n_masked += len(drop_idx)
-                # one fresh NaN array per row, so nothing shares a reference
-                long_df.loc[drop_idx, rep_col] = pd.Series(
-                    [np.full(D, np.nan) for _ in range(len(drop_idx))],
-                    index=drop_idx,
-                )
-
-        if verbose:
-            print(f"masked {n_masked}/{len(long_df)} rows "
-                f"({long_df.groupby(id_col).ngroups} subjects checked)")
-
-        return long_df
-    
-    df = df_source.copy()  # don't overwrite the original
-    df = mask_if_modality_missing(df, required_modality=params['filter_modality'], inplace=True)
-    df = mask_dropped_questionnaires(df, get_questionnaires_to_keep=questionnaires_to_keep, inplace=True)
-
+    # --- apply both masks at once, write back once ---
+    final_mask = gate_mask | ~kept
+    print(f"gate masked {gate_mask.sum()}, keep-list masked {(~kept).sum()}, "
+          f"total {final_mask.sum()}/{len(df)}")
+    reps[final_mask] = np.nan
+    df['rep'] = list(reps)
     return df
 
 def reshape_features(
@@ -594,11 +517,16 @@ def process_representation(df, params, verbose=False):
             "true_label":      y_val,
             "predicted_label": y_pred,
             "probability_0":   prob_0,
+            "probability_1":   1 - prob_0,
         })
 
     if COMPARE_ALL:
         return {rep: fit_predict(rep) for rep in FEATURES}
-    return fit_predict(REPRESENTATION)
+    results_df = fit_predict(REPRESENTATION)
+    prob_0, all_labels = results_df["probability_0"].to_numpy(), results_df["true_label"].to_numpy()
+    prob_1 = results_df["probability_1"].to_numpy()
+    all_probs = np.stack([prob_0, prob_1], axis=1)
+    return results_df, all_probs, all_labels
 
 def get_args():
     import argparse
@@ -615,6 +543,12 @@ def load_file(params):
         df = pd.read_csv(os.path.join(params["source_path"], f"statistics_{params['problem']}.csv"))
     return df
 
+'''def questionnaires_to_keep_wrapper(r, censor_time, original_data, sid, subject_images):
+    questionnaire_info = {q: {'case_dt_dateq': r[f'case_dt_dateq{q}']} for q in range(1, 14)}
+    keep = questionnaires_to_keep(r['last_avail_q'], censor_time, questionnaire_info,
+                                  original_data, sid, subject_images,
+                                  r['case_grid_pattern'], r['rempli_seulq12'])
+    return keep'''
 
 if __name__ == "__main__":
     main()
