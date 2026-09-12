@@ -813,7 +813,9 @@ def _index_images(sample, grouped):
 def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                                    modality_string_list, original_modality_names,
                                    grid_dict, censor_time, filter_modality,
-                                   huggingface_transform, invert_color, debug, train_df, exp_params=None, is_synthetic = False):
+                                   huggingface_transform, invert_color, debug, train_df, 
+                                   exp_params=None, is_synthetic = False,
+                                   is_val=False):
     """Return a function that builds the full sequence for one subject.
 
     All the static configuration is captured in the closure, so the returned
@@ -894,11 +896,18 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 #count the number of window views you have in selected_transforms
                 n_window_views = sum(1 for t in selected_transforms if t[0] == 'window')
                 indices = [i for i in range(1, num + 1)]
-                sampled_windows_no_rep = random.sample(indices, len(indices))
+                if is_val:
+                    sampled_windows_no_rep = indices[:] #if i am in validation -> no randomicity
+                else:
+                    sampled_windows_no_rep = random.sample(indices, len(indices))
+                
                 remaining = n_elements_window * n_window_views - len(sampled_windows_no_rep)
                 if remaining > 0:
-                    sampled_windows = sampled_windows_no_rep + random.choices(indices, k=remaining)
-                    sampled_windows = random.sample(sampled_windows, len(sampled_windows))
+                    if is_val:
+                        sampled_windows = sampled_windows_no_rep + indices[:remaining]
+                    else:
+                        sampled_windows = sampled_windows_no_rep + random.choices(indices, k=remaining)
+                        sampled_windows = random.sample(sampled_windows, len(sampled_windows))
                 else:
                     sampled_windows = sampled_windows_no_rep[:n_elements_window * n_window_views]
                 count_windows = 0
@@ -1156,7 +1165,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                                            modality_string_list, original_modality_names,
                                            exclusion_set, exp_params=None,huggingface_transform=False,
                                            invert_color=False, grid_dict=None, censor_time='pre_diagnosis',
-                                           filter_modality='number_random', debug=False, train_df=None):
+                                           filter_modality='number_random', debug=False, train_df=None, is_val=False):
     #check if you have a column called 'synth_label' in the train_df
     if train_df is not None and 'synth_label' in train_df.columns:
         is_synthetic = True
@@ -1167,7 +1176,8 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
     build_sequence = _make_subject_sequence_builder(
         transform_func, augmentation_transform_list, modality_string_list,
         original_modality_names, grid_dict, censor_time, filter_modality,
-        huggingface_transform, invert_color, debug, train_df, exp_params=exp_params, is_synthetic=is_synthetic)
+        huggingface_transform, invert_color, debug, train_df, exp_params=exp_params, is_synthetic=is_synthetic,
+        is_val=is_val)
 
     def flatten_samples(src):
         for sample in src:
@@ -1211,11 +1221,12 @@ def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_tr
                                     modality_string_list, original_modality_names,
                                     exclusion_set, grid_dict, censor_time,
                                     filter_modality, exp_params=None,huggingface_transform=False,
-                                    invert_color=False, debug=False, train_df=None, **kw):
+                                    invert_color=False, debug=False, train_df=None, is_val=False, **kw):
     build_sequence = _make_subject_sequence_builder(
         transform_func, augmentation_transform_list, modality_string_list,
         original_modality_names, grid_dict, censor_time, filter_modality,
-        huggingface_transform, invert_color, debug, train_df,exp_params=exp_params)
+        huggingface_transform, invert_color, debug, train_df,exp_params=exp_params,
+        is_val=is_val)
 
     def flatten_groups(src):
         for sample in src:
@@ -1488,7 +1499,8 @@ def collate_groups_PD(batch_of_groups, debug=False):
 #------ Build dataset --------
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
                        huggingface_transform=False,augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None,
-                       censor_time='pre_diagnosis', filter_modality='digit', debug=False, grouped=False, train_df=None, exp_params=None, partial_batch=False):
+                       censor_time='pre_diagnosis', filter_modality='digit', debug=False, grouped=False, train_df=None, exp_params=None, 
+                       partial_batch=False, is_val=False):
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
@@ -1554,7 +1566,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                                     exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
                                     grid_dict=grid_dict, censor_time=censor_time,
                                     original_modality_names=modality, filter_modality=filter_modality, debug=debug, train_df=train_df,
-                                    exp_params=exp_params)) # This replaces .map() and .select()
+                                    exp_params=exp_params, is_val=is_val)) # This replaces .map() and .select()
                 .batched(batch_size,
                         collation_fn=partial(collate_fn, debug=debug),
                         partial=partial_batch)
@@ -1622,7 +1634,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
 
     if not one_only: #if i use this funtion for building a single dataloader for training, i don't need to build the validation dataloader
         val_dataset   = prepare_PD_dataset(val_input, exclusion_set=val_exclusion_set,train_df=train_df,exp_params=exp_params, 
-                                        partial_batch=True, **common_kwargs)
+                                        partial_batch=True, is_val=True, **common_kwargs)
         
         val_workers = worker//2
 

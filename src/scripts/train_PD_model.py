@@ -65,6 +65,9 @@ def pre_trained_weights(name):
     elif name == 'pre_trained_E3N_custom_window':
         out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_4',
                     'best-00-001708-0.3423.ckpt')
+    elif name == 'pre_trained_E3N_convnext_tiny_window_1':
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_1',
+                    'best-14-015884-0.0724.ckpt')
     '''os.path.join(
         '/home/a_morelli/models/model_training_logs/pre_trained_models/mnist',
         'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
@@ -101,14 +104,14 @@ exp_params = {
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'pre_training': True,
+    'pre_training': False,
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': ALL_SYNTHETIC_TRANSFORMS, # ALL_SYNTHETIC_TRANSFORMS or None
+    'synthetic': None, # ALL_SYNTHETIC_TRANSFORMS or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
 
 
     #experiment parameters
-    'data_modality': get_input_modality('window_view_minimal'), #mixed_view, window_view
+    'data_modality': get_input_modality('window_view'), #mixed_view, window_view
     'num_tiles': 3,
     'use_grid': True,
     'use_balanced_weights': False,
@@ -120,19 +123,19 @@ exp_params = {
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit', 
 
     #model definition
     'model': "convnext_tiny",#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
+    'custom_pre_trained_weights': pre_trained_weights('pre_trained_E3N_convnext_tiny_window_1'), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
     'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
     'norm_std': 'PD_window',
     'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
-    'val_check_interval': 0.3, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
-    'align_train_metrics_to_val': True,  
+    'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
+    'align_train_metrics_to_val': False,  
     'min_window_steps': 50,
     'model_parameters': {
         'd_model': 128, 
@@ -162,9 +165,9 @@ exp_params = {
     'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 16,
+    'batch_size': 4,
     'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
-    'num_epochs': 15,
+    'num_epochs': 50,
     'max_steps': -1, #N or -1
     'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
@@ -176,7 +179,7 @@ exp_params = {
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
-    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
     #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None
