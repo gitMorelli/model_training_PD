@@ -129,7 +129,8 @@ exp_params = {
     #model definition
     'model': "convnext_tiny",#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': pre_trained_weights('pre_trained_E3N_convnext_tiny_window_1'), #None, 'pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
+    'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
+    'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
     'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
     'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
     'norm_std': 'PD_window',
@@ -152,12 +153,12 @@ exp_params = {
     },
 
     #Transforms definitions
-    'custom_transform': 'pad_resize_normalize',#'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+    'custom_transform': None, #'pad_resize_normalize',#'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
-    'image_pixel_space_augmentations': PHOTO_ONLY, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
+    'image_pixel_space_augmentations': None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
 
     
     #Training params definition
@@ -600,7 +601,7 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
     
-    model = load_ln_checkpoint(model,exp_params['custom_pre_trained_weights'])
+    model = load_ln_checkpoint(model,exp_params['custom_pre_trained_weights'], load_full_model=exp_params['load_full_model'])
 
     if val:
         return model, transform

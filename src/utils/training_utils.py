@@ -1207,7 +1207,7 @@ class ModelPDClassification(ModelPDBase):
     # ---- prediction ------------------------------------------------------------
     def predict_step(self, batch, batch_idx):
         frames, seq_ids, slot_ids, lengths, labels, \
-            resizing_factors, subject_ids, modalities = batch
+            resizing_factors, subject_ids, modalities, *_ = batch
 
         outputs = self(frames, seq_ids, slot_ids, lengths)
         tok_logits, subj_logits = outputs if self.per_step else (None, outputs)
@@ -1356,7 +1356,7 @@ class ModelPDGrouped(ModelPDBase):
     # ---- loss + metrics ---------------------------------------------------
     def compute_loss_and_metrics(self, batch, stage):
         frames, seq_ids, slot_ids, lengths, labels, \
-            resized, subject_ids, modalities, group_ids = batch
+            resized, subject_ids, modalities, group_ids, *_ = batch
         bsz = labels.size(0)                          # subjects in batch
         n_groups = int(group_ids.max().item()) + 1
 
@@ -1433,7 +1433,7 @@ class ModelPDGrouped(ModelPDBase):
     # ---- prediction -------------------------------------------------------
     def predict_step(self, batch, batch_idx):
         frames, seq_ids, slot_ids, lengths, labels, \
-            resized, subject_ids, modalities, group_ids = batch
+            resized, subject_ids, modalities, group_ids , *_ = batch
 
         scores = self._subject_scores(self(frames, seq_ids, slot_ids, lengths))
 

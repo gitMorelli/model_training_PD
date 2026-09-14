@@ -1355,29 +1355,40 @@ def load_backbone_from_lightning_ckpt(backbone, ckpt_path):
     return backbone
 
 #Load from custom checkpoint
-def load_ln_checkpoint(full_model,custom_pre_trained_weights):
+def load_ln_checkpoint(full_model, custom_pre_trained_weights, load_full_model=False):
     if custom_pre_trained_weights is not None:
         checkpoint = torch.load(custom_pre_trained_weights, map_location=torch.device('cpu'))
-        state_dict = checkpoint['state_dict'] 
+        state_dict = checkpoint['state_dict']
         prefix = "model."  # set to "" if there's no wrapper prefix
-        backbone_weights = {
-            k[len(prefix):]: v
-            for k, v in state_dict.items()
-            if k[len(prefix):].startswith("vision_model.")
-        }
 
-        '''keys_to_remove = [k for k in stripped if k.startswith('fc.')]
-        print("Removing keys:", keys_to_remove)  # sanity check
-        for k in keys_to_remove:
-            stripped.pop(k)'''
-        
-        missing, unexpected = full_model.load_state_dict(backbone_weights, strict=False)
+        if load_full_model:
+            # Assume head also matches: load everything, just strip the prefix
+            weights_to_load = {
+                k[len(prefix):]: v
+                for k, v in state_dict.items()
+                if k.startswith(prefix)
+            }
+        else:
+            # Only load backbone weights
+            weights_to_load = {
+                k[len(prefix):]: v
+                for k, v in state_dict.items()
+                if k[len(prefix):].startswith("vision_model.")
+            }
+
+        missing, unexpected = full_model.load_state_dict(weights_to_load, strict=False)
 
         assert not unexpected, f"Unexpected keys: {unexpected}"
-        assert all(not k.startswith("vision_model.") for k in missing), \
-            f"Some backbone weights didn't load: {[k for k in missing if k.startswith('vision_model.')]}"
 
-        print(f"Loaded weights into the backbone from {custom_pre_trained_weights}.")
+        if load_full_model:
+            assert not missing, f"Some weights didn't load: {missing}"
+        else:
+            assert all(not k.startswith("vision_model.") for k in missing), \
+                f"Some backbone weights didn't load: {[k for k in missing if k.startswith('vision_model.')]}"
+
+        scope = "full model" if load_full_model else "backbone"
+        print(f"Loaded weights into the {scope} from {custom_pre_trained_weights}.")
+
     return full_model
 
 #Multiple instance learning modules

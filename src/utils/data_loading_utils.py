@@ -811,6 +811,47 @@ def _index_images(sample, grouped):
             pool.setdefault(q_num, {})[mod_name] = value
     return pool
 
+def get_properties(sid,train_df,params, q_to_keep):
+    """Get the properties for a specific step of a subject from the training DataFrame.
+    if selected_properties is None -> we don't use covariates in trainig
+    if only per_step or global is None -> the corresponding property list will be empty
+
+    local properties is a tensor of shape T_i,n (T_i number of questionnaires for subject i, n number of properties extracted per step)
+    global  properties is a tensor of shape m (m number of properties extracted globally for the subject)
+    """
+    selected_properties = params.get('selected_properties', None)
+    if selected_properties is None:
+        return None, None
+    global_properties = []
+    local_properties = []
+    row = train_df[train_df['unique_id'] == sid].iloc[0]
+    if selected_properties['global'] is not None:
+        for prop in selected_properties['global']: 
+            global_properties.append(row[prop])
+            '''
+            note available global properties
+            Column: etudegp
+            Column: profq2
+            Column: lateralite
+            Column: relative_age
+            '''
+    if selected_properties['per_step'] is not None:
+        for q in q_to_keep:
+            step_properties = []
+            for prop in selected_properties['per_step']:
+                #substitute the '*' with q in prop
+                property_name = prop.replace('*', str(q))
+                step_properties.append(row[property_name])
+            local_properties.append(torch.tensor(step_properties, dtype=torch.float32))
+            '''
+            note available per-step properties
+            Column: case_dt_dateq* -> case_dt_dateq1, case_dt_dateq2, ..
+            ''' 
+    #transform the properties to torch tensors
+    global_properties = torch.tensor(global_properties, dtype=torch.float32) if global_properties else torch.tensor([], dtype=torch.float32)
+    local_properties = torch.stack(local_properties) if local_properties else torch.tensor([], dtype=torch.float32)
+    return global_properties, local_properties
+
 def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                                    modality_string_list, original_modality_names,
                                    grid_dict, censor_time, filter_modality,
@@ -1020,6 +1061,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         questionnaires = []  # per-frame metadata
         resized_list = []
         modalities = []
+        global_properties = []
+        local_properties = []
 
         q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id, subject_images, case_grid_pattern, rempli_seulq12)
 
@@ -1045,12 +1088,13 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             questionnaires.append(X)
             resized_list.append(rescale_factor)
             modalities.append(names)
+        global_properties, local_properties = get_properties(subject_id,train_df,exp_params, questionnaires)
 
         if not frames:
             return None
 
         sequence = frames if debug else torch.stack(frames, dim=0)  # (T_i, n_views, C, H, W)
-        return sequence, questionnaires, modalities, resized_list
+        return sequence, questionnaires, modalities, resized_list, global_properties, local_properties
 
     return build_subject_sequence
 
@@ -1229,8 +1273,8 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
             if result is None:
                 continue
 
-            sequence, questionnaires, modalities, resized_list = result
-            yield sequence, label, subject_id, questionnaires, modalities, resized_list
+            sequence, questionnaires, modalities, resized_list, global_properties, local_properties = result
+            yield sequence, label, subject_id, questionnaires, modalities, resized_list, global_properties, local_properties
 
     return flatten_samples
 
@@ -1271,7 +1315,7 @@ def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_tr
                                         image_pool.get(subject_id, {}),meta['case_grid_pattern'], rempli_seulq12)
                 if result is None:
                     continue
-                sequence, questionnaires, modalities, resized = result
+                sequence, questionnaires, modalities, resized, _, _ = result
                 label = torch.tensor(meta["label"], dtype=torch.long)
                 group.append((sequence, label, subject_id,
                               questionnaires, modalities, resized))
@@ -1439,59 +1483,85 @@ def collate_variable_sequences_PD_grouped(samples, debug=False):
  
     return (*base, group_ids, torch.tensor(group_seq_ids))
 
-def _collate_subject_level(sequences, labels, subject_ids, questionnaires,
-                           modalities_list, resized_list, debug=False):
-    """Shared core: takes per-subject lists and builds the flat batch.
- 
-    sequences      : list of (T_i, k, C, H, W) tensors (or nested lists if debug)
-    labels         : tensor (N,)
-    subject_ids    : list of N strings
-    questionnaires : list of N lists of questionnaire numbers
-    modalities_list: list of N lists (per timestep, list of modality names)
-    resized_list   : list of N lists of rescale factors
-    """
-    if debug:
-        lengths = torch.tensor([len(seq) for seq in sequences])
-    else:
-        lengths = torch.tensor([seq.shape[0] for seq in sequences])
- 
-    seq_ids, slot_ids = [], []
-    resized, modalities = [], []
-    if debug:
-        frames = []
-    else:
-        frames = torch.cat(sequences, dim=0)               # (sum T_i, k, C, H, W)
- 
-    for b, qs in enumerate(questionnaires):
-        for i, q in enumerate(qs):
-            seq_ids.append(b)
-            slot_ids.append(int(q) - 1)                    # slots 0..12
-            resized.append(resized_list[b][i])
-            modalities.append(modalities_list[b][i])
-            if debug:
-                frames.append(sequences[b][i])
-    
-    # if the batch has three subjects then frames, seq_ids, slot_ids have dimension sum(T_i) where T_i is the number of time-steps for subject i
-    return (frames,  # list of dicts if debug
-            torch.tensor(seq_ids), #which subject the frame is from
-            torch.tensor(slot_ids), #which questionnaire/time-step if the frame
-            lengths, 
-            labels,
-            resized,
-            subject_ids,
-            modalities)
- 
+from typing import NamedTuple, Optional, List
+
+class SubjectBatch(NamedTuple):
+    frames: torch.Tensor            # or list of dicts if debug
+    seq_ids: torch.Tensor
+    slot_ids: torch.Tensor
+    lengths: torch.Tensor
+    labels: torch.Tensor
+    resized: list
+    subject_ids: list
+    modalities: list
+    global_properties: Optional[torch.Tensor] = None   # (N, m1)
+    local_properties: Optional[torch.Tensor] = None     # (sum T_i, m2)
+OPTIONAL_FIELD_SPECS = {
+    "global_properties": (6, lambda vals: torch.stack(vals, dim=0)),   # (N, m1)
+    "local_properties":  (7, lambda vals: torch.cat(vals, dim=0)),     # (sum T_i, m2)
+}
+
+
+def _maybe_aggregate(samples, field_name):
+    idx, agg = OPTIONAL_FIELD_SPECS[field_name]
+    if all(len(s) > idx and s[idx] is not None for s in samples):
+        return agg([s[idx] for s in samples])
+    return None
+
+
 def collate_variable_sequences_PD(samples, debug=False):
-    """Collate for the flat (per-subject) loader. Same output as before."""
-    sequences       = [s[0] for s in samples]              # each (T_i, k, C, H, W)
+    sequences       = [s[0] for s in samples]
     labels          = torch.stack([s[1] for s in samples])
     subject_ids     = [s[2] for s in samples]
     questionnaires  = [s[3] for s in samples]
     modalities_list = [s[4] for s in samples]
     resized_list    = [s[5] for s in samples]
- 
+
+    global_properties = _maybe_aggregate(samples, "global_properties") #if global_properties is None for any sample, it will return None
+    local_properties  = _maybe_aggregate(samples, "local_properties")
+
     return _collate_subject_level(sequences, labels, subject_ids, questionnaires,
-                                  modalities_list, resized_list, debug=debug)
+                                   modalities_list, resized_list, debug=debug,
+                                   global_properties=global_properties,
+                                   local_properties=local_properties)
+
+def _collate_subject_level(sequences, labels, subject_ids, questionnaires,
+                            modalities_list, resized_list, debug=False,
+                            global_properties=None, local_properties=None):
+    if debug:
+        lengths = torch.tensor([len(seq) for seq in sequences])
+    else:
+        lengths = torch.tensor([seq.shape[0] for seq in sequences])
+
+    seq_ids, slot_ids = [], []
+    resized, modalities = [], []
+    if debug:
+        frames = []
+    else:
+        frames = torch.cat(sequences, dim=0)
+
+    for b, qs in enumerate(questionnaires):
+        for i, q in enumerate(qs):
+            seq_ids.append(b)
+            slot_ids.append(int(q) - 1)
+            resized.append(resized_list[b][i])
+            modalities.append(modalities_list[b][i])
+            if debug:
+                frames.append(sequences[b][i])
+
+    return SubjectBatch(
+        frames=frames,
+        seq_ids=torch.tensor(seq_ids),
+        slot_ids=torch.tensor(slot_ids),
+        lengths=lengths,
+        labels=labels,
+        resized=resized,
+        subject_ids=subject_ids,
+        modalities=modalities,
+        global_properties=global_properties,
+        local_properties=local_properties,
+    )
+
 
 def collate_groups_PD(batch_of_groups, debug=False):
     sequences, labels, subject_ids = [], [], []

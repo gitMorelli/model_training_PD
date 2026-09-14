@@ -5,7 +5,7 @@ Column: case_control
 Column: last_avail_q
 Column: rempli_pattern
 Column: case_pattern
-Column: grid_pattern
+Column: grid_pattern 
 Column: case_grid_pattern
 Column: diag_park_final1_quest
 Column: at_least_warning

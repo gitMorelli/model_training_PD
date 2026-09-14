@@ -331,7 +331,7 @@ def debug_images_PD_with_meta_old(mean, std, batch, out_dir,
 
     def debug_show_batch(batch, out_dir):
         frames, seq_ids, slot_ids, lengths, labels, \
-            resizing_factors, subject_ids, modalities = batch
+            resizing_factors, subject_ids, modalities , *_ = batch
         seq_ids, slot_ids = seq_ids.cpu(), slot_ids.cpu()
         B = lengths.size(0)
 
@@ -724,7 +724,7 @@ def _denorm_to_hwc(img, mean, std):
 def iter_subjects(batch):
     """Yield one dict per subject from a single collated batch."""
     (frames, seq_ids, slot_ids, lengths, labels,
-     resizing_factors, subject_ids, modalities) = batch
+     resizing_factors, subject_ids, modalities, *_) = batch
     seq_ids, slot_ids = seq_ids.cpu(), slot_ids.cpu()
     B = lengths.size(0)
     for b in range(B):
