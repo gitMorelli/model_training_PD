@@ -41,7 +41,7 @@ from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader, get_optimization_groups
 from src.utils.training_utils import set_automatic_hyperparameters, MemMonitor, BatchTimer, ThroughputMonitor, WriteProbe
-
+from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
 
 def pre_trained_weights(name):
     if name is None:
@@ -157,6 +157,8 @@ exp_params = {
     #in the code based on the view name
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
+    'image_pixel_space_augmentations': PHOTO_ONLY, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
+
     
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
@@ -175,7 +177,7 @@ exp_params = {
     'weight_decay': 0.05, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['all'],
+    'layers_to_unfreeze': ['classifier'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,

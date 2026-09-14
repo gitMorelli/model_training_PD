@@ -28,6 +28,7 @@ import glob
 from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform, place_patches, get_grid_sample
 from src.utils.image_processing import debug_image_properties
 from src.utils.handwriting_features import extract_image_properties
+from src.utils.image_processing import augment_frame
 
 #Datasets and dataloaders for speed tests
 class InMemoryWdsDataset(torch.utils.data.Dataset):
@@ -834,6 +835,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         'X': 16
     }
 
+    rng = np.random.default_rng() #for the random sampling of pixel_level augmentations
+
     def build_questionnaire_views(X, images_for_q, original_id, questionnaire_info, synth_transform=None):
         """Build the list of augmented views for one questionnaire."""
         list_of_views = []
@@ -904,7 +907,9 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 remaining = n_elements_window * n_window_views - len(sampled_windows_no_rep)
                 if remaining > 0:
                     if is_val:
-                        sampled_windows = sampled_windows_no_rep + indices[:remaining]
+                        sampled_windows = sampled_windows_no_rep[:]
+                        for i in range(remaining):
+                            sampled_windows.append(indices[i % len(indices)])
                     else:
                         sampled_windows = sampled_windows_no_rep + random.choices(indices, k=remaining)
                         sampled_windows = random.sample(sampled_windows, len(sampled_windows))
@@ -935,7 +940,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                         patches=[]
                         for idx in this_window_indexes:
                             patch = get_grid_sample(x_coords, y_coords, img, idx, n_x)
-                            patches.append(patch)
+                            patches.append(patch) 
                         img_view = place_patches(patches, size, 255)
                     img_view = augmentation_transform[1](img_view)  # apply the callable transform
                 elif augmentation_transform[0] is None:
@@ -943,6 +948,18 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 else:
                     # a callable transform
                     img_view = augmentation_transform[1](img)
+                
+                pixel_space_augmentations=exp_params.get('image_pixel_space_augmentations', None)
+                if (pixel_space_augmentations is not None) and (not is_val): #apply augmentation in pixel space (only during training)
+                    sigma = 0.0
+                    img_view, sigma = augment_frame(img_view, rng, pixel_space_augmentations)
+                    #sigma has no effect, i should add it as gaussian noise after to_tensor and before normalization
+                    '''
+                    t = TF.to_tensor(f)
+                    if sigma:
+                        t = (t + torch.randn_like(t) * sigma).clamp(0, 1)
+                    out.append(TF.normalize(t, self.mean, self.std))
+                    ''' 
 
                 if invert_color:
                     img_view = ImageOps.invert(img_view)

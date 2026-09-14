@@ -1178,6 +1178,9 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
     elif name.startswith('efficientnet_v2'):
         model = get_efficientnet_v2(name, mode, pretrained, **kwargs)
         transform = get_efficientnet_v2_transforms(**kwargs)
+    elif name.startswith('vit'):
+        model = get_vit(name, mode, pretrained, **kwargs)
+        transform = get_vit_transforms(**kwargs)
     elif name.startswith('clip-vit'):
         model = get_clip_vit(name, **kwargs)
         transform = get_clip_vit_transforms(name, **kwargs) 

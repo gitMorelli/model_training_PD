@@ -17,6 +17,7 @@ import random
 import cv2
 import numpy as np
 from PIL import Image
+from PIL import ImageDraw, ImageEnhance
 
 # ------------ Feature extraction -------------------
 def debug_image_properties(img_source):
@@ -722,6 +723,131 @@ def get_mu_std(exp_params,verbose=False):
         
     return mu, std
 
+#---------- Image level data augmentations -----------------------------
+def _lut(fn):
+    return [min(255, max(0, int(round(fn(v))))) for v in range(256)]
+
+
+def estimate_paper(img, q=0.90):
+    """High quantile of grayscale = paper level. Dark ink on light paper."""
+    hist = np.asarray(img.convert("L").histogram(), dtype=np.float64)
+    cdf = np.cumsum(hist) / hist.sum()
+    return float(np.searchsorted(cdf, q))
+
+
+def procedural_paper(size, rng, bands):
+    W, H = size
+    base = rng.uniform(0.82, 0.98) * 255
+    small = rng.random((8, 8)).astype(np.float32)
+    shade = np.asarray(Image.fromarray(small * 255).resize((W, H), Image.BICUBIC),
+                       dtype=np.float32)
+    shade = (shade - shade.mean()) * 0.06
+    grain = rng.normal(0, 0.015 * 255, size=(H, W)).astype(np.float32)
+    paper = np.clip(base + shade + grain, 77, 255)
+    if bands == 1:
+        return paper[..., None]
+    tint = 1.0 - rng.random((bands,)) * 0.04
+    return paper[..., None] * tint[None, None, :]
+
+def _fires(p, rng):
+    """None → disabled, no RNG consumed. Otherwise draw as usual."""
+    return p is not None and rng.random() < p
+
+
+def augment_frame(img, rng, cfg):
+    """One independent draw per frame — models a distinct acquisition.
+    Any cfg probability set to None disables that transform outright."""
+    bands = len(img.getbands())
+    W, H = img.size
+    paper = estimate_paper(img)
+
+    # --- background / medium substitution -----------------------------
+    if _fires(cfg.get("p_bg"), rng):
+        arr = np.asarray(img, dtype=np.float32)
+        if arr.ndim == 2:
+            arr = arr[..., None]
+        gray = arr.mean(axis=2, keepdims=True)
+        alpha = np.clip((paper - gray) / max(paper, 1.0), 0.0, 1.0)
+        bg = procedural_paper((W, H), rng, arr.shape[2])
+        jitter = cfg.get("ink_jitter")
+        ink = rng.uniform(0.0, jitter) * 255 if jitter else 0.0
+        out = np.clip(bg * (1 - alpha) + ink * alpha, 0, 255).astype(np.uint8)
+        img = Image.fromarray(out[..., 0] if bands == 1 else out)
+        paper = estimate_paper(img)
+
+    # --- photometric ---------------------------------------------------
+    if _fires(cfg.get("p_photo"), rng):
+        contrast, gamma = cfg.get("contrast"), cfg.get("gamma")
+
+        if contrast is not None or gamma is not None:
+            c = rng.uniform(1 - contrast, 1 + contrast) if contrast is not None else 1.0
+            g = rng.uniform(*gamma) if gamma is not None else 1.0
+
+            def f(v, c=c, g=g, anchor=paper):
+                v = (v - anchor) * c + anchor       # pivot on paper, not ink density
+                return 255.0 * (max(v, 0.0) / 255.0) ** g
+
+            lut = _lut(f)
+            if bands == 1:
+                img = img.point(lut)
+            else:
+                img = Image.merge(img.mode, [ch.point(lut) for ch in img.split()])
+
+        brightness = cfg.get("brightness")
+        if brightness is not None:
+            b = rng.uniform(1 - brightness, 1 + brightness)
+            img = ImageEnhance.Brightness(img).enhance(b)   # pure scale, no drift
+
+        hue = cfg.get("hue")
+        if bands == 3 and hue is not None:
+            shift = int(round(rng.uniform(-hue, hue) * 255))
+            h, s, v = img.convert("HSV").split()
+            h = h.point(lambda x, s=shift: (x + s) % 256)
+            img = Image.merge("HSV", (h, s, v)).convert("RGB")
+
+        paper = estimate_paper(img)
+
+    # --- translation ---------------------------------------------------
+    max_shift = cfg.get("max_shift")
+    if max_shift and _fires(cfg.get("p_shift"), rng):
+        dx = int(rng.integers(-max_shift, max_shift + 1))
+        dy = int(rng.integers(-max_shift, max_shift + 1))
+        if dx or dy:
+            fill = int(paper) if bands == 1 else (int(paper),) * bands
+            img = img.transform((W, H), Image.AFFINE, (1, 0, -dx, 0, 1, -dy),
+                                resample=Image.NEAREST, fillcolor=fill)
+
+    # --- erasing (before noise, so patches aren't suspiciously clean) ---
+    if _fires(cfg.get("p_erase"), rng):
+        fill = int(paper) if bands == 1 else (int(paper),) * bands
+        d = ImageDraw.Draw(img)
+        for _ in range(int(rng.integers(*cfg["erase_n"]))):
+            for _ in range(10):
+                a = rng.uniform(*cfg["erase_area"]) * H * W
+                r = rng.uniform(*cfg["erase_ratio"])
+                h, w = int((a * r) ** 0.5), int((a / r) ** 0.5)
+                if 0 < h < H and 0 < w < W:
+                    i, j = int(rng.integers(0, H - h)), int(rng.integers(0, W - w))
+                    d.rectangle((j, i, j + w, i + h), fill=fill)
+                    break
+
+    # --- noise sigma (0.0 → caller skips the tensor-side addition) ------
+    read_sigma = cfg.get("read_sigma")
+    sigma = rng.uniform(*read_sigma) if read_sigma is not None else 0.0
+
+    return img, sigma
+
+CFG = dict(brightness=0.15, contrast=0.15, gamma=(0.85, 1.18), hue=0.02,
+           ink_jitter=0.08, max_shift=6, erase_n=(1, 4),
+           erase_area=(0.005, 0.03), erase_ratio=(0.4, 2.5),
+           read_sigma=(0.003, 0.012),
+           p_bg=0.5, p_photo=0.8, p_shift=0.8, p_erase=0.4)
+
+ALL = {**CFG}
+NO_AUG      = {**CFG, "p_bg": None, "p_photo": None, "p_shift": None,
+                      "p_erase": None, "read_sigma": None}
+PHOTO_ONLY  = {**CFG, "p_bg": None, "p_shift": None, "p_erase": None}
+GEOM_ONLY   = {**CFG, "p_bg": None, "p_photo": None, "read_sigma": None}
 
 # CHECK IMAGE PROPERTIES
 def is_uniform_image(img_source, tol=0):
