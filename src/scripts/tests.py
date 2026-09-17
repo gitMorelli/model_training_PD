@@ -746,7 +746,21 @@ def inspect_fold_per_step():
     nan_case_dt_rows = nan_case_dt_rows.merge(metadata[['unique_id', 'case_control', 'rempli_pattern', 'case_pattern', 'grid_pattern', 'case_grid_pattern']], on='unique_id', how='left')
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         print(f"Rows where 'case_dt' is NaN after merging with metadata:\n{nan_case_dt_rows}")
-    
+
+def analyze_per_step_results():
+    from src.debug.PD_model_evaluation import plot_probability_trajectories_2, plot_probability_trajectories
+    #load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/per_step_predictions.csv"
+    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/pre_diagnosis/per_step_predictions.csv"
+    predictions = pd.read_csv(load_path)
+    save_path = "/home/a_morelli/vscode_projects/model_training/results/tests"
+    for n in [3, 5, 10, 20, 30]:
+        plot_probability_trajectories(predictions, n_steps=n, ax=None,
+                                    class_names=("negative", "positive"),
+                                    min_count=1, save_path=save_path, save_name=f"a_probability_trajectories_{n}")
+    '''plot_probability_trajectories_2(predictions, n_steps=1, ax=None,
+                                    class_names=("negative", "positive"),
+                                    min_count=1, save_path=save_path, save_name=f"1year_new_probability_trajectories", step_is_years=True)'''
+
 
 def examine_rempli_pattern_grid_pattern():
     load_path = "/home/a_morelli/models/model_training_logs/PD/cross_val/resnet18_model_results/checkpoints/v_3/PD_training_set_20_07_26.parquet" 
@@ -814,10 +828,12 @@ def debug_GRID_PATTERN_REMPLI_PATTERN():
             grid_file_avail = selected_row[grid_columns[i]].values[0]
             print(f"Questionnaire {i+1}: avail={avail}, grid_file_avail={grid_file_avail}")
 
-if __name__ == "__main__":
-    inspect_columns()
-    assert 1==0
-    df = pd.read_csv("/home/a_morelli/models/model_training_logs/PD/feature_extraction/27082026/statistics_PD.csv")
+def inspect_statistics_PD():
+    df = pd.read_csv("/home/a_morelli/models/model_training_logs/PD/feature_extraction/17092026/statistics_PD.csv")
+    print(f"Number of unique subject_ids in the train split: {df[df['split']=='train']['subject_id'].nunique()}")
+    print(f"Number of unique subject_ids in the val split: {df[df['split']=='val']['subject_id'].nunique()}")
+    print(f"Number of unique subject_ids in the test split: {df[df['split']=='test']['subject_id'].nunique()}")
+    return
     columns = list(df.columns)
     print(f"Number of columns in the dataframe: {len(columns)}")
     print(f"Columns in the dataframe: {columns}")
@@ -826,3 +842,19 @@ if __name__ == "__main__":
     print(f"Number of columns that start with 'q1_text_original': {len(q1_text_original_columns)}")
     for col in q1_text_original_columns:
         print(f"Column: {col}")   
+
+def open_exp_parameters():
+    path = "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2/exp_params.pkl"
+    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_8/exp_params.pkl"
+    #load the exp_params.pkl file and print the keys and values
+    with open(path, "rb") as f:
+        exp_params = pickle.load(f)
+    print("Experiment Parameters:")
+    for key, value in exp_params.items():
+        print(f"{key}: {value}")
+    assert 1==0
+
+if __name__ == "__main__":
+    open_exp_parameters()
+    assert 1==0
+    analyze_per_step_results()

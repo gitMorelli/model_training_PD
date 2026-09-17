@@ -1,6 +1,7 @@
 import tarfile
 import time
 import io
+from tkinter.font import names
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
@@ -27,6 +28,8 @@ import numpy as np
 from pathlib import Path
 import json
 import pickle
+from dataclasses import dataclass
+from typing import Optional, Sequence
 
 from sklearn.metrics import classification_report
 from sklearn.pipeline import Pipeline
@@ -35,13 +38,15 @@ from sklearn.pipeline import make_pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV, LogisticRegressionCV
-from sklearn.model_selection import KFold, cross_val_score, StratifiedKFold
+from sklearn.model_selection import KFold, cross_val_score, StratifiedKFold, RepeatedStratifiedKFold
 
 from src.utils.data_loading_utils import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
 from src.utils.data_loading_utils import prepare_exclusion_sets_PD, return_file_paths
 from src.utils.data_loading_utils import questionnaires_to_keep
 from src.debug.PD_model_evaluation import  analyze_results
+from sklearn.inspection import permutation_importance
+from src.debug.PD_model_evaluation import tee_stdout
 
 params = {
 
@@ -51,14 +56,14 @@ params = {
     "class_col": 'diag_park_final1_quest',
     #To put for compatibility with code
     "grouped": False,
-    'filter_missing': 'all',
+    'filter_missing': 'last_q', #all
 
     "model": "clip-vit-large-patch14-inter",
-    "loaded_timestamp": "27082026",
+    "loaded_timestamp": "17092026",
     "seed": 42,
 
-    "selected_model": "lgbm",
-    "selected_pipeline":None,
+    #model
+    "selected_model": "xgb",
 
     #for representation
     "representation_type": "concat", #concat, mod, mean
@@ -66,6 +71,9 @@ params = {
     "n_components": 50,
     "n_splits": 5,
     "compare_all": False, #if True it will score all 6 combinations instead of just the one above
+
+    #feature importance
+    "importance":"auto", # auto = only computes it if the model has it, "permutation" = always compute permutation importance (model agnostic)
 
     "balanced_data": False,
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
@@ -119,6 +127,10 @@ def main():
 
     #splits = ["train", "val", "test"]
     
+    reference_df = pd.read_parquet(params['list_of_ids_paths'])
+    reference_df = balance_data(reference_df, params, column="unique_id")
+    check_available_subjects(reference_df, column="unique_id")
+
     df = load_file(params) 
 
     df = balance_data(df, params)
@@ -133,6 +145,8 @@ def main():
 
     if params["type_of_repr"] == "feature": #i save in the same format as the representation file -> subj_id,q,mo,rep -> i can use the same logic
         df,properties = reshape_features(df, keep_cols=["split"])
+    else:
+        properties = None
     
     time_taken = time.time() - start
     print(f"----- > Time taken to reshape the data: {time_taken:.2f} seconds", flush=True)
@@ -146,19 +160,37 @@ def main():
 
     df = add_info_to_df(df, params) #adding the class_col to the df
 
+    check_available_subjects(df, column="subject_id")
+
     print(f"Completed preprocessing", flush=True)
 
-    results_df, all_probs, all_labels = process_representation(df, params, verbose=VERBOSE)
-
     save_dir = get_save_path(params)
+    log_path = os.path.join(save_dir, f"stats.txt") #copy prints also to a log file in the checkpoint folder
+    with tee_stdout(log_path):
+        results_df, all_probs, all_labels, imp_df = process_representation(df, params, verbose=VERBOSE, prop_names=properties)
 
+        analyze_results(all_probs, all_labels, results_df, split="validation",
+                            pos_label=1, threshold=None, strategy="youden",
+                            target_recall=0.90, plot=True, out_dir_path=save_dir)
+        
+        if imp_df is not None:
+            per_prop = imp_df.groupby("prop")["importance"].sum().sort_values(ascending=False)
+            per_key  = imp_df.groupby("key")["importance"].sum().sort_values(ascending=False)
+            print(f"Feature importance per property:\n{per_prop}")
+            print(f"Feature importance per key:\n{per_key}")
+            imp_df.to_csv(os.path.join(save_dir, "feature_importance.csv"), index=False)
+            print(f"Feature importance saved to {os.path.join(save_dir, 'feature_importance.csv')}")
 
-    analyze_results(all_probs, all_labels, results_df, split="validation",
-                        pos_label=1, threshold=None, strategy="youden",
-                        target_recall=0.90, plot=True, out_dir_path=save_dir)
+        save_results(save_dir, params, results_df)
 
-    save_results(save_dir, params, results_df)
-
+def check_available_subjects(df, column="subject_id"):
+    #get the number of unique subject_ids in the train split with the class_col == 0 and with te class col==1
+    print(f"[TEST] Number of unique subject_ids in the train split with class_col == 0: {df[(df['split'] == 'train') & (df[params['class_col']] == 0)][column].nunique()}")
+    print(f"[TEST] Number of unique subject_ids in the train split with class_col == 1: {df[(df['split'] == 'train') & (df[params['class_col']] == 1)][column].nunique()}")
+    print(f"[TEST] Number of unique subject_ids in the val split with class_col == 0: {df[(df['split'] == 'val') & (df[params['class_col']] == 0)][column].nunique()}")
+    print(f"[TEST] Number of unique subject_ids in the val split with class_col == 1: {df[(df['split'] == 'val') & (df[params['class_col']] == 1)][column].nunique()}")
+    print(f"[TEST] Number of unique subject_ids in the test split with class_col == 0: {df[(df['split'] == 'test') & (df[params['class_col']] == 0)][column].nunique()}")
+    print(f"[TEST] Number of unique subject_ids in the test split with class_col == 1: {df[(df['split'] == 'test') & (df[params['class_col']] == 1)][column].nunique()}")
 
 def get_save_path(params):
     save_dir_model = os.path.join(params['source_path'], 'trained_models', params['selected_model'])
@@ -365,17 +397,20 @@ def reshape_features(
  
     return long_df, props
 
-def balance_data(df, params, verbose=VERBOSE):
+def balance_data(df, params, verbose=VERBOSE, column = "subject_id"):
     exclusion_set, val_exclusion_set, _ = prepare_exclusion_sets_PD(
         params, verbose=verbose, class_col=params["class_col"])
     
     #remove rows with subject_id in either exclusion_set or val_exclusion_set
-    unique_before = df[df['split'] == 'train']['subject_id'].nunique()
+    unique_before = df[df['split'] == 'train'][column].nunique()
+    unique_before_val = df[df['split'] == 'val'][column].nunique()
     complete_exclusion_set = exclusion_set.union(val_exclusion_set)
-    df = df[~df['subject_id'].isin(complete_exclusion_set)]
+    df = df[~df[column].isin(complete_exclusion_set)]
     if verbose:
         print(f"Number of unique ids before exclusion (train split): {unique_before}")
-        print(f"Number of unique ids after exclusion (train split): {df[df['split'] == 'train']['subject_id'].nunique()}")
+        print(f"Number of unique ids after exclusion (train split): {df[df['split'] == 'train'][column].nunique()}")
+        print(f"Number of unique ids before exclusion (val split): {unique_before_val}")
+        print(f"Number of unique ids after exclusion (val split): {df[df['split'] == 'val'][column].nunique()}")
     
     return df
 
@@ -389,24 +424,64 @@ def add_info_to_df(df, params):
                   left_on=id_column_df, right_on=id_column_original, how='left')
     return df
 
-def process_representation(df, params, verbose=False):
-    REPRESENTATION = params["representation_type"]  # "concat", "mod", "mean"
-    USE_PCA        = params["use_pca"]              # True -> add PCA before the model
-    N_COMPONENTS   = params["n_components"]         # only used when USE_PCA (capped at n_train - 1)
-    COMPARE_ALL    = params["compare_all"]          # run every representation instead of just the one above
+# ============================================================================
+# features
 
-    D    = df["rep"].iloc[0].shape[0]  # e.g. 1024 for CLIP
-    SEED = params["seed"]
+@dataclass
+class FeatureBundle:
+    """One feature row per subject, plus everything needed to evaluate it."""
+    FEATURES: dict                  # rep name -> (n_subjects, n_features)
+    names: dict                     # rep name -> (n_features,) array of str
+    y: np.ndarray                   # (n_subjects,)
+    subjects: np.ndarray            # (n_subjects,) ids, sorted
+    split_of_subj: np.ndarray       # (n_subjects,) "train" / "val"
+    keys: list                      # column keys, sorted
+    mod_of_key: np.ndarray          # modality of each key
+    D: int
+
+    @property
+    def n(self) -> int:
+        return len(self.subjects)
+
+    @property
+    def train_mask(self) -> np.ndarray:
+        return self.split_of_subj == "train"
+
+    @property
+    def val_mask(self) -> np.ndarray:
+        return self.split_of_subj == "val"
+
+
+def build_feature_names(rep_name, keys, mod_of_key, prop_names):
+    """Names in the exact column order that build_subject_features produces.
+
+    prop_names[d] describes dimension d of a single `rep` vector.
+    """
+    prop_names = np.asarray(prop_names, dtype=object)
+    if rep_name == "concat":
+        # blocks.reshape(n, len(keys) * D) is key-major, then dimension
+        return np.array([f"{k}|{p}" for k in keys for p in prop_names])
+    if rep_name == "mod":
+        # must match the np.unique(mod_of_key) order used to build FEATURES
+        return np.array([f"{m}|{p}" for m in np.unique(mod_of_key) for p in prop_names])
+    if rep_name == "mean":
+        return np.array([f"mean|{p}" for p in prop_names])
+    raise ValueError(f"unknown representation: {rep_name}")
+
+
+def build_subject_features(
+    df: pd.DataFrame,
+    params: dict,
+    prop_names: Optional[Sequence] = None,
+    verbose: bool = False,
+) -> FeatureBundle:
+    D = np.asarray(df["rep"].iloc[0]).shape[0]
 
     # .copy() avoids SettingWithCopyWarning when adding the "key" column below
     df = df[df["split"].isin(["train", "val"])].copy()
-
-    # ----------------------------------------------------------------------------
-    # STEP 1 - long df -> one feature row per subject
-    # ----------------------------------------------------------------------------
     df["key"] = df["modality"].astype(str) + "_q" + df["q"].astype(str)
 
-    keys     = sorted(df["key"].unique())
+    keys = sorted(df["key"].unique())
     subjects = np.sort(df["subject_id"].unique())
 
     s = (df.drop_duplicates(["subject_id", "key"])
@@ -418,26 +493,24 @@ def process_representation(df, params, verbose=False):
         for r in s.values
     ])
     Bl = blocks.reshape(len(subjects), len(keys), D)
-    n  = len(subjects)
+    n = len(subjects)
 
     subj_info = (df.drop_duplicates("subject_id")
                    .set_index("subject_id")
                    .loc[subjects])
     y = subj_info[params["class_col"]].to_numpy()
 
-    # ---- NEW: one split per subject, aligned with the feature rows ----
-    # A subject appearing in both train and val would leak information.
+    # A subject appearing in both train and val would leak information.  This
+    # check also guarantees one row per subject downstream, which is why the CV
+    # evaluator can use StratifiedKFold rather than GroupKFold.
     n_splits_per_subj = df.groupby("subject_id")["split"].nunique()
     leaky = n_splits_per_subj[n_splits_per_subj > 1].index.tolist()
     if leaky:
-        raise ValueError(f"{len(leaky)} subjects appear in both train and val, e.g. {leaky[:5]}")
+        raise ValueError(
+            f"{len(leaky)} subjects appear in both train and val, e.g. {leaky[:5]}"
+        )
 
     split_of_subj = subj_info["split"].to_numpy()
-    train_mask = split_of_subj == "train"
-    val_mask   = split_of_subj == "val"
-    n_train    = int(train_mask.sum())
-    print(f"train subjects: {n_train} | val subjects: {int(val_mask.sum())}")
-
     mod_of_key = np.array([k.rsplit("_q", 1)[0] for k in keys])
 
     with np.errstate(invalid="ignore"):
@@ -449,84 +522,255 @@ def process_representation(df, params, verbose=False):
             "mean":   np.nanmean(Bl, axis=1),
         }
 
-    print(f"{n} subjects | {len(keys)} keys")
+    # Positional fallback keeps every downstream path uniform: importances are
+    # always named, they are just uninformative without real prop_names.
+    if prop_names is None:
+        prop_names = [f"d{j}" for j in range(D)]
+    prop_names = np.asarray(prop_names, dtype=object)
+    if len(prop_names) != D:
+        raise ValueError(f"prop_names has length {len(prop_names)}, expected D={D}")
+
+    names = {}
+    for rep, X in FEATURES.items():
+        nm = build_feature_names(rep, keys, mod_of_key, prop_names)
+        if len(nm) != X.shape[1]:
+            raise AssertionError(f"[{rep}] {len(nm)} names vs {X.shape[1]} columns")
+        names[rep] = nm
+
+    print(f"{n} subjects | {len(keys)} keys | "
+          f"train {int((split_of_subj == 'train').sum())} | "
+          f"val {int((split_of_subj == 'val').sum())}")
     for k, v in FEATURES.items():
         print(f"  {k:7s} -> {v.shape[1]:6d} features")
 
-    ########## CHECKS ###############
     if verbose:
-        print("Checks ---- >")
-        print(pd.Series(y).describe())
-        print(pd.Series(y).nunique(), "unique values")
+        _run_checks(df, FEATURES, y, subjects, params)
 
-        X = FEATURES["mod"]
-        print("NaN fraction:", np.isnan(X).mean())
-        print("per-column std - min/median/max:",
-              np.nanstd(X, 0).min(), np.median(np.nanstd(X, 0)), np.nanstd(X, 0).max())
-        print("duplicate rows:", len(X) - len(np.unique(np.round(X, 6), axis=0)))
+    return FeatureBundle(
+        FEATURES=FEATURES, names=names, y=y, subjects=subjects,
+        split_of_subj=split_of_subj, keys=keys, mod_of_key=mod_of_key, D=D,
+    )
 
-        chk = df.drop_duplicates("subject_id").set_index("subject_id").loc[subjects, params["class_col"]]
-        print("aligned:", np.array_equal(chk.to_numpy(), y), "| index match:", (chk.index == subjects).all())
 
-        from scipy.stats import pearsonr
-        r = np.array([pearsonr(X[:, j], y)[0] for j in range(0, X.shape[1], 8)])
-        print("max |r| over sampled features:", np.nanmax(np.abs(r)).round(4), flush=True)
-    ##################################
+def _run_checks(df, FEATURES, y, subjects, params):
+    from scipy.stats import pearsonr
 
-    # ----------------------------------------------------------------------------
-    # STEP 2 - pipeline, fit on train, predict on val
-    # ----------------------------------------------------------------------------
-    def build_pipe(use_pca=False, n_components=50, model_name="logreg", model_params=None):
-        model = get_sklearn_model(model_name, **(model_params or {}))
+    print("Checks ---- >")
+    print(pd.Series(y).describe())
+    print(pd.Series(y).nunique(), "unique values")
 
-        steps = [
-            ("impute", SimpleImputer(strategy="mean")),
-            ("scale", StandardScaler()),
-        ]
-        if use_pca:
-            # PCA is fit on the training subjects only, so cap by n_train, not n
-            steps.append(("pca", PCA(n_components=min(n_components, n_train - 1),
-                                     random_state=SEED)))
-        steps.append((model_name, model))
-        return Pipeline(steps)
+    X = FEATURES["mod"]
+    print("NaN fraction:", np.isnan(X).mean())
+    print("per-column std - min/median/max:",
+          np.nanstd(X, 0).min(), np.median(np.nanstd(X, 0)), np.nanstd(X, 0).max())
+    print("duplicate rows:", len(X) - len(np.unique(np.round(X, 6), axis=0)))
 
-    def fit_predict(rep_name):
-        X = FEATURES[rep_name]
-        X_train, y_train = X[train_mask], y[train_mask]
-        X_val,   y_val   = X[val_mask],   y[val_mask]
+    chk = (df.drop_duplicates("subject_id")
+             .set_index("subject_id")
+             .loc[subjects, params["class_col"]])
+    print("aligned:", np.array_equal(chk.to_numpy(), y),
+          "| index match:", (chk.index == subjects).all())
 
-        pipeline = build_pipe(use_pca=USE_PCA, n_components=N_COMPONENTS,
-                              model_name=params["selected_model"],
-                              model_params=params["sklearn_model_parameters"])
-        pipeline.fit(X_train, y_train)
+    r = np.array([pearsonr(X[:, j], y)[0] for j in range(0, X.shape[1], 8)])
+    print("max |r| over sampled features:", np.nanmax(np.abs(r)).round(4), flush=True)
+# ============================================================================
 
-        y_pred = pipeline.predict(X_val)
+# ============================================================================
+# Pipeline and importance helpers
+def build_pipe(params, n_train, n_features):
+    """n_train is now an argument, not a closure variable.
 
-        if hasattr(pipeline, "predict_proba"):
-            proba   = pipeline.predict_proba(X_val)
-            classes = list(pipeline.classes_)
-            # probability of class 0 if it exists, otherwise of the first class
+    The PCA cap depends on the size of the *current* training set, which changes
+    from fold to fold.  Reading it from an enclosing scope was silently wrong
+    under CV rather than an error.
+    """
+    model_name = params["selected_model"]
+    model = get_sklearn_model(model_name, **(params.get("sklearn_model_parameters") or {}))
+
+    steps = [
+        ("impute", SimpleImputer(strategy="mean")),
+        ("scale", StandardScaler()),
+    ]
+    if params.get("use_pca"):
+        n_comp = min(params["n_components"], n_train - 1, n_features)
+        steps.append(("pca", PCA(n_components=n_comp, random_state=params["seed"])))
+    steps.append((model_name, model))
+    return Pipeline(steps)
+
+
+def intrinsic_importance(pipeline):
+    """Per-input-column importance from the fitted estimator, or None."""
+    est = pipeline.steps[-1][1]
+    if hasattr(est, "coef_"):
+        w = np.atleast_2d(est.coef_)                    # (n_classes, n_out)
+    elif hasattr(est, "feature_importances_"):
+        w = np.atleast_2d(est.feature_importances_)
+    else:
+        return None
+
+    if "pca" in pipeline.named_steps:
+        # components_ is (n_components, n_features_in): project back, then abs.
+        # Doing abs before the projection would be wrong.
+        w = w @ pipeline.named_steps["pca"].components_
+    return np.abs(w).mean(axis=0)
+
+
+def _default_scoring(pipeline, y):
+    if len(np.unique(y)) == 2 and hasattr(pipeline, "predict_proba"):
+        return "roc_auc"
+    return "balanced_accuracy"
+
+
+def perm_importance(pipeline, X, y, seed=0, n_repeats=20, scoring=None, n_jobs=-1):
+    """Model-agnostic. Pass raw X with NaNs; the imputer lives in the pipeline."""
+    r = permutation_importance(
+        pipeline, X, y,
+        n_repeats=n_repeats, random_state=seed, n_jobs=n_jobs,
+        scoring=scoring or _default_scoring(pipeline, y),
+    )
+    return r.importances_mean, r.importances_std
+
+
+def _predict_frame(pipeline, X, ids, y_true, tag=""):
+    y_pred = pipeline.predict(X)
+    out = {"unique_id": ids, "true_label": y_true, "predicted_label": y_pred}
+
+    if hasattr(pipeline, "predict_proba"):
+        proba = pipeline.predict_proba(X)
+        classes = list(pipeline.classes_)
+        if len(classes) == 2:
             col = classes.index(0) if 0 in classes else 0
-            prob_0 = proba[:, col]
+            out["probability_0"] = proba[:, col]
+            out["probability_1"] = 1 - proba[:, col]
         else:
-            print(f"[{rep_name}] model has no predict_proba -> probability_0 set to NaN")
-            prob_0 = np.full(len(X_val), np.nan)
+            # prob_1 = 1 - prob_0 is meaningless beyond two classes
+            print(f"[{tag}] {len(classes)} classes -> storing per-class columns")
+            for j, c in enumerate(classes):
+                out[f"probability_{c}"] = proba[:, j]
+    else:
+        print(f"[{tag}] model has no predict_proba -> probability columns set to NaN")
+        out["probability_0"] = np.full(len(X), np.nan)
+        out["probability_1"] = np.full(len(X), np.nan)
 
-        return pd.DataFrame({
-            "unique_id":       subjects[val_mask],
-            "true_label":      y_val,
-            "predicted_label": y_pred,
-            "probability_0":   prob_0,
-            "probability_1":   1 - prob_0,
-        })
+    return pd.DataFrame(out)
 
-    if COMPARE_ALL:
-        return {rep: fit_predict(rep) for rep in FEATURES}
-    results_df = fit_predict(REPRESENTATION)
-    prob_0, all_labels = results_df["probability_0"].to_numpy(), results_df["true_label"].to_numpy()
-    prob_1 = results_df["probability_1"].to_numpy()
-    all_probs = np.stack([prob_0, prob_1], axis=1)
-    return results_df, all_probs, all_labels
+
+def _split_name_cols(imp_df):
+    parts = imp_df["feature"].str.split("|", n=1, expand=True)
+    imp_df["key"] = parts[0]
+    imp_df["prop"] = parts[1]
+    return imp_df
+# ============================================================================
+
+# ============================================================================
+# Single train/val split
+def eval_holdout(bundle: FeatureBundle, params: dict, rep: str, importance="auto"):
+    """Respects the `split` column.  Returns (results_df, imp_df)."""
+    X, names = bundle.FEATURES[rep], bundle.names[rep]
+    tr, va = bundle.train_mask, bundle.val_mask
+    X_train, y_train = X[tr], bundle.y[tr]
+    X_val, y_val = X[va], bundle.y[va]
+
+    pipeline = build_pipe(params, n_train=int(tr.sum()), n_features=X.shape[1])
+    pipeline.fit(X_train, y_train)
+
+    results_df = _predict_frame(pipeline, X_val, bundle.subjects[va], y_val, tag=rep)
+
+    imp = None if importance == "permutation" else intrinsic_importance(pipeline)
+    if imp is None:
+        m, s = perm_importance(pipeline, X_val, y_val, seed=params["seed"])
+        imp_df = pd.DataFrame({"feature": names, "importance": m, "std": s})
+    else:
+        imp_df = pd.DataFrame({"feature": names, "importance": imp})
+
+    imp_df = _split_name_cols(imp_df)
+    imp_df = imp_df.sort_values("importance", ascending=False, ignore_index=True)
+    return results_df, imp_df
+# ============================================================================
+
+# ============================================================================
+# Repeated stratified CV
+def eval_cv(bundle: FeatureBundle, params: dict, rep: str,
+            n_splits=5, n_repeats=5, importance="auto"):
+    """Ignores the `split` column and pools every subject.
+
+    Cross-validating on the train subset only would mean permanently holding out
+    data you never look at, so the pooling is deliberate, not an oversight.
+    Returns (oof_df, imp_df).
+    """
+    X, names, y = bundle.FEATURES[rep], bundle.names[rep], bundle.y
+
+    cv = RepeatedStratifiedKFold(n_splits=n_splits, n_repeats=n_repeats,
+                                 random_state=params["seed"])
+    oof, imps = [], []
+
+    for i, (tr, te) in enumerate(cv.split(X, y)):
+        pipeline = build_pipe(params, n_train=len(tr), n_features=X.shape[1])
+        pipeline.fit(X[tr], y[tr])
+
+        frame = _predict_frame(pipeline, X[te], bundle.subjects[te], y[te], tag=f"{rep}/f{i}")
+        frame["fold"] = i % n_splits
+        frame["repeat"] = i // n_splits
+        oof.append(frame)
+
+        imp = None if importance == "permutation" else intrinsic_importance(pipeline)
+        if imp is None:
+            imp, _ = perm_importance(pipeline, X[te], y[te],
+                                     seed=params["seed"] + i, n_repeats=10)
+        imps.append(imp)
+
+    imps = np.vstack(imps)
+    # rank 0 = most important within a fold; median rank is far more stable than
+    # the mean magnitude at small n
+    ranks = np.argsort(np.argsort(-imps, axis=1), axis=1)
+
+    imp_df = pd.DataFrame({
+        "feature": names,
+        "importance_mean": np.nanmean(imps, axis=0),
+        "importance_std": np.nanstd(imps, axis=0),
+        "rank_median": np.median(ranks, axis=0),
+        "top50_frac": (ranks < 50).mean(axis=0),
+    })
+    imp_df = _split_name_cols(imp_df)
+    imp_df = imp_df.sort_values("rank_median", ignore_index=True)
+
+    return pd.concat(oof, ignore_index=True), imp_df
+# ============================================================================
+
+
+def cv_summary(oof_df, metric="accuracy"):
+    """Per-fold scores. Each subject appears n_repeats times in oof_df, so never
+    score the pooled frame directly."""
+    from sklearn.metrics import accuracy_score, balanced_accuracy_score, roc_auc_score
+
+    fn = {"accuracy": accuracy_score,
+          "balanced_accuracy": balanced_accuracy_score}[metric]
+
+    rows = []
+    for (rep_i, fold), g in oof_df.groupby(["repeat", "fold"]):
+        row = {"repeat": rep_i, "fold": fold, metric: fn(g.true_label, g.predicted_label)}
+        if "probability_1" in g and g.probability_1.notna().all() and g.true_label.nunique() == 2:
+            row["roc_auc"] = roc_auc_score(g.true_label, g.probability_1)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+# ============================================================================
+# Wrappers
+def process_representation(df, params, verbose=False, prop_names=None):
+    bundle = build_subject_features(df, params, prop_names=prop_names, verbose=verbose)
+    importance = params.get("importance", "auto")
+
+    if params["compare_all"]:
+        return {rep: eval_holdout(bundle, params, rep, importance)
+                for rep in bundle.FEATURES}
+
+    results_df, imp_df = eval_holdout(bundle, params, params["representation_type"], importance)
+    all_labels = results_df["true_label"].to_numpy()
+    all_probs = np.stack([results_df["probability_0"].to_numpy(),
+                          results_df["probability_1"].to_numpy()], axis=1)
+    return results_df, all_probs, all_labels, imp_df
+# ============================================================================
 
 def get_args():
     import argparse

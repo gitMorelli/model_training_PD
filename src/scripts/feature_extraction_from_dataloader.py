@@ -128,7 +128,8 @@ def main(params):
     common = dict(worker=args.num_workers,
                   prefetch_factor=params['prefetch_factor'],
                   exp_params=params, grid_dict=grid_dict,
-                  transform=transform, train_df=train_df, persistent_workers=False, one_only=True)
+                  transform=transform, train_df=train_df, persistent_workers=False, one_only=True,
+                  partial_batch=True) #set partial_batch=True to not discard incomplete batches
 
     specs = {
         'train': lambda: prepare_loaders_PD(
@@ -213,7 +214,7 @@ def read_loader(loader, create_row, slot_to_q=None, max_batches=None):
 
     for batch in loader:
         # unpack, tolerating the 5- or 6-element variant
-        frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities = batch
+        frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities, *_ = batch
 
         seq_ids  = seq_ids.cpu()
         slot_ids = slot_ids.cpu()

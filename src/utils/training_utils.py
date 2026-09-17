@@ -101,10 +101,11 @@ class LitModel(L.LightningModule):
                  lr_classifier_head=1e-3,example_input_array=torch.randn(1, 3, 224, 224),
                  opt_groups=None,num_epochs=10,lr_scheduling='cosine',
                  balancing_factor=1.0, balanced_data=False, use_balanced_weights=True, weight_decay=1e-4, warmup_fraction=0.1, 
-                 eta_min_cosine=1e-6, batch_size=32):
+                 eta_min_cosine=1e-6, batch_size=32, label_smoothing=0.0):
         super().__init__()
         self.save_hyperparameters()
         self.opt_groups = opt_groups
+        self.label_smoothing = label_smoothing
 
         self.num_1 = num_1
         self.num_0 = num_1 * balancing_factor if balanced_data else num_0
@@ -133,9 +134,10 @@ class LitModel(L.LightningModule):
 
         if num_classes == 2:
             if use_balanced_weights:
-                self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
+                self.criterion = nn.CrossEntropyLoss(weight=self.class_weights,
+                                                     label_smoothing=self.label_smoothing)
             else:
-                self.criterion = nn.CrossEntropyLoss()
+                self.criterion = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
         elif num_classes == 1:
             if use_balanced_weights:
                 self.criterion = nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
@@ -764,45 +766,47 @@ class ModelPDBase(L.LightningModule):
         pass
 
     def on_train_epoch_end(self):
-        WHITE = "\033[97m"
-        RED = "\033[91m"
-        RESET = "\033[0m"
-
-        # 0. Map each parameter to its optimizer group's current lr (and name)
-        param_lr = {}
-        optimizer = self.optimizers()
-        optimizers = optimizer if isinstance(optimizer, (list, tuple)) else [optimizer]
-        for opt in optimizers:
-            for group in opt.param_groups:
-                for p in group["params"]:
-                    param_lr[id(p)] = (group["lr"], group.get("lr_name", "?"))
-
-        # 1. Walk every parameter in model order
-        all_layers_info = []
-        total_trainable_params = 0
-        total_non_trainable_params = 0
-        for name, param in self.model.named_parameters():
-            layer_str = f"  - {name} | Shape: {list(param.shape)} | Parameters: {param.numel():,}"
-            if param.requires_grad:
-                lr, lr_name = param_lr.get(id(param), (None, None))
-                lr_str = f" | LR: {lr:.3e} ({lr_name})" if lr is not None else " | LR: NOT IN OPTIMIZER"
-                all_layers_info.append(f"{WHITE}{layer_str}{lr_str}{RESET}")
-                total_trainable_params += param.numel()
-            else:
-                all_layers_info.append(f"{RED}{layer_str}{RESET}")
-                total_non_trainable_params += param.numel()
-
-        total_params = total_trainable_params + total_non_trainable_params
-
-        self.write_log(
-            f"\n[Epoch {self.current_epoch + 1}] "
-            f"Total Parameters: {total_params:,} | "
-            f"{WHITE}Trainable: {total_trainable_params:,}{RESET} | "
-            f"{RED}Non-trainable: {total_non_trainable_params:,}{RESET}"
-        )
 
         if self.current_epoch in [0, 5]:
+            WHITE = "\033[97m"
+            RED = "\033[91m"
+            RESET = "\033[0m"
+
             self.write_log(f"\n--- Epoch {self.current_epoch + 1} Summary ---")
+
+            # 0. Map each parameter to its optimizer group's current lr (and name)
+            param_lr = {}
+            optimizer = self.optimizers()
+            optimizers = optimizer if isinstance(optimizer, (list, tuple)) else [optimizer]
+            for opt in optimizers:
+                for group in opt.param_groups:
+                    for p in group["params"]:
+                        param_lr[id(p)] = (group["lr"], group.get("lr_name", "?"))
+
+            # 1. Walk every parameter in model order
+            all_layers_info = []
+            total_trainable_params = 0
+            total_non_trainable_params = 0
+            for name, param in self.model.named_parameters():
+                layer_str = f"  - {name} | Shape: {list(param.shape)} | Parameters: {param.numel():,}"
+                if param.requires_grad:
+                    lr, lr_name = param_lr.get(id(param), (None, None))
+                    lr_str = f" | LR: {lr:.3e} ({lr_name})" if lr is not None else " | LR: NOT IN OPTIMIZER"
+                    all_layers_info.append(f"{WHITE}{layer_str}{lr_str}{RESET}")
+                    total_trainable_params += param.numel()
+                else:
+                    all_layers_info.append(f"{RED}{layer_str}{RESET}")
+                    total_non_trainable_params += param.numel()
+
+            total_params = total_trainable_params + total_non_trainable_params
+
+            self.write_log(
+                f"\n[Epoch {self.current_epoch + 1}] "
+                f"Total Parameters: {total_params:,} | "
+                f"{WHITE}Trainable: {total_trainable_params:,}{RESET} | "
+                f"{RED}Non-trainable: {total_non_trainable_params:,}{RESET}"
+            )
+
             self.write_log(f"Expected number of stepping batches: {self.trainer.estimated_stepping_batches}")
             self.write_log(f"Epoch {self.current_epoch + 1}: Total Training Samples Processed: {self.train_sample_count}\n")
             self.write_log(f"Expected total units (subjects or groups): {self.total_units}\n")
@@ -1865,6 +1869,15 @@ class WriteProbe(L.Callback):
             os.remove(tgt)
 
 #optimization groups utils
+def _vit_depth(base_name):
+    # full (untruncated) depth of a timm ViT/DeiT from its name; covers the get_vit aliases too
+    size = base_name.split('_')[1]   # 'vit_base_patch16_224...' -> 'base', 'vit_b_16' -> 'b'
+    depths = {'t': 12, 'tiny': 12, 's': 12, 'small': 12, 'medium': 12,
+              'b': 12, 'base': 12, 'l': 24, 'large': 24, 'h': 32, 'huge': 32,
+              'giant': 40, 'gigantic': 48}
+    if size not in depths:
+        raise ValueError(f"Can't infer ViT depth from '{base_name}', set exp_params['vit_depth']")
+    return depths[size]
 def get_optimization_groups(model_name,exp_params):
     if exp_params['use_opt_groups'] == False:
         return None
@@ -1942,11 +1955,54 @@ def get_optimization_groups(model_name,exp_params):
                        'vision_model.final_norm'], 'lr': lrb, 'lr_name': 'lr_4'},
             {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'},
         ]
+    elif model_name.startswith(('vit_', 'deit')):
+        decay = exp_params.get('lr_decay', 0.8)
+        lrb = exp_params['lr_backbone']
+        p = 'vision_model.'
+
+        base_name, _, suffix = model_name.partition('_layer')
+        depth = exp_params.get('vit_depth') or _vit_depth(base_name)   # full depth, before truncation
+        if suffix:  # must mirror the cut in get_vit
+            depth = max(1, int(suffix) * depth // 4)
+
+        stem = [f'{p}cls_token', f'{p}reg_token', f'{p}pos_embed', f'{p}patch_embed.', f'{p}norm_pre.']
+        top_extra = [f'{p}fc_norm.', f'{p}attn_pool.']
+        head_names = ['classifier']
+        if suffix:
+            # get_vit replaces model.norm with a freshly initialised LayerNorm -> train it at head lr
+            head_names.insert(0, f'{p}norm.')
+        else:
+            top_extra.insert(0, f'{p}norm.')
+
+        if exp_params.get('llrd_per_block', False):
+            # classic ViT layer-wise decay: one group per block (lr_decay ~0.65 for B, ~0.75 for L)
+            chunks = [[i] for i in range(depth)]
+        else:
+            # 4 equal stages, same convention as the CNN entries (lr_decay per stage)
+            n = min(4, depth)
+            bounds = [i * depth // n for i in range(n + 1)]
+            chunks = [list(range(bounds[i], bounds[i + 1])) for i in range(n)]
+
+        k = len(chunks)
+        define_optimization_groups = [{'names': stem, 'lr': lrb * decay**k, 'lr_name': 'lr_stem'}]
+        for j, blocks in enumerate(chunks):
+            names = [f'{p}blocks.{b}.' for b in blocks]
+            if j == k - 1:
+                names += top_extra
+            define_optimization_groups.append(
+                {'names': names, 'lr': lrb * decay**(k - 1 - j), 'lr_name': f'lr_{j + 1}'})
+        define_optimization_groups.append(
+            {'names': head_names, 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'})
     return define_optimization_groups
 
 #Set hyperparameters / metadata
 def set_automatic_hyperparameters(exp_params):
-    scale_lr_with_batch = exp_params.get('scale_lr_with_batch', False)
+    if exp_params.get('label_smoothing', 0.0)!=0.0:
+        exp_params['num_classes'] = 2
+        msg = (f"Label smoothing is only compatible with the cross entropy loss ->"
+               f"setting num_classes=2")
+        print(f"\n{bar}\n>>> [NUM CLASSES] {msg}\n{bar}\n", flush=True)
+    scale_lr_with_batch = exp_params.get('scale_lr_with_batch_size', False)
     if scale_lr_with_batch:
         effective_batch_size = exp_params['batch_size']*exp_params.get('accumulate_grad_batches', 1)
         ref_size = 256

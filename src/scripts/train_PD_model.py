@@ -66,8 +66,8 @@ def pre_trained_weights(name):
         out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_4',
                     'best-00-001708-0.3423.ckpt')
     elif name == 'pre_trained_E3N_convnext_tiny_window_1':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_1',
-                    'best-14-015884-0.0724.ckpt')
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2',
+                    'best-19-021127-0.1540.ckpt')
     '''os.path.join(
         '/home/a_morelli/models/model_training_logs/pre_trained_models/mnist',
         'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
@@ -104,16 +104,17 @@ exp_params = {
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'pre_training': False,
+    'pre_training': False, #if true the model is pre-trained on a large dataset of images and the classification head is trained on the PD dataset, if false the model is trained from scratch on the PD dataset
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': None, # ALL_SYNTHETIC_TRANSFORMS or None
+    'synthetic': None , # ALL_SYNTHETIC_TRANSFORMS or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
-
+    'selected_properties': None, #None means only the images are passed in input, other values define the covariates that are passed to the model
 
     #experiment parameters
-    'data_modality': get_input_modality('window_view'), #mixed_view, window_view
+    'data_modality': get_input_modality('window_view'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
+    'label_smoothing': 0.0, #0.0 = no smoothing // 0.1, 0.2, 0.3, 0.4, 0.5; if set to x!=0 -> num_classes=2 and crossentropy is used
     'use_balanced_weights': False,
     'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
     'balanced_data': False, #note that this and balace_validation are independent
@@ -127,7 +128,7 @@ exp_params = {
     'filter_modality' : 'digit', 
 
     #model definition
-    'model': "convnext_tiny",#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model': 'convnext_tiny',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
 #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
@@ -136,7 +137,7 @@ exp_params = {
     'norm_std': 'PD_window',
     'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
-    'align_train_metrics_to_val': False,  
+    'align_train_metrics_to_val': True,  #val and align are set authomatically to none if pre_training is not active 
     'min_window_steps': 50,
     'model_parameters': {
         'd_model': 128, 
@@ -164,21 +165,21 @@ exp_params = {
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
-    'lr_decay': 0.75, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
-    'lr_backbone': 1e-4,
-    'lr_classifier_head': 1e-3,
+    'lr_decay': 0.2, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
+    'lr_backbone': 1e-5,
+    'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
-    'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
-    'num_epochs': 50,
+    'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
+    'num_epochs': 100,
     'max_steps': -1, #N or -1
     'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
-    'weight_decay': 0.05, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
+    'eta_min_cosine': 1e-8, #the timm-style convention (base/100)
+    'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier'],
+    'layers_to_unfreeze': ['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
@@ -572,8 +573,7 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
 
 #model loading
 def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs):
-    backbone,transform = get_model(name=exp_params['model'], pretrained=exp_params['pretrained'], 
-                                   custom_pre_trained_weights=exp_params['custom_pre_trained_weights'],grayscale=exp_params['to_grayscale'])
+    backbone,transform = get_model(name=exp_params['model'], pretrained=exp_params.get('pretrained', True),grayscale=exp_params['to_grayscale'])
     print("############# Model backbone loaded! #############")
     transform = get_transforms(exp_params, transform)
     out=test_output(exp_params['input_size'], backbone, channels=exp_params['num_channels']) #test the output of the backbone to determine the number of features for the classification head
@@ -601,13 +601,14 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
     
-    model = load_ln_checkpoint(model,exp_params['custom_pre_trained_weights'], load_full_model=exp_params['load_full_model'])
+    model = load_ln_checkpoint(model,exp_params['custom_pre_trained_weights'], load_full_model=exp_params.get('load_full_model', False))
 
     if val:
         return model, transform
     
     unfreeze_layers(model,layer_names=exp_params['layers_to_unfreeze'], keep_lora = lora_tuning)
 
+    write_log(f"Model weights loaded from {exp_params['custom_pre_trained_weights']}")
     if verbose:
         write_log(f"Size of extracted representation: {in_features}") # <-- ADD THIS LINE
         write_log(f"Device of model after initialization: {next(model.parameters()).device}") # <-- ADD THIS LINE

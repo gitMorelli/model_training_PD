@@ -4,7 +4,7 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/feature_extraction.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=30             # Number of CPU cores per task
+#SBATCH --cpus-per-task=24             # Number of CPU cores per task
 #SBATCH --mem=64G                      # Job memory request
 #SBATCH --time=06:00:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
@@ -34,4 +34,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.feature_extraction_from_dataloader \
-    --num_workers 28
+    --num_workers 22

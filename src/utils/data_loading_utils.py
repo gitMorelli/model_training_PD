@@ -1024,7 +1024,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     metadata['selected_transform'] = selected_transforms[k]
                     metadata['imputed'] = imputed
                     list_of_views.append(metadata)
-                elif debug and feature_extraction==True:
+                elif debug and feature_extraction:
                     metadata = extract_image_properties(img_view,
                              x_coords,
                              y_coords,
@@ -1666,7 +1666,8 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
 
 #pipelines
 def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, 
-                       SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None, cross_val=False, one_only=False, persistent_workers=True):
+                       SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None, cross_val=False, one_only=False, persistent_workers=True,
+                       running_eval=False, partial_batch=False):
     def worker_init_fn(worker_id):
         # Force OpenCV to use a single thread per DataLoader worker process
         cv2.setNumThreads(0)
@@ -1707,7 +1708,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         val_input   = SHARD_PATTERN_val
 
     train_dataset = prepare_PD_dataset(train_input, exclusion_set=exclusion_set,train_df=train_df, exp_params=exp_params, 
-                                       partial_batch=False, **common_kwargs) 
+                                       partial_batch=partial_batch, **common_kwargs) 
     train_loader = DataLoader(
         train_dataset, 
         num_workers=worker, 
@@ -1723,13 +1724,17 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         val_dataset   = prepare_PD_dataset(val_input, exclusion_set=val_exclusion_set,train_df=train_df,exp_params=exp_params, 
                                         partial_batch=True, is_val=True, **common_kwargs)
         
-        val_workers = worker//2
+        if running_eval:
+            val_workers = worker
+        else:
+            val_workers = worker//2
+            prefetch_factor = min(2, prefetch_factor) if val_workers > 0 else None
 
         val_loader = DataLoader(
             val_dataset, 
             num_workers=val_workers, 
             batch_size=None, 
-            prefetch_factor=min(2, prefetch_factor) if val_workers > 0 else None,
+            prefetch_factor=prefetch_factor, # Tells workers to queue up batches in advance (set to none if 0 workers)
             pin_memory=False, #creates a stall when true and variable size batches (eg custom collate)
             worker_init_fn=worker_init_fn,
             persistent_workers=persistent_workers
@@ -1885,7 +1890,8 @@ def generate_exclusion_set_val(csv_data, data_modality, majority_class_id, balan
     exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
     return exclusion_set
 
-def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data=None, exclude_cases=False, class_col='diag_park_final1_quest'):
+def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data=None, exclude_cases=False, 
+                              class_col='diag_park_final1_quest', verbose =False):
     '''
     this funciton computes, for a specific split, all the ids that should be ignored during loading, accounting for all exclusion/inclusion
     conditions.
@@ -1902,23 +1908,30 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
     
     csv_data = csv_source.copy()
     csv_data = csv_data[csv_data['split'] == split]
+    if verbose:
+        print(f"[Prepare exclusion] [pre] Number of samples in {split} set: {len(csv_data)}")
     all_original_ids = set(original_data[original_data['split']==split]['unique_id'].unique())
 
     if exp_params['grouped']: #if grouped modality i want only one case in each group -> have to deal with the cases that are
         #also selected as controls
         #remove all rows with case_control==0 and diag_park_final1_quest==1
-        print("Removing all rows with case_control==0 and diag_park_final1_quest==1 to avoid having cases also as controls in grouped modality")
-        print(f"Initial number of samples in {split} set: {len(csv_data)}")
+        if verbose:
+            print("Removing all rows with case_control==0 and diag_park_final1_quest==1 to avoid having cases also as controls in grouped modality")
+            print(f"Initial number of samples in {split} set: {len(csv_data)}")
         csv_data = csv_data[~((csv_data['case_control']==0) & (csv_data['diag_park_final1_quest']==1))]
-        print(f"Number of samples in {split} set after removing cases also as controls: {len(csv_data)}")
-        print("-" * 50)
+        
+        if verbose:
+            print(f"Number of samples in {split} set after removing cases also as controls: {len(csv_data)}")
+            print("-" * 50)
 
     #exclude the subjects for which grid_pattern or case_grid_pattern has a certain pattern (eg all 0 or 0 before last avail q or ...)
     if exp_params['filter_missing'] == 'all':
         csv_data['last_avail_q'] = 13 #set last avail q to 13 for all subjects to reuse the same code
-    print(f"Initial number of samples in {split} set: {len(csv_data)}")
+    if verbose:
+        print(f"Initial number of samples in {split} set: {len(csv_data)}")
     if 'case_control' in csv_data.columns:
-        print(f"Initial number of unique subjects with case_control==1 in {split} set: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
+        if verbose:
+            print(f"Initial number of unique subjects with case_control==1 in {split} set: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
     def prefix_has_one(pattern, n):
         return '1' in pattern[:int(n)]
     mask = csv_data.apply(
@@ -1928,16 +1941,20 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
     )
     #subjects_with_no_pre_avail_q_data = csv_data[~mask]['unique_id'].unique()
     csv_data = csv_data[mask]
-    print(f"Number of samples in {split} set after filtering for 000.. string: {len(csv_data)}")
+    if verbose:
+        print(f"Number of samples in {split} set after filtering for 000.. string: {len(csv_data)}")
     if 'case_control' in csv_data.columns:
-        print(f"Number of unique subjects with case_control==1 in {split} set after filtering for 000.. string: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
+        if verbose:
+            print(f"Number of unique subjects with case_control==1 in {split} set after filtering for 000.. string: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
 
     if (split=='train' and exp_params['balanced_data']) or (split=='val' and exp_params['balance_validation']):
         csv_data['group_id'] = csv_data['unique_id'].str.split('_').str[1].astype(int)
-        print(f"Balancing the dataset for {split} set with balancing factor {exp_params['balancing_factor']})")
+        if verbose:
+            print(f"Balancing the dataset for {split} set with balancing factor {exp_params['balancing_factor']})")
         #keep only the controls
         if exclude_cases:
-            print("Excluding cases from the controls for balancing")
+            if verbose:
+                print("Excluding cases from the controls for balancing")
             csv_data_controls = csv_data[(csv_data['case_control'] == 0) & (csv_data[class_col] == 0)]
         else:
             csv_data_controls = csv_data[csv_data['case_control'] == 0]
@@ -1984,7 +2001,7 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
         original_data = pd.read_parquet(exp_params['list_of_ids_paths'])
         csv_data = original_data.copy()
     if verbose:
-        print("Initial CSV data loaded. First row example:")
+        print("[Prepare exclusion] [pre] Initial CSV data loaded. First row example:")
         for col in csv_data.columns:
             print(f"{col}: {csv_data[col].iloc[0]}")
         print('#' * 50)
@@ -1999,9 +2016,9 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
 
     
     exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train',original_data=original_data, exclude_cases=exclude_cases, 
-                                              class_col=class_col) 
+                                              class_col=class_col, verbose=verbose) 
     val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val', original_data=original_data, exclude_cases=exclude_cases, 
-                                                  class_col=class_col)
+                                                  class_col=class_col, verbose=verbose)
     
     if verbose:
         print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
@@ -2021,7 +2038,7 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
         counts = [0,0]  # Default counts if class_col is not present (eg when i iterate in debug mode on pre_training dataset)
 
     if verbose:
-        print("After applying the exclusion set, the training set has:")
+        print("[Prepare exclusion] [post] After applying the exclusion set, the training set has:")
         print(f"Class 0: {counts[0]} samples")
         print(f"Class 1: {counts[1]} samples")
         print(f"Ratio of Class 1 to Class 0: {counts[1] / counts[0] if counts[0] > 0 else 'undefined'}")

@@ -1,5 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=train_PD
+#--output=/home/a_morelli/vscode_projects/model_training/results/train_PD_pretraining.out
+#--error=/home/a_morelli/vscode_projects/model_training/results/train_PD_pretraining.err
 #SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train_PD.out
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD.err
 #SBATCH --nodes=1                      # Run on a single node

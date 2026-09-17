@@ -60,10 +60,10 @@ def get_last_best_checkpoint(checkpoint_dir,version):
 
 experiment = "PD"#"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'resnet18' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='1'
-override_parameters=False
+version='40'
+override_parameters=True
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #get the most recent ckpt file with best in the name 
@@ -72,15 +72,18 @@ checkpoint_to_load = get_last_best_checkpoint(CHECKPOINT_PATH,version)
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f) 
 
+prefix=''
 if override_parameters:
+    print(f"Overriding parameters from {params_path}", flush=True)
     exp_params['censor_time'] = 'pre_diagnosis' #you can test models trained on all also on partial sequences
+    prefix='pre_diagnosis'
 
 #exp_params['filter_missing']='all'
 #exp_params['censor_time']='all'
 
 exp_params['predict_on_train'] = False
 exp_params['balance_validation'] = False
-exp_params['batch_size'] = 1
+exp_params['batch_size'] = 4
 #'precision': "16-mixed",
 
 if exp_params['pre_training']:
@@ -105,7 +108,7 @@ if old_run:
 def main(exp_params):
     args = get_args()
     worker = args.num_workers
-    prefetch_factor = 2 if worker > 0 else None
+    prefetch_factor = 4 if worker > 0 else None
 
     #fix all the seeds for reproducibility 
     torch.manual_seed(exp_params['seed'])
@@ -132,7 +135,8 @@ def main(exp_params):
     val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
 
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict, transform, 
-                                                    SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df)
+                                                    SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df,
+                                                    running_eval=True)
     
     if exp_params['matched_validation']:
         matched_val_loader = prepare_balanced_validation(worker,prefetch_factor,exp_params, grid_dict, transform)
@@ -141,6 +145,10 @@ def main(exp_params):
     # Setting ckpt_path="best" tells Lightning to automatically find your top model
     ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
     lit_model = litmodel_initialization_from_checkpoint(model, ckpt_path, exp_params)
+    if prefix!='':
+        save_path = os.path.join(os.path.dirname(ckpt_path), prefix)
+    else:
+        save_path = os.path.dirname(ckpt_path)
 
     tb_logger=False
     # 4. Initialize Trainer and Fit
@@ -155,13 +163,13 @@ def main(exp_params):
     
     print(f"Evaluating model on validation set using checkpoint: {ckpt_path}")
 
-    log_path = os.path.join(os.path.dirname(ckpt_path), f"stats.txt") #copy prints also to a log file in the checkpoint folder
+    log_path = os.path.join(save_path, f"stats.txt") #copy prints also to a log file in the checkpoint folder
     with tee_stdout(log_path):
         return_model_info(exp_params)
 
         analyze_results(all_probs, all_labels, results_df, split="validation",
                         pos_label=1, threshold=None, strategy="youden",
-                        target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
+                        target_recall=0.90, plot=True, out_dir_path=save_path)
         
         if exp_params['matched_validation']:
             print("#" * 50)
@@ -170,7 +178,7 @@ def main(exp_params):
             results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = get_result_df(outputs)
             analyze_results(all_probs_matched, all_labels_matched, results_df_matched, split="matched_validation",
                             pos_label=1, threshold=None, strategy="youden",
-                            target_recall=0.90, plot=True, out_dir_path=os.path.dirname(ckpt_path))
+                            target_recall=0.90, plot=True, out_dir_path=save_path)
         
         if hasattr(lit_model, 'per_step') and lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
             print("#" * 50)
@@ -178,9 +186,9 @@ def main(exp_params):
             results_df_per_step = get_per_step_results(outputs, train_df)
             plot_probability_trajectories(results_df_per_step, n_steps=20, ax=None,
                                   class_names=("negative", "positive"),
-                                  min_count=1, save_path=os.path.dirname(ckpt_path))
+                                  min_count=1, save_path=save_path)
             #save the per_step results in a csv file
-            results_df_per_step.to_csv(os.path.join(os.path.dirname(ckpt_path), f"per_step_predictions.csv"), index=False)
+            results_df_per_step.to_csv(os.path.join(save_path, f"per_step_predictions.csv"), index=False)
 
         if exp_params['predict_on_train']:
             outputs = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
@@ -191,7 +199,7 @@ def main(exp_params):
             results_complete = pd.concat([results_df, results_df_train], ignore_index=True)
             results_df = results_complete.copy()
     
-    store_results(csv_data, results_df, ckpt_path,exp_params)
+    store_results(csv_data, results_df, save_path,exp_params)
 
 def override_val_exclusion(train_df, val_exclusion_set, exp_params):
     if exp_params['pre_training']:
@@ -328,11 +336,11 @@ def get_per_step_results(outputs, train_df,class_names=None):
 
     return result_df.sort_values(["unique_id", "slot"]).reset_index(drop=True)
 
-
 def plot_probability_trajectories(df, n_steps=20, ax=None,
                                   class_names=("negative", "positive"),
                                   min_count=1, show_points=True,
-                                  point_alpha=0.15, save_path=None):
+                                  point_alpha=0.15, save_path=None,
+                                  save_name="probability_trajectories", step_is_years=False):
     """Average probability_1 across subjects on a binned case_dt axis.
     Rows are binned to N equal-width steps between min and max case_dt.
     Each class (true_label 0 / 1) gets a mean curve with a ±SEM band.
@@ -343,6 +351,15 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
         raise ValueError("no rows with case_dt, probability_1, and true_label")
 
     lo, hi = d["case_dt"].min(), d["case_dt"].max()
+    if step_is_years:
+        delta = hi - lo
+        #determine the number of bins in which to divide the range of case_dt into equal-width bins of 1 year (as close as possible)
+        #-> n_steps=2y with delta=6y -> n_steps=3, if delta=5y -> n_steps=ceil(5/2)=3
+        n_steps = int(np.ceil(delta / n_steps))
+        print(f"step_is_years=True, delta={delta}, n_steps={n_steps}")
+    width_bin_years = (hi - lo) / n_steps
+    print("Bin is {:.2f} years wide, from {:.2f} to {:.2f}".format(width_bin_years, lo, hi))
+
     edges = np.linspace(lo, hi, n_steps + 1)
     centers = 0.5 * (edges[:-1] + edges[1:])
     d["_bin"] = np.clip(np.digitize(d["case_dt"], edges) - 1, 0, n_steps - 1)
@@ -386,7 +403,7 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
         ax.plot(x, m, color=color, lw=1.8, zorder=3)
 
     ax.axhline(0.5, color="gray", lw=0.7, ls="--", alpha=0.6)
-    ax.set_xlabel("case_dt (binned)")
+    ax.set_xlabel(f"case_dt (binned), {n_steps} steps, {width_bin_years:.2f} years wide")
     ax.set_ylabel("probability_1")
     pad = 0.02 * (d["probability_1"].max() - d["probability_1"].min() or 1)
     ax.set_ylim(d["probability_1"].min() - pad,
@@ -395,7 +412,110 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
     ax.legend(loc="best", frameon=False)
 
     if save_path:
-        fig_path = os.path.join(save_path, "probability_trajectories.png")
+        fig_path = os.path.join(save_path, f"{save_name}.png")
+        plt.savefig(fig_path, dpi=300, bbox_inches="tight")
+        print(f"Saved probability trajectories plot to {fig_path}")
+    return stats
+
+def plot_probability_trajectories_2(df, n_steps=20, ax=None,
+                                  class_names=("negative", "positive"),
+                                  min_count=1, show_points=True,
+                                  point_alpha=0.15, save_path=None,
+                                  save_name="probability_trajectories",
+                                  step_is_years=False,
+                                  show_bin_edges=True, show_bin_index=True,
+                                  max_xticks=21):
+    """Average probability_1 across subjects on a binned case_dt axis.
+    Rows are binned to N equal-width steps between min and max case_dt.
+    Each class (true_label 0 / 1) gets a mean curve with a ±SEM band.
+    Raw points keep their true case_dt position; bin edges are drawn on the x axis.
+    """
+    d = df.dropna(subset=["case_dt", "probability_1", "true_label"]).copy()
+    if d.empty:
+        raise ValueError("no rows with case_dt, probability_1, and true_label")
+
+    lo, hi = d["case_dt"].min(), d["case_dt"].max()
+    if step_is_years:
+        delta = hi - lo
+        n_steps = int(np.ceil(delta / n_steps))
+        print(f"step_is_years=True, delta={delta}, n_steps={n_steps}")
+    width_bin_years = (hi - lo) / n_steps
+    print("Bin is {:.2f} years wide, from {:.2f} to {:.2f}".format(width_bin_years, lo, hi))
+
+    edges = np.linspace(lo, hi, n_steps + 1)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    d["_bin"] = np.clip(np.digitize(d["case_dt"], edges) - 1, 0, n_steps - 1)
+
+    grp = d.groupby(["true_label", "_bin"])["probability_1"]
+    stats = grp.agg(mean="mean", std="std", n="count").reset_index()
+    stats["sem"] = stats["std"] / np.sqrt(stats["n"])
+    stats = stats[stats["n"] >= min_count]
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(9, 5))
+
+    # bin boundaries drawn first so everything else sits on top
+    if show_bin_edges:
+        for e_ in edges:
+            ax.axvline(e_, color="gray", lw=0.5, ls=":", alpha=0.35, zorder=0)
+
+    palette = {0: "#3B8BD4", 1: "#D85A30"}
+    y_lo, y_hi = d["probability_1"].min(), d["probability_1"].max()
+    for label, name in zip((0, 1), class_names):
+        s = stats[stats["true_label"] == label].sort_values("_bin")
+        if s.empty:
+            continue
+        x = centers[s["_bin"].to_numpy()]
+        m = s["mean"].to_numpy()
+        e = s["sem"].fillna(0).to_numpy()
+        color = palette[label]
+
+        # raw rows behind the curve, at their actual case_dt (no binning, no jitter)
+        if show_points:
+            raw = d[d["true_label"] == label]
+            if not raw.empty:
+                ax.scatter(raw["case_dt"].to_numpy(), raw["probability_1"].to_numpy(),
+                           s=8, color=color, alpha=point_alpha,
+                           linewidths=0, zorder=1)
+
+        ax.fill_between(x, m - e, m + e, color=color, alpha=0.25,
+                        edgecolor=color, linewidth=1.2, zorder=2)
+        ax.errorbar(x, m, yerr=e, fmt="o", color=color, ecolor=color,
+                    elinewidth=1.4, capsize=3, markersize=6,
+                    markeredgecolor="white", markeredgewidth=1,
+                    label=f"true_label = {label} ({name})", zorder=3)
+        ax.plot(x, m, color=color, lw=1.8, zorder=3)
+        y_lo = min(y_lo, (m - e).min())
+        y_hi = max(y_hi, (m + e).max())
+
+    ax.axhline(0.5, color="gray", lw=0.7, ls="--", alpha=0.6)
+
+    # major ticks on the bin edges, thinned out if there are too many
+    step = max(1, int(np.ceil(len(edges) / max_xticks)))
+    tick_edges = edges[::step]
+    ax.set_xticks(tick_edges)
+    ax.set_xticklabels([f"{t:.2f}" for t in tick_edges], rotation=45, ha="right")
+
+    # minor ticks on the bin centres, labelled with the bin index
+    if show_bin_index and n_steps <= 30:
+        ax.set_xticks(centers, minor=True)
+        ax.set_xticklabels([str(i) for i in range(n_steps)], minor=True)
+        ax.tick_params(axis="x", which="minor", length=0, labelsize=7,
+                       colors="gray", pad=2)
+
+    span = (hi - lo) or 1
+    ax.set_xlim(lo - 0.02 * span, hi + 0.02 * span)
+
+    ax.set_xlabel(f"case_dt — {n_steps} bins of {width_bin_years:.2f} years "
+                  f"(ticks = bin edges, small numbers = bin index)")
+    ax.set_ylabel("probability_1")
+    pad = 0.02 * ((y_hi - y_lo) or 1)
+    ax.set_ylim(y_lo - pad, y_hi + pad)
+    ax.grid(True, axis="y", alpha=0.25, linewidth=0.5)
+    ax.legend(loc="best", frameon=False)
+
+    if save_path:
+        fig_path = os.path.join(save_path, f"{save_name}.png")
         plt.savefig(fig_path, dpi=300, bbox_inches="tight")
         print(f"Saved probability trajectories plot to {fig_path}")
     return stats
@@ -448,10 +568,10 @@ def store_results(csv_data, results_df, ckpt_path,params):
     else:
         print("No duplicate rows found in the merged dataframe based on 'unique_id'.")
     #save the merged dataframe in a csv file
-    merged_df.to_csv(os.path.join(os.path.dirname(ckpt_path), f"predictions.csv"), index=False)
+    merged_df.to_csv(os.path.join(ckpt_path, f"predictions.csv"), index=False)
     #save params dict as predictions_metadata.pkl
     #save the exp_params dictionary to a pickle file in the checkpoint folder
-    with open(os.path.join(os.path.dirname(ckpt_path), f"predictions_metadata.pkl"), 'wb') as f:
+    with open(os.path.join(ckpt_path, f"predictions_metadata.pkl"), 'wb') as f:
         pickle.dump(params, f)
 
 def litmodel_initialization_from_checkpoint(model, ckpt_path, exp_params):
@@ -496,7 +616,6 @@ def _as_prob_matrix(all_scores, num_classes=None):
     if num_classes is not None and s.shape[1] != num_classes:
         raise ValueError(f"expected {num_classes} columns, got {s.shape[1]}")
     return s
-
 
 # ======================================================================
 # binary path (unchanged behavior) -- used when C == 2
@@ -545,43 +664,120 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90, pos_labe
  
     raise ValueError(f"unknown strategy: {strategy}")
 
-def _plot_roc_curve_binary(y_true, y_scores, pos_label=1, threshold=None, path=None):
-    if plt is None:
-        print("matplotlib not available; skipping ROC plot")
-        return
+
+def _plot_roc_curve_binary(y_true, y_scores, pos_label=1, threshold=None,
+                           path=None, name="model", data_path=None):
+    """Plot a ROC curve and optionally dump the curve data to `data_path` (.npz)."""
+    y_true = np.asarray(y_true)
+    y_scores = np.asarray(y_scores)
+
     fpr, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=pos_label)
-    auc = roc_auc_score(y_true, y_scores)
- 
-    plt.figure(figsize=(5, 5))
-    plt.plot(fpr, tpr, label=f"model (AUC={auc:.3f})")
-    plt.plot([0, 1], [0, 1], ls="--", color="gray", label="random (AUC=0.500)")
- 
-    # Youden-optimal point on the curve, shown regardless of which strategy was used
+    auc = float(roc_auc_score(y_true, y_scores))
+
+    # Youden-optimal point on the curve
     if len(thresholds) > 1:
         j = (tpr - fpr)[1:]
         k = int(np.argmax(j)) + 1
-        plt.scatter([fpr[k]], [tpr[k]], facecolors="none", edgecolors="green",
-                    s=90, zorder=4,
-                    label=f"max Youden J={j[k - 1]:.3f} @ {thresholds[k]:.3f}")
- 
+        youden_fpr, youden_tpr = float(fpr[k]), float(tpr[k])
+        youden_j, youden_thr = float(j[k - 1]), float(thresholds[k])
+    else:
+        youden_fpr = youden_tpr = youden_j = youden_thr = np.nan
+
     # the operating point actually used
     if threshold is not None:
         y_pred = (y_scores >= threshold).astype(int)
-        sens = recall_score(y_true, y_pred, pos_label=pos_label, zero_division=0)
-        spec = recall_score(y_true, y_pred, pos_label=1 - pos_label, zero_division=0)
-        plt.scatter([1 - spec], [sens], color="red", zorder=5,
-                    label=f"threshold={threshold:.3f}")
- 
-    plt.xlabel("false positive rate (1 - specificity)")
-    plt.ylabel("true positive rate (sensitivity)")
-    plt.xlim(0, 1); plt.ylim(0, 1)
-    plt.legend(loc="lower right", fontsize=8)
-    plt.tight_layout()
+        sens = float(recall_score(y_true, y_pred, pos_label=pos_label, zero_division=0))
+        spec = float(recall_score(y_true, y_pred, pos_label=1 - pos_label, zero_division=0))
+        thr_fpr, thr_tpr = 1.0 - spec, sens
+    else:
+        thr_fpr = thr_tpr = np.nan
+
+    curve = {
+        "name": name,
+        "fpr": fpr,
+        "tpr": tpr,
+        "auc": auc,
+        "threshold": np.nan if threshold is None else float(threshold),
+        "threshold_fpr": thr_fpr,
+        "threshold_tpr": thr_tpr,
+        "youden_fpr": youden_fpr,
+        "youden_tpr": youden_tpr,
+        "youden_j": youden_j,
+        "youden_threshold": youden_thr,
+    }
+
+    if data_path is not None:
+        np.savez_compressed(data_path, **curve)
+
+    if plt is None:
+        print("matplotlib not available; skipping ROC plot")
+        return curve
+
+    _draw_roc_curves([curve], path=path)
+    return curve
+
+
+def _load_roc_curve(data_path):
+    """Load a curve saved by _plot_roc_curve_binary."""
+    with np.load(data_path, allow_pickle=False) as d:
+        out = {"name": str(d["name"]), "fpr": d["fpr"], "tpr": d["tpr"]}
+        for key in ("auc", "threshold", "threshold_fpr", "threshold_tpr",
+                    "youden_fpr", "youden_tpr", "youden_j", "youden_threshold"):
+            out[key] = float(d[key])
+        return out
+
+
+def _draw_roc_curves(curves, path=None, title=None, show_youden=True):
+    """Draw one or more ROC curves (dicts from _plot_roc_curve_binary / _load_roc_curve)."""
+    if plt is None:
+        print("matplotlib not available; skipping ROC plot")
+        return
+
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.plot([0, 1], [0, 1], ls="--", color="gray", label="random (AUC=0.500)")
+
+    for c in curves:
+        line, = ax.plot(c["fpr"], c["tpr"], label=f"{c['name']} (AUC={c['auc']:.3f})")
+        color = line.get_color()
+        if show_youden and not np.isnan(c["youden_fpr"]):
+            ax.scatter([c["youden_fpr"]], [c["youden_tpr"]], facecolors="none",
+                       edgecolors=color, s=90, zorder=4,
+                       label=f"{c['name']} Youden J={c['youden_j']:.3f} "
+                             f"@ {c['youden_threshold']:.3f}")
+        if not np.isnan(c["threshold"]):
+            ax.scatter([c["threshold_fpr"]], [c["threshold_tpr"]], color=color,
+                       edgecolor="black", zorder=5,
+                       label=f"{c['name']} thr={c['threshold']:.3f}")
+
+    ax.set_xlabel("false positive rate (1 - specificity)")
+    ax.set_ylabel("true positive rate (sensitivity)")
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    if title:
+        ax.set_title(title)
+    ax.legend(loc="lower right", fontsize=8)
+    fig.tight_layout()
     if path:
-        plt.savefig(path)
-        plt.close()
+        fig.savefig(path)
+        plt.close(fig)
     else:
         plt.show()
+
+
+def _plot_roc_curve_with_previous(y_true, y_scores, prev_data_paths, pos_label=1,
+                                  threshold=None, path=None, compare_path=None,
+                                  name="exp2", data_path=None, show_youden=False):
+    """Plot the current experiment alone, then superimposed with previous runs."""
+    curve = _plot_roc_curve_binary(y_true, y_scores, pos_label=pos_label,
+                                   threshold=threshold, path=path,
+                                   name=name, data_path=data_path)
+
+    if isinstance(prev_data_paths, (str, bytes)):
+        prev_data_paths = [prev_data_paths]
+    previous = [_load_roc_curve(p) for p in prev_data_paths]
+
+    _draw_roc_curves(previous + [curve], path=compare_path,
+                     title="ROC curves comparison", show_youden=show_youden)
+    return curve
 
 def _plot_roc_curve_mc(y_true, y_prob, class_names, path=None):
     if plt is None:
@@ -650,25 +846,107 @@ def _baseline_table_binary(y_true, pos_label=1, seed=0):
     ])
 
 
-def _plot_pr_curve_binary(y_true, y_scores, pos_label=1, threshold=None, path=None):
+#--------------- pr curve ---------
+def _plot_pr_curve_binary(y_true, y_scores, pos_label=1, threshold=None,
+                          path=None, name="model", data_path=None):
+    """Plot a PR curve and optionally dump the curve data to `data_path` (.npz)."""
+    y_true = np.asarray(y_true)
+    y_scores = np.asarray(y_scores)
+
+    precision, recall, _ = precision_recall_curve(y_true, y_scores, pos_label=pos_label)
+    ap = float(average_precision_score(y_true, y_scores, pos_label=pos_label))
+    prevalence = float(np.mean(y_true == pos_label))
+
+    if threshold is not None:
+        yp = (y_scores >= threshold).astype(int)
+        thr_recall = float(recall_score(y_true, yp, pos_label=pos_label, zero_division=0))
+        thr_precision = float(precision_score(y_true, yp, pos_label=pos_label, zero_division=0))
+    else:
+        thr_recall = thr_precision = np.nan
+
+    curve = {
+        "name": name,
+        "precision": precision,
+        "recall": recall,
+        "ap": ap,
+        "prevalence": prevalence,
+        "threshold": np.nan if threshold is None else float(threshold),
+        "threshold_recall": thr_recall,
+        "threshold_precision": thr_precision,
+    }
+
+    if data_path is not None:
+        np.savez_compressed(data_path, **curve)
+
+    if plt is None:
+        print("matplotlib not available; skipping PR plot")
+        return curve
+
+    _draw_pr_curves([curve], path=path, prevalence=prevalence)
+    return curve
+
+
+def _load_pr_curve(data_path):
+    """Load a curve saved by _plot_pr_curve_binary."""
+    with np.load(data_path, allow_pickle=False) as d:
+        return {
+            "name": str(d["name"]),
+            "precision": d["precision"],
+            "recall": d["recall"],
+            "ap": float(d["ap"]),
+            "prevalence": float(d["prevalence"]),
+            "threshold": float(d["threshold"]),
+            "threshold_recall": float(d["threshold_recall"]),
+            "threshold_precision": float(d["threshold_precision"]),
+        }
+
+
+def _draw_pr_curves(curves, path=None, prevalence=None, title=None):
+    """Draw one or more curves (dicts from _plot_pr_curve_binary / _load_pr_curve)."""
     if plt is None:
         print("matplotlib not available; skipping PR plot")
         return
-    precision, recall, _ = precision_recall_curve(y_true, y_scores, pos_label=pos_label)
-    ap = average_precision_score(y_true, y_scores, pos_label=pos_label)
-    prevalence = float(np.mean(y_true == pos_label))
 
-    plt.figure(figsize=(5, 5))
-    plt.plot(recall, precision, label=f"model (AP={ap:.3f})")
-    plt.axhline(prevalence, ls="--", color="gray", label=f"random (AP={prevalence:.3f})")
-    if threshold is not None:
-        yp = (y_scores >= threshold).astype(int)
-        plt.scatter([recall_score(y_true, yp, pos_label=pos_label, zero_division=0)],
-                    [precision_score(y_true, yp, pos_label=pos_label, zero_division=0)],
-                    color="red", zorder=5, label=f"threshold={threshold:.3f}")
-    plt.xlabel("recall (PD)"); plt.ylabel("precision (PD)")
-    plt.xlim(0, 1); plt.ylim(0, 1); plt.legend(); plt.tight_layout()
-    plt.savefig(path) if path else plt.show()
+    fig, ax = plt.subplots(figsize=(5, 5))
+    for c in curves:
+        line, = ax.plot(c["recall"], c["precision"], label=f"{c['name']} (AP={c['ap']:.3f})")
+        if not np.isnan(c["threshold"]):
+            ax.scatter([c["threshold_recall"]], [c["threshold_precision"]],
+                       color=line.get_color(), edgecolor="black", zorder=5,
+                       label=f"{c['name']} thr={c['threshold']:.3f}")
+
+    if prevalence is None:
+        prevalence = curves[0]["prevalence"]
+    ax.axhline(prevalence, ls="--", color="gray", label=f"random (AP={prevalence:.3f})")
+
+    ax.set_xlabel("recall (PD)"); ax.set_ylabel("precision (PD)")
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    if title:
+        ax.set_title(title)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    if path:
+        fig.savefig(path)
+        plt.close(fig)
+    else:
+        plt.show()
+
+
+def _plot_pr_curve_with_previous(y_true, y_scores, prev_data_paths, pos_label=1,
+                                 threshold=None, path=None, compare_path=None,
+                                 name="exp2", data_path=None):
+    """Plot the current experiment alone, then superimposed with previous runs."""
+    curve = _plot_pr_curve_binary(y_true, y_scores, pos_label=pos_label,
+                                  threshold=threshold, path=path,
+                                  name=name, data_path=data_path)
+
+    if isinstance(prev_data_paths, (str, bytes)):
+        prev_data_paths = [prev_data_paths]
+    previous = [_load_pr_curve(p) for p in prev_data_paths]
+
+    _draw_pr_curves(previous + [curve], path=compare_path,
+                    prevalence=curve["prevalence"], title="PR curves comparison")
+    return curve
 
 
 def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
@@ -706,11 +984,20 @@ def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
     with pd.option_context("display.float_format", "{:.3f}".format):
         print(_baseline_table_binary(y_true, pos_label).to_string(index=False))
  
+    dirname = os.path.basename(os.path.normpath(out_dir_path))
+    parent_path = os.path.dirname(os.path.normpath(out_dir_path))
     if plot:
         _plot_pr_curve_binary(y_true, y_scores, pos_label, threshold,
-                              path=os.path.join(out_dir_path, f"pr_curve_{split}.png"))
+                              path=os.path.join(out_dir_path, f"pr_curve_{split}.png"), data_path=os.path.join(out_dir_path, f"pr_curve_{split}.npz"))
         _plot_roc_curve_binary(y_true, y_scores, pos_label, threshold,
-                               path=os.path.join(out_dir_path, f"roc_curve_{split}.png"))
+                               path=os.path.join(out_dir_path, f"roc_curve_{split}.png"), data_path=os.path.join(out_dir_path, f"roc_curve_{split}.npz"))
+        if dirname == "pre_diagnosis":
+            _plot_pr_curve_with_previous(y_true, y_scores, prev_data_paths=[os.path.join(parent_path, f"pr_curve_{split}.npz")], pos_label=pos_label,
+                                         threshold=threshold, path=os.path.join(out_dir_path, f"pr_curve_{split}.png"), compare_path=os.path.join(out_dir_path, f"pr_curve_{split}_comparison.png"),
+                                         name=f"{split} (this run)", data_path=os.path.join(out_dir_path, f"pr_curve_{split}.npz"))
+            _plot_roc_curve_with_previous(y_true, y_scores, prev_data_paths=[os.path.join(parent_path, f"roc_curve_{split}.npz")], pos_label=pos_label,
+                                         threshold=threshold, path=os.path.join(out_dir_path, f"roc_curve_{split}.png"), compare_path=os.path.join(out_dir_path, f"roc_curve_{split}_comparison.png"),
+                                         name=f"{split} (this run)", data_path=os.path.join(out_dir_path, f"roc_curve_{split}.npz"))
     #get the balanced accuracy score from the classification report
     balanced_acc = report["macro avg"]["recall"]
     f1_positive  = report["PD"]["f1-score"]
