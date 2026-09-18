@@ -1,97 +1,124 @@
 Checkpoint to load: best-44-013185-0.3887.ckpt
 Overriding parameters from /home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_40/exp_params.pkl
-Experiment Parameters:
-problem: PD
-class_col: diag_park_final1_quest
-debug: False
-debugging_callbacks: True
-fast_dev_run: False
-grouped: False
-pre_training: False
-bce_aux_weight: 0.3
-synthetic: None
-synthetic_proportions: [0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333]
-selected_properties: None
-data_modality: ['X_window', 'X_window', 'X_window', 'text_window', 'text_window', 'text_window', 'digit_window', 'digit_window', 'digit_window']
-num_tiles: 9
-use_grid: True
-use_balanced_weights: True
-balancing_factor: 3
-balanced_data: False
-balance_validation: False
-majority_class_id: 0
-threshold_num: 1
-num_classes: 1
-filter_missing: all
-censor_time: all_matched
-filter_modality: digit
-model: convnext_tiny
-custom_pre_trained_weights: None
-load_full_model: False
-pretrained: True
-norm_mu: [0.0610334410445247]
-norm_std: [0.23933505962649537]
-model_structure: FlexibleSequenceQuestionnaireModel
-val_check_interval: None
-align_train_metrics_to_val: False
-min_window_steps: 50
-model_parameters: {'d_model': 128, 'n_heads': 4, 'n_layers': 1, 'ff_mult': 2, 'dropout': 0.4, 'count_norm': 2, 'use_spread': False, 'use_count_feature': False, 'use_attention_pool': False, 'seq_model': 'gru', 'bidirectional': True}
-custom_transform: None
-apply_augmentation: None
-invert_color: True
-to_grayscale: True
-image_pixel_space_augmentations: None
-lora_tuning: False
-use_opt_groups: True
-lr_decay: 0.2
-lr_backbone: 1e-05
-lr_classifier_head: 0.001
-lr_scheduling: cosine
-batch_size: 4
-scale_lr_with_batch_size: False
-num_epochs: 100
-max_steps: -1
-patience: 10
-stopping_metric: val/pr_auc
-eta_min_cosine: 1e-08
-weight_decay: 0.01
-warmup_fraction: 0.05
-input_size: 224
-layers_to_unfreeze: ['classifier']
-seed: 42
-accumulate_grad_batches: 16
-precision: 16-mixed
-gradient_clip_val: 1.0
-prefetch_factor: 4
-list_of_ids_paths: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_8/PD_training_set_20_07_26.parquet
-data_folder: /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26
-grid_dict_path: /home/a_morelli/datasets/id_lists/h5/PD_data_h5
-num_channels: 1
-huggingface_transform: False
-CHECKPOINT_PATH: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints
-OUTPUT_PATH: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results
-SOURCE_PATH: /home/a_morelli/models/model_training_logs/PD/
-timestamp: 2026-09-16 18:43:56
-best_epoch: 40
-best_val_loss: 1.0630329847335815
-best_val_acc: 0.8407766819000244
-best_train_acc: 0.8262531757354736
-current_version: 8
-optimization_groups: [{'names': ['vision_model.features.0'], 'lr': 1.6000000000000004e-08, 'lr_name': 'lr_stem'}, {'names': ['vision_model.features.1'], 'lr': 8.000000000000003e-08, 'lr_name': 'lr_1'}, {'names': ['vision_model.features.2', 'vision_model.features.3'], 'lr': 4.000000000000001e-07, 'lr_name': 'lr_2'}, {'names': ['vision_model.features.4', 'vision_model.features.5'], 'lr': 2.0000000000000003e-06, 'lr_name': 'lr_3'}, {'names': ['vision_model.features.6', 'vision_model.features.7', 'vision_model.final_norm'], 'lr': 1e-05, 'lr_name': 'lr_4'}, {'names': ['classifier'], 'lr': 0.001, 'lr_name': 'lr_head'}]
+Column: etudegp
+Type: int64
+Number of NaNs: 0
+Number of unique values: 4
+Unique values: [1 2 3 9]
+Range: 1 - 9
+####################################
+Column: profq2
+Type: int64
+Number of NaNs: 0
+Number of unique values: 3
+Unique values: [0 1 9]
+Range: 0 - 9
+####################################
+Column: lateralite
+Type: int64
+Number of NaNs: 0
+Number of unique values: 3
+Unique values: [0 9 1]
+Range: 0 - 9
+####################################
+Column: relative_age
+Type: int64
+Number of NaNs: 0
+Number of unique values: 27
+Range: 0 - 26
+####################################
+Column: case_dt_dateq1
+Type: float64
+Number of NaNs: 0
+Number of unique values: 146
+Range: -29.0403832991102 - -1.8754277891854894
+####################################
+Column: case_dt_dateq2
+Type: float64
+Number of NaNs: 1056
+Number of unique values: 176
+Range: -27.45516769336071 - 1.377138945927447
+####################################
+Column: case_dt_dateq3
+Type: float64
+Number of NaNs: 1824
+Number of unique values: 147
+Range: -25.95756331279945 - 3.0390143737166326
+####################################
+Column: case_dt_dateq4
+Type: float64
+Number of NaNs: 2484
+Number of unique values: 176
+Range: -24.45448323066393 - 4.37782340862423
+####################################
+Column: case_dt_dateq5
+Type: float64
+Number of NaNs: 1021
+Number of unique values: 552
+Range: -22.190280629705683 - 5.429158110882957
+####################################
+Column: case_dt_dateq6
+Type: float64
+Number of NaNs: 1374
+Number of unique values: 595
+Range: -18.844626967830255 - 8.813141683778234
+####################################
+Column: case_dt_dateq7
+Type: float64
+Number of NaNs: 1659
+Number of unique values: 606
+Range: -16.569472963723477 - 10.316221765913758
+####################################
+Column: case_dt_dateq8
+Type: float64
+Number of NaNs: 2934
+Number of unique values: 488
+Range: -13.96577686516085 - 14.064339493497604
+####################################
+Column: case_dt_dateq9
+Type: float64
+Number of NaNs: 2799
+Number of unique values: 439
+Range: -11.000684462696784 - 16.2217659137577
+####################################
+Column: case_dt_dateq10
+Type: float64
+Number of NaNs: 3605
+Number of unique values: 403
+Range: -7.553730321697468 - 19.537303216974674
+####################################
+Column: case_dt_dateq11
+Type: float64
+Number of NaNs: 4529
+Number of unique values: 350
+Range: -3.572895277207392 - 21.568788501026695
+####################################
+Column: case_dt_dateq12
+Type: float64
+Number of NaNs: 5604
+Number of unique values: 299
+Range: -1.0458590006844628 - 25.00752908966461
+####################################
+Column: case_dt_dateq13
+Type: float64
+Number of NaNs: 7404
+Number of unique values: 175
+Range: 1.9274469541409993 - 28.210814510609172
+####################################
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5745848
+Job ID: 5748567
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n16
+Nodelist: n24
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-09-17 11:38:30
-Job ended at:   2026-09-17 11:38:48
-Job Wall-clock time: 00:00:18
+Job started at: 2026-09-17 17:55:30
+Job ended at:   2026-09-17 17:56:07
+Job Wall-clock time: 00:00:37
 CPU Utilized: 00:00:11
-CPU Efficiency: 15.28% of 00:01:12 core-walltime
-Memory Utilized: 156.26 MB
-Memory Efficiency: 0.95% of 16.00 GB
+CPU Efficiency: 7.43% of 00:02:28 core-walltime
+Memory Utilized: 1.00 GB
+Memory Efficiency: 6.28% of 16.00 GB

@@ -1500,6 +1500,13 @@ class ConcatenateViews(nn.Module):
         return features
 
 #Helpers time-sequences
+def _property_encoder(m, d, dropout):
+    """Small MLP: raw property vector -> d-dim embedding.
+    Last layer is zero-initialised, so at init the model is identical to the property-free one."""
+    enc = nn.Sequential(nn.Linear(m, d), nn.GELU(), nn.Dropout(dropout), nn.Linear(d, d))
+    nn.init.zeros_(enc[-1].weight)
+    nn.init.zeros_(enc[-1].bias)
+    return enc
 #Time-sequence models
 class SequenceClassifierHead(nn.Module):
     """Everything after the CNN: view aggregation + slot transformer + classification.
@@ -1584,17 +1591,27 @@ class SequenceFlexibleClassifierHead(nn.Module):
 
     def __init__(self, feat_dim, n_slots, n_classes,
                  d_model=256, seq_model='gru', view_agg='attention',
-                 use_slot_pos=True, dropout=0.1, **mixer_kwargs):
+                 use_slot_pos=True, dropout=0.1,
+                 n_local=0, n_global=0, global_fusion='both',
+                 **mixer_kwargs):
         super().__init__()
         if seq_model not in MIXERS:
             raise ValueError(f'seq_model must be one of {sorted(MIXERS)}')
+        if global_fusion not in ('early', 'late', 'both'):
+            raise ValueError("global_fusion must be 'early', 'late' or 'both'")
 
         self.proj = nn.Linear(feat_dim, d_model) if feat_dim != d_model else nn.Identity()
         self.view_agg = view_agg
         self.view_pool = GatedAttentionPool(d_model) if view_agg == 'attention' else None
 
+        # ---- property encoders ----
+        self.n_local, self.n_global, self.global_fusion = n_local, n_global, global_fusion
+        self.local_enc = _property_encoder(n_local, d_model, dropout) if n_local else None
+        self.global_early = (_property_encoder(n_global, d_model, dropout)
+                             if n_global and global_fusion in ('early', 'both') else None)
+
         self.seq_in_norm = nn.LayerNorm(d_model)          # scale-match before + slot_pos
-        self.n_slots = n_slots
+        self.n_slots = n_slots 
         self.use_slot_pos = use_slot_pos
         if use_slot_pos:
             self.slot_pos = nn.Embedding(n_slots, d_model)
@@ -1603,12 +1620,12 @@ class SequenceFlexibleClassifierHead(nn.Module):
         cfg = dict(dropout=dropout, **mixer_kwargs)
         self.seq_model = seq_model
         self.mixer = MIXERS[seq_model](d_model, cfg)
-
-        # keep positions out of the summed value when the mixer is a pure weighted average
         self.separate_values = use_slot_pos and self.mixer.wants_raw_values
 
         self.drop = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(self.mixer.out_dim)
+        self.global_late = (_property_encoder(n_global, self.mixer.out_dim, dropout)
+                            if n_global and global_fusion in ('late', 'both') else None)
         self.head = nn.Linear(self.mixer.out_dim, n_classes)
 
     # ---- slot layout -------------------------------------------------------
@@ -1634,17 +1651,29 @@ class SequenceFlexibleClassifierHead(nn.Module):
     # ---- forward -----------------------------------------------------------
 
     def forward(self, feats, N, k, seq_ids, slot_ids, lengths,
+                local_properties=None, global_properties=None,
                 return_view_attn=False, return_slot_attn=False):
-        # feats: (N*k, feat_dim) straight from the CNN
+        if self.local_enc is not None and local_properties is None:
+            raise ValueError('head was built with n_local > 0 but local_properties is None')
+        if self.n_global and global_properties is None:
+            raise ValueError('head was built with n_global > 0 but global_properties is None')
+
         x = self.proj(feats).view(N, k, -1)                        # (N, k, d_model)
         if self.view_pool is not None:
             q, view_attn = self.view_pool(x)
         else:
-            q, view_attn = x.mean(1), None
-        q = self.seq_in_norm(q)          #Apply a normalization layer # (N, d_model)
+            q, view_attn = x.mean(1), None                         # (N, d_model)
+
+        # ---- per-token conditioning (still in input/frame order) ----
+        if self.local_enc is not None:
+            q = q + self.local_enc(local_properties.to(q.dtype))        # (N, d_model)
+        if self.global_early is not None:
+            g = self.global_early(global_properties.to(q.dtype))        # (B, d_model)
+            q = q + g[seq_ids]                                     # broadcast to tokens
+        q = self.seq_in_norm(q)
 
         B, dev = lengths.size(0), q.device
-        compact = self.mixer.needs_compact #for each mixe I have defined if it can accept sequences with missing values in between timesteps
+        compact = self.mixer.needs_compact
         rows, cols, L, order = self._layout(seq_ids, slot_ids, B, compact)
 
         q_pos = q + self.slot_pos(slot_ids) if self.use_slot_pos else q
@@ -1653,16 +1682,20 @@ class SequenceFlexibleClassifierHead(nn.Module):
 
         pad_mask = torch.ones(B, L, dtype=torch.bool, device=dev)
         pad_mask[rows, cols] = False
-        lens = torch.bincount(seq_ids, minlength=B)                # true valid-slot counts
+        lens = torch.bincount(seq_ids, minlength=B)
 
         pooled, slot_attn = self.mixer(buf, pad_mask, lens, values=values)
-        logits = self.head(self.drop(self.norm(pooled)))
+        z = self.norm(pooled)                                      # (B, D) or (B, L, D) if per_step
+        if self.global_late is not None:
+            g = self.global_late(global_properties.to(z.dtype))         # (B, D)
+            z = z + (g.unsqueeze(1) if z.dim() == 3 else g)
+        logits = self.head(self.drop(z))
 
         if getattr(self.mixer, 'per_step', False):
             n_tok = seq_ids.numel()
             idx = order if order is not None else torch.arange(n_tok, device=dev)
             tok_logits = logits.new_zeros(n_tok, logits.size(-1))
-            tok_logits[idx] = logits[rows, cols]                    # input token order
+            tok_logits[idx] = logits[rows, cols]
             last = logits[torch.arange(B, device=dev), (lens - 1).clamp(min=0)]
             logits = (tok_logits, last)
 
@@ -1677,14 +1710,19 @@ class SequenceFlexibleClassifierHead(nn.Module):
 class FlexibleSequenceQuestionnaireModel(nn.Module):
     def __init__(self, vision_model, feat_dim, n_slots, n_classes, **head_kwargs):
         super().__init__()
-        self.vision_model = vision_model                               # -> cnn.*
-        self.classifier = SequenceFlexibleClassifierHead(           # -> classifier.*
+        self.vision_model = vision_model
+        self.classifier = SequenceFlexibleClassifierHead(
             feat_dim, n_slots, n_classes, **head_kwargs)
 
-    def forward(self, frames, seq_ids, slot_ids, lengths, return_view_attn=False):
-        N, k  = frames.shape[:2]
-        feats = self.vision_model(frames.flatten(0, 1))             # (N*k, feat_dim)  <- only heavy step
-        return self.classifier(feats, N, k, seq_ids, slot_ids, lengths, return_view_attn)
+    def forward(self, frames, seq_ids, slot_ids, lengths,
+                local_properties=None, global_properties=None,
+                return_view_attn=False, return_slot_attn=False):
+        N, k = frames.shape[:2]
+        feats = self.vision_model(frames.flatten(0, 1))            # (N*k, feat_dim)
+        return self.classifier(feats, N, k, seq_ids, slot_ids, lengths,
+                               local_properties=local_properties, global_properties=global_properties,
+                               return_view_attn=return_view_attn,
+                               return_slot_attn=return_slot_attn)
 #unordered models
 class SetClassifierHead(nn.Module):
     """Order-invariant head over a variable number of timesteps per subject.
@@ -1742,7 +1780,7 @@ class SetClassifierHead(nn.Module):
             nn.Linear(ff_mult * d_model, n_classes),
         )
 
-    def forward(self, feats, N, k, seq_ids, lengths, return_view_attn=False):
+    def forward(self, feats, N, k, seq_ids, lengths, return_view_attn=False, local_properties = None, global_properties = None):
         # feats: (N*k, feat_dim) straight from the CNN
         # N = sum(T_i) = total timesteps in the batch
         # seq_ids: (N,) which subject each timestep belongs to
@@ -1792,10 +1830,11 @@ class SetQuestionnaireModel(nn.Module):
         self.classifier = SetClassifierHead(                # -> classifier.*
             feat_dim, n_classes, **head_kwargs)
 
-    def forward(self, frames, seq_ids, slot_ids, lengths, return_view_attn=False):
+    def forward(self, frames, seq_ids, slot_ids, lengths, local_properties=None, global_properties=None, return_view_attn=False):
         N, k  = frames.shape[:2]
         feats = self.vision_model(frames.flatten(0, 1))     # (N*k, feat_dim)
-        return self.classifier(feats, N, k, seq_ids, lengths, return_view_attn)
+        return self.classifier(feats, N, k, seq_ids, lengths, return_view_attn, 
+            local_properties=local_properties,global_properties=global_properties)
 
 #others
 def test_output(size, model,channels=3):

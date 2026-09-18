@@ -42,6 +42,7 @@ from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augme
 from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader, get_optimization_groups
 from src.utils.training_utils import set_automatic_hyperparameters, MemMonitor, BatchTimer, ThroughputMonitor, WriteProbe
 from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
+from src.utils.tabular_data_utils import preprocess_PD_csv
 
 def pre_trained_weights(name):
     if name is None:
@@ -100,7 +101,8 @@ exp_params = {
 
     #debugging
     'debugging_callbacks':True,
-    'fast_dev_run':False, #can be False, None or True, False and None have same behavior
+    'fast_dev_run': False, #can be False, None or True, False and None have same behavior
+    'pass_example_input_array': False,
 
     #training modality
     'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
@@ -108,7 +110,9 @@ exp_params = {
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
     'synthetic': None , # ALL_SYNTHETIC_TRANSFORMS or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
-    'selected_properties': None, #None means only the images are passed in input, other values define the covariates that are passed to the model
+    'selected_properties': ['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*'], #None or [] means no conditioning on covariates
+    #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
+    'global_fusion':'late', #early, late
 
     #experiment parameters
     'data_modality': get_input_modality('window_view'), #mixed_view, window_view, window_view_minimal
@@ -167,7 +171,7 @@ exp_params = {
     'use_opt_groups': True,
     'lr_decay': 0.2, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
     'lr_backbone': 1e-5,
-    'lr_classifier_head': 1e-4,
+    'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
     'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
@@ -175,11 +179,11 @@ exp_params = {
     'max_steps': -1, #N or -1
     'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-8, #the timm-style convention (base/100)
+    'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'],
+    'layers_to_unfreeze': ['classifier'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
@@ -258,9 +262,16 @@ def main(exp_params):
     
     write_log, current_version = logging_initialization() 
 
-    model, transform = model_initialization(write_log,exp_params,verbose=VERBOSE, **exp_params['model_parameters'])
-
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
+    train_df, *_ = preprocess_PD_csv(train_df,exp_params['selected_properties'], split_col='split')
+
+    n_local,n_global = _selected_properties_get_dims(exp_params, train_df)
+    print(f"n_local: {n_local}, n_global: {n_global}", flush=True)
+    model, transform = model_initialization(write_log,exp_params,verbose=VERBOSE, **exp_params['model_parameters'], 
+                                            n_local=n_local, n_global=n_global)
+
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print("train_df after preprocessing:", train_df.head(), flush=True)
 
     val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
     
@@ -271,7 +282,6 @@ def main(exp_params):
                                                                        SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
                                                                        train_df=train_df)
     
-    
     '''p = psutil.Process(os.getpid())
     for i, batch in enumerate(train_loader):
         del batch
@@ -279,11 +289,8 @@ def main(exp_params):
             print(f"batch {i}: rss={p.memory_info().rss/1e9:.2f} GB", flush=True)
         if i == 300: break'''
     
-
-    
     if DEBUG_IMGS:
         debug(train_loader,val_loader,exp_params)
-    
     
     lit_model = litmodel_initialization(model,counts,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
 
@@ -327,6 +334,7 @@ def main(exp_params):
 
 
 #### HELPER FUCNTIONS #### 
+
 def override_val_exclusion(train_df, val_exclusion_set, exp_params):
     if exp_params['pre_training']:
         N=2000
@@ -559,8 +567,11 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
         additional_kwargs['align_train_metrics_to_val']= exp_params['align_train_metrics_to_val']
         additional_kwargs['min_window_steps']= exp_params['min_window_steps']
         total_units = sum(counts)  # total number of samples in all classes
-    example_input_array = model_class.make_example_input(k=exp_params['num_tiles'], n_slots=13, C=exp_params['num_channels'], 
-                                                         H=exp_params['input_size'], W=exp_params['input_size'])
+    if exp_params.get('pass_example_input_array', False):
+        example_input_array = model_class.make_example_input(k=exp_params['num_tiles'], n_slots=13, C=exp_params['num_channels'], 
+                                                            H=exp_params['input_size'], W=exp_params['input_size'])
+    else:
+        example_input_array = None
     lit_model = model_class(write_log,model=model,total_units=total_units,lr_backbone=exp_params['lr_backbone'], 
                          lr_classifier_head=exp_params['lr_classifier_head'], example_input_array=example_input_array, 
                          opt_groups=define_optimization_groups, num_epochs=exp_params['num_epochs'], lr_scheduling=exp_params['lr_scheduling'],
@@ -572,7 +583,7 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
     return lit_model
 
 #model loading
-def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs):
+def model_initialization(write_log,exp_params, verbose=True,val=False, n_local=0, n_global=0, **kwargs):
     backbone,transform = get_model(name=exp_params['model'], pretrained=exp_params.get('pretrained', True),grayscale=exp_params['to_grayscale'])
     print("############# Model backbone loaded! #############")
     transform = get_transforms(exp_params, transform)
@@ -597,7 +608,10 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
         model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], view_agg='attention', **kwargs)
     elif exp_params['model_structure'] == 'FlexibleSequenceQuestionnaireModel':
         n_slots = 13  # This is a fixed value based on your description
-        model = FlexibleSequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, **kwargs)
+
+        model = FlexibleSequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, 
+                                                   n_local=n_local, n_global=n_global, 
+                                                   global_fusion=exp_params.get('global_fusion', 'late'), **kwargs)
     else:
         raise ValueError(f"Unknown model_structure: {exp_params['model_structure']}")
     
@@ -616,6 +630,52 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, **kwargs)
         write_log("Model Architecture and Trainable Parameters right after initialization:")
         write_log(trainable_parameters_info)
     return model, transform
+
+
+def _selected_properties_get_dims(params, train_df):
+    '''
+    this function uses the specified conditioning columns and the processed df to return the expected dimensions
+    for the conditioning signals
+    '''
+    from src.utils.tabular_data_utils import _MAP_COLUMNS
+    selected_properties = params.get('selected_properties', [])
+    if not selected_properties:
+        return 0,0
+
+    local_dims=0
+    global_dims=0
+    all_cols = train_df.columns.tolist()
+    for prop in selected_properties:
+        #get column type (normalize, one_hot, ..)
+        column_type = _MAP_COLUMNS.get(prop)
+        #check if local or global
+        is_local=False
+        if '*' in prop:
+            is_local=True
+            prop_base = prop.replace('*', '2') # Replace the '*' with '2' -> i will count in how many columns it the q1 expanded, will be the same for qX
+            #cannot use 1 because it would match q11:13 also
+        else:
+            prop_base = prop
+        
+        #if the column is mapped to a single column in the df i don't have to count
+        if column_type in ['normalize']: 
+            if is_local:
+                local_dims += 1
+            else:
+                global_dims += 1
+            continue
+        
+        #else i count in how manu columns it was expanded
+        n_cols=0
+        for col in all_cols:
+            if col.startswith('_'+prop_base):
+                n_cols += 1
+        if is_local:
+            local_dims += n_cols
+        else:
+            global_dims += n_cols
+
+    return local_dims, global_dims
 
 def logging_initialization():
     #read the current version number (starts from 1)

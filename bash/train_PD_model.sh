@@ -12,9 +12,7 @@
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
-#--gres=gpu:1
 #SBATCH --gres=gpu:h100:1
-#--nodelist=gpu05
 #SBATCH --exclude=gpu01,gpu02,gpu04
 
 # --- Environment Setup ---

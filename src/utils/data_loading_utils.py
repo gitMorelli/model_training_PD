@@ -819,15 +819,26 @@ def get_properties(sid,train_df,params, q_to_keep):
     local properties is a tensor of shape T_i,n (T_i number of questionnaires for subject i, n number of properties extracted per step)
     global  properties is a tensor of shape m (m number of properties extracted globally for the subject)
     """
-    selected_properties = params.get('selected_properties', None)
-    if selected_properties is None:
+    selected_properties={}
+    properties = params.get('selected_properties', None)
+    if not properties:   # True for None, [], (), '', etc.
         return None, None
+    
+    selected_properties['per_step'] = [prop for prop in properties if '*' in prop]
+    selected_properties['global'] = [prop for prop in properties if '*' not in prop]
+
     global_properties = []
     local_properties = []
     row = train_df[train_df['unique_id'] == sid].iloc[0]
+    all_cols = train_df.columns.tolist()
+
     if selected_properties['global'] is not None:
         for prop in selected_properties['global']: 
-            global_properties.append(row[prop])
+            #select all the properties that are in the columns of the dataframe and start with '_'+prop
+            prefix = '_' + prop
+            result = [s for s in all_cols if s.startswith(prefix)]
+            for r in result:
+                global_properties.append(row[r])
             '''
             note available global properties
             Column: etudegp
@@ -840,8 +851,10 @@ def get_properties(sid,train_df,params, q_to_keep):
             step_properties = []
             for prop in selected_properties['per_step']:
                 #substitute the '*' with q in prop
-                property_name = prop.replace('*', str(q))
-                step_properties.append(row[property_name])
+                prefix = '_' + prop.replace('*', str(q)) + '_'
+                result = [s for s in all_cols if s.startswith(prefix)]
+                for r in result:
+                    step_properties.append(row[r])
             local_properties.append(torch.tensor(step_properties, dtype=torch.float32))
             '''
             note available per-step properties
@@ -2002,9 +2015,9 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
         csv_data = original_data.copy()
     if verbose:
         print("[Prepare exclusion] [pre] Initial CSV data loaded. First row example:")
-        for col in csv_data.columns:
+        '''for col in csv_data.columns:
             print(f"{col}: {csv_data[col].iloc[0]}")
-        print('#' * 50)
+        print('#' * 50)'''
         print("Unique subjects in the dataset:", csv_data['unique_id'].nunique())
         print("Unique subjects in training set:", csv_data[csv_data['split'] == 'train']['unique_id'].nunique())
         print("Unique subjects in validation set:", csv_data[csv_data['split'] == 'val']['unique_id'].nunique())
@@ -2057,9 +2070,9 @@ def prepare_test_exclusion_set(exp_params,verbose=True,class_col='', pre_compute
         csv_data = original_data.copy()
     if verbose:
         print("Initial CSV data loaded. First row example:")
-        for col in csv_data.columns:
+        '''for col in csv_data.columns:
             print(f"{col}: {csv_data[col].iloc[0]}")
-        print('#' * 50)
+        print('#' * 50)'''
         print("Unique subjects in the dataset:", csv_data['unique_id'].nunique())
         print("Unique subjects in test set:", csv_data[csv_data['split'] == 'test']['unique_id'].nunique())
         print('#' * 50)

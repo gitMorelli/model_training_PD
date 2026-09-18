@@ -854,7 +854,24 @@ def open_exp_parameters():
         print(f"{key}: {value}")
     assert 1==0
 
+
 if __name__ == "__main__":
+    df = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
+    train_df = df[df['split']=='train']
+    columns_of_interest = ['etudegp', 'profq2', 'lateralite', 'relative_age']+[f'case_dt_dateq{i}' for i in range(1, 14)]
+    #for eachcolumn return the type the number of nans, and the number of unique values (or the range if continuous)
+    for col in columns_of_interest:
+        print(f"Column: {col}")
+        print(f"Type: {train_df[col].dtype}")
+        print(f"Number of NaNs: {train_df[col].isnull().sum()}")
+        n_unique=train_df[col].nunique()
+        print(f"Number of unique values: {n_unique}")
+        if n_unique <= 10:
+            print(f"Unique values: {train_df[col].unique()}")
+        if train_df[col].dtype in ['int64', 'float64']:
+            print(f"Range: {train_df[col].min()} - {train_df[col].max()}")
+        print("####################################")
+    assert 1==0
     open_exp_parameters()
     assert 1==0
     analyze_per_step_results()

@@ -583,8 +583,8 @@ class ModelPDBase(L.LightningModule):
         self._flush_train_window()
 
     # ---- forward ------------------------------------------------------------
-    def forward(self, frames, seq_ids, slot_ids, lengths):
-        return self.model(frames, seq_ids, slot_ids, lengths)
+    def forward(self, frames, seq_ids, slot_ids, lengths,**covariates):
+        return self.model(frames, seq_ids, slot_ids, lengths, **covariates)
 
     @staticmethod
     def make_example_input(k, n_slots, n_views_frames=2, C=3, H=224, W=224):
@@ -1134,13 +1134,27 @@ class ModelPDClassification(ModelPDBase):
                 return torch.sigmoid(outputs).reshape(-1)
             return torch.softmax(outputs, dim=1)[:, 1]         # 2-logit CE head
         return torch.softmax(outputs, dim=1)                   # multiclass
+    
+    # ----- Covariates helpers ---------------------
+    def forward(self, frames, seq_ids, slot_ids, lengths, global_properties=None, local_properties = None):
+        if global_properties is None and local_properties is None:
+            return self.model(frames, seq_ids, slot_ids, lengths)
+        else:
+            return self.model(frames, seq_ids, slot_ids, lengths,
+                          global_properties=global_properties, local_properties=local_properties)
+
+    def _get_covariates(self, batch):
+        global_properties = getattr(batch, "global_properties", None)   # None instead of an error
+        local_properties  = getattr(batch, "local_properties", None)    # None instead of an error
+
+        return {'global_properties': global_properties, 'local_properties': local_properties}
 
     # ---- loss + metrics --------------------------------------------------------
     def compute_loss_and_metrics(self, batch, stage):
         frames, seq_ids, slot_ids, lengths, labels, *_ = batch
         bsz = labels.size(0)
 
-        outputs = self(frames, seq_ids, slot_ids, lengths)
+        outputs = self(frames, seq_ids, slot_ids, lengths, **self._get_covariates(batch))
         logits, targets, subj_logits = self._unpack(outputs, batch)
 
         if stage == "train" and not self._guard_finite(logits, "outputs"):
@@ -1213,7 +1227,7 @@ class ModelPDClassification(ModelPDBase):
         frames, seq_ids, slot_ids, lengths, labels, \
             resizing_factors, subject_ids, modalities, *_ = batch
 
-        outputs = self(frames, seq_ids, slot_ids, lengths)
+        outputs = self(frames, seq_ids, slot_ids, lengths, **self._get_covariates(batch))
         tok_logits, subj_logits = outputs if self.per_step else (None, outputs)
 
         def _probs_preds(z):

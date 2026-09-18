@@ -520,7 +520,10 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
     """
     # unpack, tolerating the 5- or 6-element variant
     frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities, *_ = batch
+    global_properties = getattr(batch, "global_properties", None)   # None instead of an error
+    local_properties  = getattr(batch, "local_properties", None)    # None instead of an error
 
+ 
     seq_ids  = seq_ids.cpu()
     slot_ids = slot_ids.cpu()
     lengths  = lengths.cpu()
@@ -548,6 +551,10 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
     print(f"resizing_factors ({len(resizing_factors)}): {resizing_factors}")
     print(f"subject_ids ({len(subject_ids)}): {list(subject_ids)}")
     print(f"modalities ({len(modalities)}): {modalities}")
+    if global_properties is not None:
+        print(f"global_properties ({global_properties.shape}): {global_properties}")
+    if local_properties is not None:
+        print(f"local_properties ({local_properties.shape}): {local_properties}")
 
     # consistency check: lengths must match the frame counts implied by seq_ids
     counts = torch.bincount(seq_ids, minlength=B)

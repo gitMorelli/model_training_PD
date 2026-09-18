@@ -3,8 +3,6 @@ Traceback (most recent call last):
     return _run_code(code, main_globals, None,
   File "/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/runpy.py", line 86, in _run_code
     exec(code, run_globals)
-  File "/home/a_morelli/vscode_projects/model_training/src/scripts/tests.py", line 858, in <module>
-    open_exp_parameters()
-  File "/home/a_morelli/vscode_projects/model_training/src/scripts/tests.py", line 855, in open_exp_parameters
+  File "/home/a_morelli/vscode_projects/model_training/src/scripts/tests.py", line 874, in <module>
     assert 1==0
 AssertionError

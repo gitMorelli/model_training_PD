@@ -48,7 +48,7 @@ from src.utils.visualization import debug_images_dataset
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std
 from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
-from src.scripts.train_PD_model import model_initialization
+from src.scripts.train_PD_model import model_initialization, preprocess_PD_csv
 
 def get_last_best_checkpoint(checkpoint_dir,version):
     checkpoint_files = glob.glob(os.path.join(checkpoint_dir,f"v_{version}", "*best*.ckpt"))
@@ -60,10 +60,10 @@ def get_last_best_checkpoint(checkpoint_dir,version):
 
 experiment = "PD"#"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'resnet18' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'convnext_tiny' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='40'
-override_parameters=True
+version='4'
+override_parameters=False
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #get the most recent ckpt file with best in the name 
@@ -114,7 +114,7 @@ def main(exp_params):
     torch.manual_seed(exp_params['seed'])
     random.seed(exp_params['seed'])
     #with lightning 
-    L.seed_everything(exp_params['seed'], workers=True)
+    L.seed_everything(exp_params['seed'], workers=True) 
 
     #load grid_files for selecting chunks from the images during the dataloading
     grid_dict = load_grid_dict(exp_params)
@@ -133,6 +133,7 @@ def main(exp_params):
     
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
     val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
+    train_df, *_ = preprocess_PD_csv(train_df,exp_params.get('selected_properties', None), split_col='split')
 
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict, transform, 
                                                     SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df,
@@ -247,6 +248,7 @@ def prepare_balanced_validation(worker,prefetch_factor,exp_params, grid_dict, tr
 
     train_df = pd.read_parquet(exp_params_temp['list_of_ids_paths'])
     exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params_temp,verbose=VERBOSE,class_col=CLASS_COL, exclude_cases=True)
+    train_df, *_ = preprocess_PD_csv(train_df,exp_params.get('selected_properties', None), split_col='split')
 
     _,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params_temp,exclusion_set,val_exclusion_set, grid_dict, transform, 
                                                     SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df)
