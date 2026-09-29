@@ -973,10 +973,13 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             
             debug_pixel_space_augmentations = exp_params.get('debug_pixel_space_augmentations', False) 
             if debug_pixel_space_augmentations:
-                selected_transforms = selected_transforms + selected_transforms
-                selected_modality_names = [n for name in selected_modality_names for n in (name, name + '_noaug')]
+                selected_transforms = selected_transforms + selected_transforms +selected_transforms
+                selected_modality_names = [n for name in selected_modality_names for n in (name, name + '_noaug',name + '_diff')]
+            '''key_random = random.randint(0, 2**32 - 1) #unique key for the worker
+            print(key_random, selected_modality_names, flush=True)
+            print(key_random, selected_transforms, flush=True)'''
             for k, augmentation_transform in enumerate(selected_transforms):
-
+                #print(key_random, selected_modality_names[k],count_windows, flush=True)
                 if augmentation_transform[0] == 'original':
                     img_view = img.copy()
                 elif augmentation_transform[0] == 'grid':
@@ -993,9 +996,10 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     #create a sizexsizex3 blank image
                     img_view = Image.new('RGB', (size, size), color=(255, 255, 255))
                     if num>0:
+                        if '_noaug' in selected_modality_names[k] or '_diff' in selected_modality_names[k]:
+                            count_windows -= 1 #i should use the same index as that of the previous augmented slide
                         this_window_indexes = sampled_windows[(count_windows) * n_elements_window: (count_windows+1) * n_elements_window]
-                        if not '_noaug' in selected_modality_names[k]:
-                            count_windows += 1
+                        count_windows += 1
                         patches=[]
                         for idx in this_window_indexes:
                             patch = get_grid_sample(x_coords, y_coords, img, idx, n_x)
@@ -1011,8 +1015,16 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                 pixel_space_augmentations=exp_params.get('image_pixel_space_augmentations', None)
                 if (pixel_space_augmentations is not None) and (not is_val) and (not '_noaug' in selected_modality_names[k]): #apply augmentation in pixel space (only during training)
                     sigma = 0.0
-                    print("----------------> Augmenting")
+                    #print("----------------> Augmenting")
                     img_view, sigma = augment_frame(img_view, rng, pixel_space_augmentations)
+
+                    '''orig = img_view.copy()
+                    aug, sigma = augment_frame(orig, rng, pixel_space_augmentations)
+
+                    a = np.asarray(orig.convert("L"), dtype=np.int16)
+                    b = np.asarray(aug.convert("L"), dtype=np.int16)
+                    print("mean abs diff:", np.abs(a - b).mean(), " max:", np.abs(a - b).max())
+                    print("-"*50)'''
                     #sigma has no effect, i should add it as gaussian noise after to_tensor and before normalization
                     '''
                     t = TF.to_tensor(f) 
@@ -1056,6 +1068,11 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                              trend_keys=("bbox_height", "stroke_width_mean"),  #"ink_area", "fill_ratio"
                              reductions=("mean", "std"))
                     list_of_views.append(metadata)
+                elif '_diff' in selected_modality_names[k]:
+                    orig_tensor=list_of_views[-1]  #the previous one is the original
+                    augment_tensor=list_of_views[-2]  #the one before is the augmented
+                    diff_tensor = torch.abs(orig_tensor - augment_tensor)
+                    list_of_views.append(diff_tensor)
                 else:
                     list_of_views.append(img_tensor)
                 list_of_modality_names.append(selected_modality_names[k])

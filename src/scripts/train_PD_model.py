@@ -165,14 +165,14 @@ exp_params = {
     #in the code based on the view name
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
-    'image_pixel_space_augmentations': GEOM_ONLY,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
+    'image_pixel_space_augmentations': ALL,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
 
     
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
     'lr_decay': 0.2, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
-    'lr_backbone': 1e-5,
+    'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
@@ -185,7 +185,7 @@ exp_params = {
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier'],
+    'layers_to_unfreeze': ['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,

@@ -396,7 +396,7 @@ def debug_images_PD_with_meta_old(mean, std, batch, out_dir,
     return debug_show_batch(batch, out_dir=out_dir)
 
 def debug_images_PD(mean, std, loader, out_dir, input_is_batch=False,
-                    meta_fn=None, show_metadata=True):
+                    meta_fn=None, show_metadata=True): 
     #(N, k, C, H, W), N = sum(T_i) - Format
     def _denorm_to_hwc(img, mean, std):
         """(C,H,W) tensor -> (H,W[,C]) numpy in [0,1] for imshow."""

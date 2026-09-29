@@ -754,9 +754,10 @@ def _fires(p, rng):
     return p is not None and rng.random() < p
 
 
-def augment_frame(img, rng, cfg):
+def augment_frame(img_source, rng, cfg):
     """One independent draw per frame — models a distinct acquisition.
     Any cfg probability set to None disables that transform outright."""
+    img = img_source.copy()
     bands = len(img.getbands())
     W, H = img.size
     paper = estimate_paper(img)
@@ -777,6 +778,7 @@ def augment_frame(img, rng, cfg):
 
     # --- photometric ---------------------------------------------------
     if _fires(cfg.get("p_photo"), rng):
+        #print("Applying photometric transformations")
         contrast, gamma = cfg.get("contrast"), cfg.get("gamma")
 
         if contrast is not None or gamma is not None:
@@ -844,6 +846,10 @@ CFG = dict(brightness=0.15, contrast=0.15, gamma=(0.85, 1.18), hue=0.02,
            p_bg=0.5, p_photo=0.8, p_shift=0.8, p_erase=0.4)
 
 ALL = {**CFG}
+LOUD = {**ALL, "brightness": 0.6, "contrast": 0.6, "max_shift": 60,
+        "erase_area": (0.05, 0.1),
+        "p_bg": 1.0, "p_photo": 1.0, "p_shift": 1.0, "p_erase": 1.0}
+
 NO_AUG      = {**CFG, "p_bg": None, "p_photo": None, "p_shift": None,
                       "p_erase": None, "read_sigma": None}
 PHOTO_ONLY  = {**CFG, "p_bg": None, "p_shift": None, "p_erase": None}

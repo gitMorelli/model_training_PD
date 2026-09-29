@@ -60,9 +60,9 @@ def get_last_best_checkpoint(checkpoint_dir,version):
 
 experiment = "PD"#"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'convnext_tiny' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'resnet18' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='4'
+version='36'
 override_parameters=False
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
@@ -175,8 +175,8 @@ def main(exp_params):
         if exp_params['matched_validation']:
             print("#" * 50)
             print(f"Evaluating model on matched validation set using checkpoint: {ckpt_path}")
-            outputs = trainer.predict(lit_model, dataloaders=matched_val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
-            results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = get_result_df(outputs)
+            outputs_matched = trainer.predict(lit_model, dataloaders=matched_val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
+            results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = get_result_df(outputs_matched)
             analyze_results(all_probs_matched, all_labels_matched, results_df_matched, split="matched_validation",
                             pos_label=1, threshold=None, strategy="youden",
                             target_recall=0.90, plot=True, out_dir_path=save_path)
@@ -342,13 +342,14 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
                                   class_names=("negative", "positive"),
                                   min_count=1, show_points=True,
                                   point_alpha=0.15, save_path=None,
-                                  save_name="probability_trajectories", step_is_years=False):
+                                  save_name="probability_trajectories", step_is_years=False,
+                                  signal_column= "probability_1"):
     """Average probability_1 across subjects on a binned case_dt axis.
     Rows are binned to N equal-width steps between min and max case_dt.
     Each class (true_label 0 / 1) gets a mean curve with a ±SEM band.
     Bins with fewer than `min_count` subjects are dropped from that class.
     """
-    d = df.dropna(subset=["case_dt", "probability_1", "true_label"]).copy()
+    d = df.dropna(subset=(signal_column, "case_dt", "true_label")).copy()
     if d.empty:
         raise ValueError("no rows with case_dt, probability_1, and true_label")
 
@@ -366,7 +367,7 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
     centers = 0.5 * (edges[:-1] + edges[1:])
     d["_bin"] = np.clip(np.digitize(d["case_dt"], edges) - 1, 0, n_steps - 1)
 
-    grp = d.groupby(["true_label", "_bin"])["probability_1"]
+    grp = d.groupby(["true_label", "_bin"])[signal_column]
     stats = grp.agg(mean="mean", std="std", n="count").reset_index()
     stats["sem"] = stats["std"] / np.sqrt(stats["n"])
     stats = stats[stats["n"] >= min_count]
@@ -392,7 +393,7 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
                 rng = np.random.default_rng(label)
                 jitter = rng.uniform(-0.3, 0.3, len(raw)) * bin_w
                 ax.scatter(centers[raw["_bin"].to_numpy()] + jitter,
-                           raw["probability_1"], s=8, color=color,
+                           raw[signal_column], s=8, color=color,
                            alpha=point_alpha, linewidths=0, zorder=1)
 
         # ±SEM band with a visible edge, then the mean line, then the markers
@@ -406,10 +407,10 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
 
     ax.axhline(0.5, color="gray", lw=0.7, ls="--", alpha=0.6)
     ax.set_xlabel(f"case_dt (binned), {n_steps} steps, {width_bin_years:.2f} years wide")
-    ax.set_ylabel("probability_1")
-    pad = 0.02 * (d["probability_1"].max() - d["probability_1"].min() or 1)
-    ax.set_ylim(d["probability_1"].min() - pad,
-                d["probability_1"].max() + pad)
+    ax.set_ylabel(signal_column)
+    pad = 0.02 * (d[signal_column].max() - d[signal_column].min() or 1)
+    ax.set_ylim(d[signal_column].min() - pad,
+                d[signal_column].max() + pad)
     ax.grid(True, axis="y", alpha=0.25, linewidth=0.5)
     ax.legend(loc="best", frameon=False)
 

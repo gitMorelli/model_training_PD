@@ -749,8 +749,8 @@ def inspect_fold_per_step():
 
 def analyze_per_step_results():
     from src.debug.PD_model_evaluation import plot_probability_trajectories_2, plot_probability_trajectories
-    #load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/per_step_predictions.csv"
-    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/pre_diagnosis/per_step_predictions.csv"
+    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/per_step_predictions.csv"
+    #load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/pre_diagnosis/per_step_predictions.csv"
     predictions = pd.read_csv(load_path)
     save_path = "/home/a_morelli/vscode_projects/model_training/results/tests"
     for n in [3, 5, 10, 20, 30]:
@@ -845,7 +845,7 @@ def inspect_statistics_PD():
 
 def open_exp_parameters():
     path = "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2/exp_params.pkl"
-    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_5/exp_params.pkl"
+    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_6/exp_params.pkl"
     #load the exp_params.pkl file and print the keys and values
     with open(path, "rb") as f:
         exp_params = pickle.load(f)
@@ -873,6 +873,4 @@ def explore_covariates():
         print("####################################")
 
 if __name__ == "__main__":
-    open_exp_parameters()
-    assert 1==0
     analyze_per_step_results()
