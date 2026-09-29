@@ -90,6 +90,8 @@ def get_input_modality(name):
     elif name=='window_no_text':
         n=3
         return ['X_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
+    elif name=='window_debug_aug':
+        return ['X_window','_X_window']+ ['digit_window' , '_digit_window']+ ['text_window', '_text_window']
 
 RESTORE = False
 version_override =  11
@@ -110,7 +112,7 @@ exp_params = {
     'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
     'synthetic': None , # ALL_SYNTHETIC_TRANSFORMS or None
     'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
-    'selected_properties': ['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*'], #None or [] means no conditioning on covariates
+    'selected_properties': [],#['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*'], #None or [] means no conditioning on covariates
     #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
     'global_fusion':'late', #early, late
 
@@ -163,7 +165,7 @@ exp_params = {
     #in the code based on the view name
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
-    'image_pixel_space_augmentations': None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
+    'image_pixel_space_augmentations': GEOM_ONLY,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
 
     
     #Training params definition
@@ -179,7 +181,7 @@ exp_params = {
     'max_steps': -1, #N or -1
     'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
+    'eta_min_cosine': 1e-8, #the timm-style convention (base/100)
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,

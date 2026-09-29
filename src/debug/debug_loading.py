@@ -39,6 +39,8 @@ from src.utils.visualization import debug_images_dataset, save_img_with_info_vie
 from src.utils.visualization import SubjectViewer, launch_interactive_PD
 from src.utils.training_utils import set_automatic_hyperparameters
 from src.debug.create_statistics_on_images import read_loader
+from src.scripts.train_PD_model import get_input_modality
+from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
 
 params = {
     'selected_problem': "PD",#"PD", # "handedness"
@@ -46,7 +48,7 @@ params = {
     'pre_training': False,
     'debug': False,
 
-    'pre_filter_csv': False,
+    'pre_filter_csv': False, 
     'integrate_csv': False,
     'columns_to_add': ['rempli_seulq12'],
     'interactive_visualization': False,
@@ -56,7 +58,7 @@ params = {
                                'case_grid_pattern','q_5_num_X',
                                'synth_label'],
 
-    "data_modality": ['X_window','digit_window','text_window']+['X_window','digit_window','text_window']+['X_window','digit_window','text_window'],
+    "data_modality": get_input_modality('window_view'),
     #['X_window' for _ in range(2)]+['digit_window' for _ in range(2)]+['text_window' for _ in range(2)],
     #['X_crop']+['digit_full','digit_crop']+['digit' for _ in range(3)]+['text_full','text_crop']+ ['text' for _ in range(3)], # 'X', 'text', 'digit', 'all' (all returns 3x3x224x224 elements instead of 3x224x224)
     "num_tiles": 3,
@@ -73,6 +75,8 @@ params = {
     "invert_color": True,
     "use_grid": True,
     "to_grayscale": True,
+    'image_pixel_space_augmentations': GEOM_ONLY,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
+    'debug_pixel_space_augmentations': True, #if True it will create a second version of the image without pixel space augmentations (to debug the effect of pixel space augmentations)
 
     "seed": 42,
     "balanced_data": True,
@@ -124,9 +128,9 @@ SHARD_PATTERN_val = os.path.join(params['data_folder'],"val/worker*_shard-*.tar"
 VERBOSE = True
 
 
-def main(params,run_random_samples_from_loader=False, 
+def main(params,run_random_samples_from_loader=True, 
          run_study_loader = False, show_grids=False, 
-         run_compute_time = True, run_debug_from_shards=False,
+         run_compute_time = False, run_debug_from_shards=False,
          run_explore_files=False):
     args = get_args()
     random.seed(params['seed'])

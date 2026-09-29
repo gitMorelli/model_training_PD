@@ -2011,6 +2011,7 @@ def get_optimization_groups(model_name,exp_params):
 
 #Set hyperparameters / metadata
 def set_automatic_hyperparameters(exp_params):
+    bar = "=" * 80
     if exp_params.get('label_smoothing', 0.0)!=0.0:
         exp_params['num_classes'] = 2
         msg = (f"Label smoothing is only compatible with the cross entropy loss ->"
@@ -2024,7 +2025,6 @@ def set_automatic_hyperparameters(exp_params):
         exp_params['lr_classifier_head'] *= effective_batch_size / ref_size
         msg = (f"Scaling learning rates with effective batch size {effective_batch_size} (base {ref_size}): "
                 f"lr_backbone={exp_params['lr_backbone']}, lr_classifier_head={exp_params['lr_classifier_head']}")
-        bar = "=" * 80
         print(f"\n{bar}\n>>> [LR SCALING] {msg}\n{bar}\n", flush=True)
     if exp_params.get('lora_tuning', False):
         exp_params['layers_to_unfreeze'] = ['classifier']

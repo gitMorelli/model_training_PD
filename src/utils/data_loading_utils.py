@@ -971,6 +971,10 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     sampled_windows = sampled_windows_no_rep[:n_elements_window * n_window_views]
                 count_windows = 0
             
+            debug_pixel_space_augmentations = exp_params.get('debug_pixel_space_augmentations', False) 
+            if debug_pixel_space_augmentations:
+                selected_transforms = selected_transforms + selected_transforms
+                selected_modality_names = [n for name in selected_modality_names for n in (name, name + '_noaug')]
             for k, augmentation_transform in enumerate(selected_transforms):
 
                 if augmentation_transform[0] == 'original':
@@ -990,7 +994,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     img_view = Image.new('RGB', (size, size), color=(255, 255, 255))
                     if num>0:
                         this_window_indexes = sampled_windows[(count_windows) * n_elements_window: (count_windows+1) * n_elements_window]
-                        count_windows += 1
+                        if not '_noaug' in selected_modality_names[k]:
+                            count_windows += 1
                         patches=[]
                         for idx in this_window_indexes:
                             patch = get_grid_sample(x_coords, y_coords, img, idx, n_x)
@@ -1004,12 +1009,13 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                     img_view = augmentation_transform[1](img)
                 
                 pixel_space_augmentations=exp_params.get('image_pixel_space_augmentations', None)
-                if (pixel_space_augmentations is not None) and (not is_val): #apply augmentation in pixel space (only during training)
+                if (pixel_space_augmentations is not None) and (not is_val) and (not '_noaug' in selected_modality_names[k]): #apply augmentation in pixel space (only during training)
                     sigma = 0.0
+                    print("----------------> Augmenting")
                     img_view, sigma = augment_frame(img_view, rng, pixel_space_augmentations)
                     #sigma has no effect, i should add it as gaussian noise after to_tensor and before normalization
                     '''
-                    t = TF.to_tensor(f)
+                    t = TF.to_tensor(f) 
                     if sigma:
                         t = (t + torch.randn_like(t) * sigma).clamp(0, 1)
                     out.append(TF.normalize(t, self.mean, self.std))

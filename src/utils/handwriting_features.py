@@ -110,9 +110,9 @@ def _contour_features(mask, smooth_sigma=2.0, min_contour_points=12):
             "contour_jitter_rms": float("nan"),
             "contour_length": float("nan")}
 
-    padded = np.pad(mask.astype(np.float64), 1)
+    padded = np.pad(mask.astype(np.float64), 1) #CHECK: consider smoothing the padded image to have cleaner contours
     try:
-        contours = find_contours(padded, 0.5)
+        contours = find_contours(padded, 0.5) #CHECK: is 0.5 ok?
     except Exception:
         return nan3
 
@@ -272,6 +272,11 @@ def _cell_features(mask, min_component_area=8, compute_slant=True):
         nb = nb[skel]
         feats["endpoints_per_100_skel_px"] = _f(100.0 * (nb == 1).sum() / skel_len)
         feats["branchpoints_per_100_skel_px"] = _f(100.0 * (nb >= 3).sum() / skel_len)
+        '''
+        CHECK: the following is a more robust way to count branchpoints
+        bp_mask = skel & (nb_full >= 3)          # nb_full = convolution result before indexing by skel
+        n_junctions = ndi.label(bp_mask, structure=np.ones((3, 3)))[1]
+        '''
     else:
         for k in ("stroke_width_mean", "stroke_width_std", "stroke_width_cv",
                   "stroke_width_p10", "stroke_width_p90",
@@ -288,7 +293,7 @@ def _cell_features(mask, min_component_area=8, compute_slant=True):
     feats["perimeter"] = _f(per)
     feats["compactness"] = _f(per ** 2 / max(ink_area, 1))
     try:
-        eul = int(euler_number(crop, connectivity=2))
+        eul = int(euler_number(crop, connectivity=2)) #NOTE: conncetivity should be the same as the one used for the connected components
     except Exception:
         eul = 0
     feats["n_holes"] = float(max(n_raw - eul, 0))
@@ -301,7 +306,7 @@ def _cell_features(mask, min_component_area=8, compute_slant=True):
     feats["slant_deg"] = _slant_deg(crop) if compute_slant else float("nan")
 
     # ---- run lengths inside the bbox --------------------------------------- #
-    for axis, tag in ((0, "h"), (1, "v")):
+    for axis, tag in ((0, "h"), (1, "v")): #WARNING: mean and std are not the best descrptors for run lengths
         m, s = _mean_std(_ink_runs(crop, axis=axis))
         feats[f"ink_run_{tag}_mean"], feats[f"ink_run_{tag}_std"] = m, s
         m, s = _mean_std(_interior_gap_runs(crop, axis=axis))

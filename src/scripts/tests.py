@@ -845,7 +845,7 @@ def inspect_statistics_PD():
 
 def open_exp_parameters():
     path = "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2/exp_params.pkl"
-    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_8/exp_params.pkl"
+    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_5/exp_params.pkl"
     #load the exp_params.pkl file and print the keys and values
     with open(path, "rb") as f:
         exp_params = pickle.load(f)
@@ -855,7 +855,7 @@ def open_exp_parameters():
     assert 1==0
 
 
-if __name__ == "__main__":
+def explore_covariates():
     df = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
     train_df = df[df['split']=='train']
     columns_of_interest = ['etudegp', 'profq2', 'lateralite', 'relative_age']+[f'case_dt_dateq{i}' for i in range(1, 14)]
@@ -871,7 +871,8 @@ if __name__ == "__main__":
         if train_df[col].dtype in ['int64', 'float64']:
             print(f"Range: {train_df[col].min()} - {train_df[col].max()}")
         print("####################################")
-    assert 1==0
+
+if __name__ == "__main__":
     open_exp_parameters()
     assert 1==0
     analyze_per_step_results()
