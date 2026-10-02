@@ -1,34 +1,15 @@
-import tarfile
 import time
 import io
 from tkinter.font import names
-import torch
-from PIL import Image
-from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms as T
 import os
 import pandas as pd
-import torch.nn as nn
 import time
-import webdataset as wds
-import glob
-from tqdm import tqdm
-import torch.optim as optim
-from torchvision import models
-import torchvision.utils as vutils
-import lightning as L
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
-from lightning.pytorch.loggers import TensorBoardLogger
-import random
-import shutil
-#from lightning.pytorch.loggers import CSVLogger
-from lightning.pytorch.callbacks import Callback
 from datetime import datetime, timedelta
 import numpy as np
 from pathlib import Path
 import json
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from sklearn.metrics import classification_report
@@ -47,6 +28,7 @@ from src.utils.data_loading_utils import questionnaires_to_keep
 from src.debug.PD_model_evaluation import  analyze_results
 from sklearn.inspection import permutation_importance
 from src.debug.PD_model_evaluation import tee_stdout
+from src.debug.PD_model_evaluation import plot_probability_trajectories
 
 params = {
 
@@ -57,6 +39,7 @@ params = {
     #To put for compatibility with code
     "grouped": False,
     'filter_missing': 'last_q', #all
+    'compute_per_step': True,
 
     "model": "clip-vit-large-patch14-inter",
     "loaded_timestamp": "17092026",
@@ -67,10 +50,13 @@ params = {
 
     #for representation
     "representation_type": "concat", #concat, mod, mean
-    "use_pca": False,
+    "impute_missing": False,#False leaves the Nan, True imputes with mean 
+    "use_pca": False, #requires imputing
     "n_components": 50,
     "n_splits": 5,
     "compare_all": False, #if True it will score all 6 combinations instead of just the one above
+    "max_nan_frac":0.95, #features with a fraction of NaN values greater than this threshold will be dropped. 
+    "nan_ref": "train", # "train", "all=train+val"
 
     #feature importance
     "importance":"auto", # auto = only computes it if the model has it, "permutation" = always compute permutation importance (model agnostic)
@@ -153,7 +139,7 @@ def main():
     
     
     if params["mask_features"]:
-        df = mask_features(df, params) #masking features for the representation
+        df,keep_dict = mask_features(df, params) #masking features for the representation
 
     time_taken = time.time() - start
     print(f"----- > Time taken to mask the features: {time_taken:.2f} seconds", flush=True)
@@ -167,7 +153,7 @@ def main():
     save_dir = get_save_path(params)
     log_path = os.path.join(save_dir, f"stats.txt") #copy prints also to a log file in the checkpoint folder
     with tee_stdout(log_path):
-        results_df, all_probs, all_labels, imp_df = process_representation(df, params, verbose=VERBOSE, prop_names=properties)
+        results_df, all_probs, all_labels, imp_df, pipeline = process_representation(df, params, verbose=VERBOSE, prop_names=properties)
 
         analyze_results(all_probs, all_labels, results_df, split="validation",
                             pos_label=1, threshold=None, strategy="youden",
@@ -180,8 +166,18 @@ def main():
             print(f"Feature importance per key:\n{per_key}")
             imp_df.to_csv(os.path.join(save_dir, "feature_importance.csv"), index=False)
             print(f"Feature importance saved to {os.path.join(save_dir, 'feature_importance.csv')}")
-
-        save_results(save_dir, params, results_df)
+        
+        if params.get('compute_per_step',False):
+            results_per_step = process_per_step(pipeline, df, reference_df, keep_dict,
+                                                params, verbose=VERBOSE, prop_names=properties)
+            for n in [5, 10, 15, 20]:
+                statistics,diff = plot_probability_trajectories(results_per_step, n_steps=n, ax=None,
+                                                    class_names=("negative", "positive"),
+                                                    min_count=1, save_path=save_dir, 
+                                                    save_name=f"probability_trajectories_{n}", plot_difference=True, show_points=True)
+        else:
+            results_per_step = None
+        save_results(save_dir, params, results_df, results_per_step=results_per_step)
 
 def check_available_subjects(df, column="subject_id"):
     #get the number of unique subject_ids in the train split with the class_col == 0 and with te class col==1
@@ -210,7 +206,7 @@ def get_save_path(params):
 
     return save_dir
 
-def save_results(save_dir, params, results_df):
+def save_results(save_dir, params, results_df, results_per_step=None):
     #save the params in a pkl file
     params_path = os.path.join(save_dir, "params.pkl")
     with open(params_path, "wb") as f:
@@ -221,6 +217,11 @@ def save_results(save_dir, params, results_df):
     results_path = os.path.join(save_dir, "results.csv")
     results_df.to_csv(results_path, index=False)
     print(f"Results saved to {results_path}")
+
+    if results_per_step is not None:
+        results_per_step_path = os.path.join(save_dir, "results_per_step.csv")
+        results_per_step.to_csv(results_per_step_path, index=False)
+        print(f"Results per step saved to {results_per_step_path}")
 
 def mask_features(df_source, params):
     original_data = pd.read_parquet(params['list_of_ids_paths'])
@@ -246,6 +247,7 @@ def mask_features(df_source, params):
     censor_time = params['censor_time']
     subject_images = list(range(1, 14))
     keep_set = set()
+    keep_dict = {}
     for sid in df['subject_id'].unique():
         sub = per_subject[sid]          # tiny DataFrame, O(1) lookup
         r = sub.iloc[0]                 # scalar fields come from the same slice
@@ -254,6 +256,7 @@ def mask_features(df_source, params):
                                       sub, sid, subject_images,
                                       r['case_grid_pattern'], r['rempli_seulq12'])
         keep_set.update((sid, q) for q in keep)
+        keep_dict[sid] = keep
 
     kept = np.fromiter(((s, q) in keep_set for s, q in zip(df['subject_id'], df['q'])),
                        dtype=bool, count=len(df))
@@ -264,7 +267,7 @@ def mask_features(df_source, params):
           f"total {final_mask.sum()}/{len(df)}")
     reps[final_mask] = np.nan
     df['rep'] = list(reps)
-    return df
+    return df, keep_dict
 
 def reshape_features(
     df,
@@ -435,9 +438,11 @@ class FeatureBundle:
     y: np.ndarray                   # (n_subjects,)
     subjects: np.ndarray            # (n_subjects,) ids, sorted
     split_of_subj: np.ndarray       # (n_subjects,) "train" / "val"
-    keys: list                      # column keys, sorted
+    keys: list                      # column keys, sorted (pre-filter layout)
     mod_of_key: np.ndarray          # modality of each key
     D: int
+    dropped: dict = field(default_factory=dict)  # rep name -> pd.Series(nan_frac, index=dropped names)
+    max_nan_frac: Optional[float] = None
 
     @property
     def n(self) -> int:
@@ -451,6 +456,19 @@ class FeatureBundle:
     def val_mask(self) -> np.ndarray:
         return self.split_of_subj == "val"
 
+def drop_nan_columns(X, names, max_nan_frac, ref_mask=None):
+    """Drop columns whose NaN fraction exceeds max_nan_frac.
+
+    The fraction is computed over the rows in ref_mask (all rows if None).
+    Returns the filtered X, the filtered names, and a Series of the dropped
+    names -> NaN fraction, sorted from most to least missing.
+    """
+    ref = X if ref_mask is None else X[ref_mask]
+    nan_frac = np.isnan(ref).mean(axis=0)
+    keep = nan_frac <= max_nan_frac          # strictly "more than" is dropped
+    dropped = (pd.Series(nan_frac[~keep], index=names[~keep], name="nan_frac")
+                 .sort_values(ascending=False))
+    return X[:, keep], names[keep], dropped
 
 def build_feature_names(rep_name, keys, mod_of_key, prop_names):
     """Names in the exact column order that build_subject_features produces.
@@ -473,8 +491,21 @@ def build_subject_features(
     df: pd.DataFrame,
     params: dict,
     prop_names: Optional[Sequence] = None,
+    max_nan_frac: Optional[float] = None,
+    nan_ref: str = "train",
     verbose: bool = False,
 ) -> FeatureBundle:
+    """...
+    max_nan_frac : drop columns with a NaN fraction strictly greater than this
+                   (e.g. 0.3). None disables filtering.
+    nan_ref      : "train" computes NaN fractions on train subjects only (no
+                   peeking at val), "all" uses every subject.
+    """
+    if max_nan_frac is not None and not 0.0 <= max_nan_frac <= 1.0:
+        raise ValueError(f"max_nan_frac must be in [0, 1], got {max_nan_frac}")
+    if nan_ref not in ("train", "all"):
+        raise ValueError(f"nan_ref must be 'train' or 'all', got {nan_ref!r}")
+
     D = np.asarray(df["rep"].iloc[0]).shape[0]
 
     # .copy() avoids SettingWithCopyWarning when adding the "key" column below
@@ -537,11 +568,32 @@ def build_subject_features(
             raise AssertionError(f"[{rep}] {len(nm)} names vs {X.shape[1]} columns")
         names[rep] = nm
 
+    # --- NaN-based column filtering ---------------------------------------
+    # Done after naming so matrix and names are filtered with the same mask.
+    dropped = {}
+    if max_nan_frac is not None:
+        ref_mask = (split_of_subj == "train") if nan_ref == "train" else None
+        if ref_mask is not None and not ref_mask.any():
+            raise ValueError("nan_ref='train' but there are no train subjects")
+        for rep in list(FEATURES):
+            n_before = FEATURES[rep].shape[1]
+            X, nm, dr = drop_nan_columns(FEATURES[rep], names[rep], max_nan_frac, ref_mask)
+            if X.shape[1] == 0:
+                raise ValueError(
+                    f"[{rep}] all {n_before} features exceed max_nan_frac={max_nan_frac}"
+                )
+            FEATURES[rep], names[rep], dropped[rep] = X, nm, dr
+
     print(f"{n} subjects | {len(keys)} keys | "
           f"train {int((split_of_subj == 'train').sum())} | "
           f"val {int((split_of_subj == 'val').sum())}")
     for k, v in FEATURES.items():
-        print(f"  {k:7s} -> {v.shape[1]:6d} features")
+        msg = f"  {k:7s} -> {v.shape[1]:6d} features"
+        if max_nan_frac is not None:
+            msg += f"  ({len(dropped[k])} dropped, NaN frac > {max_nan_frac:.0%} on {nan_ref})"
+        print(msg)
+        if verbose and len(dropped.get(k, ())):
+            print(dropped[k].head(10).to_string())
 
     if verbose:
         _run_checks(df, FEATURES, y, subjects, params)
@@ -549,6 +601,7 @@ def build_subject_features(
     return FeatureBundle(
         FEATURES=FEATURES, names=names, y=y, subjects=subjects,
         split_of_subj=split_of_subj, keys=keys, mod_of_key=mod_of_key, D=D,
+        dropped=dropped, max_nan_frac=max_nan_frac,
     )
 
 
@@ -587,10 +640,13 @@ def build_pipe(params, n_train, n_features):
     model_name = params["selected_model"]
     model = get_sklearn_model(model_name, **(params.get("sklearn_model_parameters") or {}))
 
-    steps = [
-        ("impute", SimpleImputer(strategy="mean")),
-        ("scale", StandardScaler()),
-    ]
+    steps = []
+
+    if params.get("impute_missing",False):
+        steps.append(("impute", SimpleImputer(strategy="mean")))
+    
+    steps.append(("scale", StandardScaler()))
+
     if params.get("use_pca"):
         n_comp = min(params["n_components"], n_train - 1, n_features)
         steps.append(("pca", PCA(n_components=n_comp, random_state=params["seed"])))
@@ -667,6 +723,8 @@ def _split_name_cols(imp_df):
 def eval_holdout(bundle: FeatureBundle, params: dict, rep: str, importance="auto"):
     """Respects the `split` column.  Returns (results_df, imp_df)."""
     X, names = bundle.FEATURES[rep], bundle.names[rep]
+    #print(names)
+    #assert 1==0
     tr, va = bundle.train_mask, bundle.val_mask
     X_train, y_train = X[tr], bundle.y[tr]
     X_val, y_val = X[va], bundle.y[va]
@@ -685,7 +743,7 @@ def eval_holdout(bundle: FeatureBundle, params: dict, rep: str, importance="auto
 
     imp_df = _split_name_cols(imp_df)
     imp_df = imp_df.sort_values("importance", ascending=False, ignore_index=True)
-    return results_df, imp_df
+    return results_df, imp_df, pipeline
 # ============================================================================
 
 # ============================================================================
@@ -758,18 +816,89 @@ def cv_summary(oof_df, metric="accuracy"):
 # ============================================================================
 # Wrappers
 def process_representation(df, params, verbose=False, prop_names=None):
-    bundle = build_subject_features(df, params, prop_names=prop_names, verbose=verbose)
+    bundle = build_subject_features(df, params, prop_names=prop_names, verbose=verbose, max_nan_frac=params.get("max_nan_frac", None),
+                                    nan_ref=params.get("nan_ref", "train"))
     importance = params.get("importance", "auto")
+
+    print("Dropped features (based on NaN fraction):")
+    print(bundle.dropped[params["representation_type"]] if bundle.dropped else "None")
 
     if params["compare_all"]:
         return {rep: eval_holdout(bundle, params, rep, importance)
                 for rep in bundle.FEATURES}
 
-    results_df, imp_df = eval_holdout(bundle, params, params["representation_type"], importance)
+    results_df, imp_df, pipeline = eval_holdout(bundle, params, params["representation_type"], importance)
     all_labels = results_df["true_label"].to_numpy()
     all_probs = np.stack([results_df["probability_0"].to_numpy(),
                           results_df["probability_1"].to_numpy()], axis=1)
-    return results_df, all_probs, all_labels, imp_df
+    return results_df, all_probs, all_labels, imp_df, pipeline
+
+def process_per_step(pipeline,df,reference_df,keep_dict, params, verbose=False, prop_names=None):
+    bundle = build_subject_features(df, params, prop_names=prop_names, verbose=verbose, max_nan_frac=params.get("max_nan_frac", None),
+                                    nan_ref=params.get("nan_ref", "train"))
+
+    print("Dropped features (based on NaN fraction):")
+    print(bundle.dropped[params["representation_type"]] if bundle.dropped else "None")
+
+    if params["compare_all"]:
+        raise NotImplementedError("compare_all is not implemented for process_per_step")
+
+    rep = params["representation_type"]
+    if rep not in ['concat']:
+        raise ValueError(f"Representation type {rep} is not supported for process_per_step. ")
+    
+    X, names = bundle.FEATURES[rep], bundle.names[rep]
+    tr, va = bundle.train_mask, bundle.val_mask
+
+    X_val, y_val = X[va], bundle.y[va]
+
+    #i precompute the predictions for each step (prediction is made keeping all available data till that step)
+    X_temp = X_val.copy()
+    all_results = []
+    for i in range(13, 0, -1): 
+        #create a copy of X_val in which all features corresponding to q{i} are set to NaN
+        q_i_mask = np.array([f"q{i+1}|" in name for name in names])
+        X_temp[:, q_i_mask] = np.nan
+        results_df = _predict_frame(pipeline, X_temp, bundle.subjects[va], y_val, tag=rep)
+        results_df["step"] = i
+        all_results.append(results_df)
+    all_results_df = pd.concat(all_results, ignore_index=True)
+
+    rows = []
+    for i in range(len(X_val)):
+        unique_id = bundle.subjects[va][i]
+        true_label = y_val[i]
+        steps = keep_dict.get(unique_id, [])
+        sorted_steps = sorted(steps)
+        
+        #for each available step return a prediction, then remove that step and repeat
+        for q in sorted_steps:
+            row_result = all_results_df[(all_results_df["unique_id"] == unique_id) & (all_results_df["step"] == q)]
+            row = {
+                "unique_id": unique_id,
+                "true_label": true_label,
+                "q": q,
+                "predicted_label": row_result["predicted_label"].values[0],
+                "probability_0": row_result["probability_0"].values[0],
+                "probability_1": row_result["probability_1"].values[0],
+            }
+            rows.append(row)
+    results_df = pd.DataFrame(rows)
+
+    """Attach case_dt to result_df by matching (unique_id, slot=i) to
+    reference_df's case_dt_dateq{i+1}. 
+    Rename columns for using the trajectory analysis function"""
+    cols = [f"case_dt_dateq{i}" for i in range(1,14)]
+
+    long = (reference_df[["unique_id", *cols]]
+            .melt(id_vars="unique_id", value_vars=cols,
+                var_name="_col", value_name="case_dt"))
+    long["q"] = long["_col"].str.removeprefix("case_dt_dateq").astype(int) - 1
+
+    results_df = results_df.merge(long[["unique_id", "q", "case_dt"]],
+                        on=["unique_id", "q"], how="left")
+
+    return results_df
 # ============================================================================
 
 def get_args():

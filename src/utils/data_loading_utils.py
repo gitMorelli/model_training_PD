@@ -1100,7 +1100,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
         global_properties = []
         local_properties = []
 
-        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id, subject_images, case_grid_pattern, rempli_seulq12)
+        q_to_keep=questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,subject_id, 
+                                         subject_images, case_grid_pattern, rempli_seulq12)
 
         for X in range(1, 14):
             if X not in q_to_keep:  # questionnaire not to keep based on censoring
@@ -1291,6 +1292,10 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
             elif train_df is not None and 'fake_label' in train_df.columns:
                 fake_label = train_df.loc[train_df['unique_id']==subject_id,'fake_label'].values
                 label = torch.tensor(fake_label[0], dtype=torch.long) if len(fake_label)>0 else torch.tensor(-1, dtype=torch.long)
+            elif exp_params['problem']=='handedness':
+                #get the label from the train_df
+                handedness_label = train_df.loc[train_df['unique_id']==subject_id,exp_params['class_col']].values
+                label = torch.tensor(handedness_label[0], dtype=torch.long) if len(handedness_label)>0 else torch.tensor(-1, dtype=torch.long)
             else:
                 label = torch.tensor(json_data.get("label", -1), dtype=torch.long)
             questionnaire_info = json_data.get("questionnaire_info", {})
@@ -1703,7 +1708,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
 #pipelines
 def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, 
                        SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None, cross_val=False, one_only=False, persistent_workers=True,
-                       running_eval=False, partial_batch=False):
+                       running_eval=False, partial_batch=False, merge_shards=False):
     def worker_init_fn(worker_id):
         # Force OpenCV to use a single thread per DataLoader worker process
         cv2.setNumThreads(0)
@@ -1733,7 +1738,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
 
     )
 
-    if cross_val:
+    if cross_val or merge_shards:
         train_shards = sorted(glob.glob(SHARD_PATTERN_train))
         val_shards   = sorted(glob.glob(SHARD_PATTERN_val))
         all_shards   = train_shards + val_shards
@@ -1926,6 +1931,22 @@ def generate_exclusion_set_val(csv_data, data_modality, majority_class_id, balan
     exclusion_set = set(majority_class_ids) - set(majority_ids_to_include)
     return exclusion_set
 
+def _exclude_subjects_by_pattern(exp_params, csv_data, split='train', verbose=False):
+    #exclude the subjects for which grid_pattern or case_grid_pattern has a certain pattern (eg all 0 or 0 before last avail q or ...)
+    if exp_params['filter_missing'] == 'all':
+        csv_data['last_avail_q'] = 13 #set last avail q to 13 for all subjects to reuse the same code
+    if verbose:
+        print(f"Initial number of samples in {split} set: {len(csv_data)}")
+    def prefix_has_one(pattern, n):
+        return '1' in pattern[:int(n)]
+    mask = csv_data.apply(
+        lambda r: prefix_has_one(r['grid_pattern'], r['last_avail_q'])
+                and prefix_has_one(r['case_grid_pattern'], r['last_avail_q']),
+        axis=1
+    )
+
+    return mask
+
 def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data=None, exclude_cases=False, 
                               class_col='diag_park_final1_quest', verbose =False):
     '''
@@ -1961,20 +1982,8 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
             print("-" * 50)
 
     #exclude the subjects for which grid_pattern or case_grid_pattern has a certain pattern (eg all 0 or 0 before last avail q or ...)
-    if exp_params['filter_missing'] == 'all':
-        csv_data['last_avail_q'] = 13 #set last avail q to 13 for all subjects to reuse the same code
-    if verbose:
-        print(f"Initial number of samples in {split} set: {len(csv_data)}")
-    if 'case_control' in csv_data.columns:
-        if verbose:
-            print(f"Initial number of unique subjects with case_control==1 in {split} set: {csv_data[csv_data['case_control']==1]['unique_id'].nunique()}")
-    def prefix_has_one(pattern, n):
-        return '1' in pattern[:int(n)]
-    mask = csv_data.apply(
-        lambda r: prefix_has_one(r['grid_pattern'], r['last_avail_q'])
-                and prefix_has_one(r['case_grid_pattern'], r['last_avail_q']),
-        axis=1
-    )
+    mask = _exclude_subjects_by_pattern(exp_params, csv_data, split=split, verbose=verbose)
+
     #subjects_with_no_pre_avail_q_data = csv_data[~mask]['unique_id'].unique()
     csv_data = csv_data[mask]
     if verbose:
@@ -2025,6 +2034,45 @@ def generate_exclusion_set_PD(csv_source,exp_params,split='train', original_data
     
     return ids_to_exclude
 
+def generate_exclusion_set_hand(csv_source,exp_params,split='train', original_data=None, 
+                              class_col='diag_park_final1_quest', verbose =False):
+
+    if original_data is None: #for compatibility with old code
+        original_data = csv_source.copy()
+    
+    csv_data = csv_source.copy()
+    csv_data = csv_data[csv_data['split'] == split]
+    if verbose:
+        print(f"[Prepare exclusion] [pre] Number of samples in {split} set: {len(csv_data)}")
+    all_original_ids = set(original_data[original_data['split']==split]['unique_id'].unique())
+
+    mask = _exclude_subjects_by_pattern(exp_params, csv_data, split=split, verbose=verbose)
+    #subjects_with_no_pre_avail_q_data = csv_data[~mask]['unique_id'].unique()
+    csv_data = csv_data[mask]
+    if verbose:
+        print(f"Number of samples in {split} set after filtering for 000.. string: {len(csv_data)}")
+    
+    if (split=='train' and exp_params['balanced_data']) or (split=='val' and exp_params['balance_validation']):
+        if verbose:
+            print(f"Balancing the dataset for {split} set with balancing factor {exp_params['balancing_factor']})")
+
+        #keep balancing factor ids in each group for each case, sampling with priority from the at_least_warning==0 controls
+        n_target = int(exp_params['balancing_factor'])
+        seed = exp_params['seed']
+        
+        #select n_target ids in the class_col==0 group 
+        selected_ids = set(
+            csv_data[csv_data[class_col] == 0].sample(n=min(n_target, len(csv_data[csv_data[class_col] == 0])), random_state=seed)['unique_id']
+        )
+
+        #the ids to keep are the selected ones plus all the ids in class_col==1
+        csv_data = csv_data[csv_data['unique_id'].isin(selected_ids) | (csv_data[class_col] == 1)]
+    
+    ids_to_exclude = all_original_ids - set(csv_data['unique_id'].unique()) #i exclude all the ids that are not still in the df
+    
+    return ids_to_exclude
+
+
 def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed_csv=None, exclude_cases=False):
     '''returns the num_0 and num_1 in the training set after considering the exclusion -> the true class numerosity'''
     exclusion_set = set()
@@ -2050,11 +2098,16 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
             print("Class distribution in the training set:\n", csv_data[csv_data['split'] == 'train'][class_col].value_counts())
             print('#' * 50)
 
-    
-    exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train',original_data=original_data, exclude_cases=exclude_cases, 
-                                              class_col=class_col, verbose=verbose) 
-    val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val', original_data=original_data, exclude_cases=exclude_cases, 
-                                                  class_col=class_col, verbose=verbose)
+    if class_col in ['lateralite']:
+        exclusion_set = generate_exclusion_set_hand(csv_data,exp_params, split='train',original_data=original_data, 
+                                                class_col=class_col, verbose=verbose) 
+        val_exclusion_set = generate_exclusion_set_hand(csv_data,exp_params, split='val', original_data=original_data, 
+                                                    class_col=class_col, verbose=verbose)
+    else:
+        exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train',original_data=original_data, exclude_cases=exclude_cases, 
+                                                class_col=class_col, verbose=verbose) 
+        val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val', original_data=original_data, exclude_cases=exclude_cases, 
+                                                    class_col=class_col, verbose=verbose)
     
     if verbose:
         print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
@@ -2331,4 +2384,8 @@ def return_file_paths(problem,grouped,pre_training):
         list_of_ids_paths = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet"
         data_folder = '/mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_grouped_03_08_26'
         grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/PD_data_h5"
+    elif problem == 'handedness' and not grouped and not pre_training:
+        list_of_ids_paths = "/home/a_morelli/datasets/id_lists/handedness_training_set_2_10_26.parquet"
+        data_folder = "/mnt/beegfs02/scratch/a_morelli/model_training/shards/PDpretraining/final_png_whitebg_21_07_26"
+        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26"
     return list_of_ids_paths, data_folder, grid_dict_path

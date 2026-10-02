@@ -309,7 +309,7 @@ def prepare_pre_training_data():
     print(f"Pre-training data saved to {save_path}")
 
 def inspect_columns(): 
-    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet" 
+    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet" 
     csv_data = pd.read_parquet(load_path)
     columns = csv_data.columns
     for col in columns:
@@ -854,6 +854,17 @@ def open_exp_parameters():
         print(f"{key}: {value}")
     assert 1==0
 
+def plot_roc_auc_over_time():
+    from src.debug.PD_model_evaluation import roc_auc_over_time
+    load_path = "/home/a_morelli/models/model_training_logs/PD/feature_extraction/17092026/trained_models/xgb/v_13/results_per_step.csv"
+    results_per_step = pd.read_csv(load_path)
+    save_path = "/home/a_morelli/vscode_projects/model_training/results/tests/roc"
+    os.makedirs(save_path, exist_ok=True)
+    print([col for col in results_per_step.columns])
+    res,_ = roc_auc_over_time(
+        results_per_step, step=2,window=1, pred_col="probability_1", true_col="true_label",
+        save_path=save_path, save_name="roc_auc_over_time.pdf",percentiles=(5, 99)
+    )
 
 def explore_covariates():
     df = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
@@ -872,5 +883,84 @@ def explore_covariates():
             print(f"Range: {train_df[col].min()} - {train_df[col].max()}")
         print("####################################")
 
+# Prepare datasets #
+def prepare_handedness_datasets():
+    source_folder = "/home/a_morelli/datasets/id_lists/"
+    all_covariates_path=os.path.join(source_folder, "final_table_with_all_info_8_7_26.csv")
+    all_df = pd.read_csv(all_covariates_path,encoding='cp1252')
+
+    df_path = os.path.join(source_folder, "final_table_for_matching_splitted_13_7_26_pre_training.parquet")
+    df = pd.read_parquet(df_path)
+
+    save_path = os.path.join(source_folder, "handedness_training_set_2_10_26.parquet")
+
+    id_col_source = 'ident_projet'
+    id_col_target = 'unique_id' #is still in the form of ident_projet (non matched results ..)
+    to_add=['lateralite']
+
+    #check if the unique_id and lateralite column are in the dataframe
+    if 'ident_projet' not in all_df.columns:
+        print("ident_projet column not found in the dataframe")
+    if 'lateralite' not in all_df.columns:
+        print("lateralite column not found in the dataframe")
+    
+    #print the first value of unique_id in the df dataframe
+    print(f"First value of unique_id in df: {df[id_col_target].iloc[0]}")
+
+    #add the lateralite column from the all_df dataframe to the df dataframe by merging on the ident_projet column (all) and unique_id column (df)
+    df = df.merge(all_df[[id_col_source]+to_add], left_on=id_col_target, right_on=id_col_source, how='left')
+
+    #check the unique values and value counts of the lateralite column in the df dataframe
+    print(f"Unique values of lateralite column in df: {df['lateralite'].unique()}")
+    print(f"Value counts of lateralite column in df:\n{df['lateralite'].value_counts(dropna=False)}")
+    #print the columns of the df dataframe
+    print(f"Columns of df dataframe: {df.columns.tolist()}")
+
+    #set split to 'impute' for rows where lateralite is NaN
+    df.loc[df['lateralite'].isnull(), 'split'] = 'impute'
+    #print the number of rows where split is 'impute'
+    print(f"Number of rows where split is 'impute': {len(df[df['split'] == 'impute'])}")
+
+    df_to_impute = df[df['split'] == 'impute']
+    df_rest = df[df['split'] != 'impute']
+
+    from sklearn.model_selection import train_test_split
+
+    TRAIN, VAL, TEST = 0.70, 0.15, 0.15
+    target = "lateralite"  # change to your class column name
+
+    # Split off train, stratified on the target
+    train_idx, temp_idx = train_test_split(
+        df_rest.index, train_size=TRAIN, stratify=df_rest[target], random_state=42
+    )
+
+    # Split the rest into val and test, stratified again
+    val_idx, test_idx = train_test_split(
+        temp_idx, test_size=TEST / (VAL + TEST),
+        stratify=df_rest.loc[temp_idx, target], random_state=42
+    )
+
+    df_rest["split"] = "train"
+    df_rest.loc[val_idx, "split"] = "val"
+    df_rest.loc[test_idx, "split"] = "test"
+
+    # Sanity check: sizes and class ratio per split
+    print(df_rest["split"].value_counts())
+    print(df_rest.groupby("split")[target].value_counts(normalize=True).unstack())
+
+    #merge the df_rest and df_to_impute dataframes
+    df = pd.concat([df_rest, df_to_impute], ignore_index=True)
+
+    #get the lateralite value counts for each split
+    print("Lateralite value counts for each split:")
+    for split in df['split'].unique():
+        split_data = df[df['split'] == split]
+        print(f"Split: {split}")
+        print(split_data['lateralite'].value_counts(dropna=False))
+
+    #save the dataframe to a parquet file
+    df.to_parquet(save_path, index=False)
+    print(f"Dataframe with lateralite column saved to {save_path}")
+
 if __name__ == "__main__":
-    analyze_per_step_results()
+    prepare_handedness_datasets()

@@ -1,28 +1,64 @@
+
+================================================================================
+>>> [LR SCALING] Scaling learning rates with effective batch size 64 (base 256): lr_backbone=2.5e-05, lr_classifier_head=0.00025
+================================================================================
+
 Checkpoint to load: best-51-015340-0.3795.ckpt
-Bin is 16.03 years wide, from -28.04 to 20.04
-Saved probability trajectories plot to /home/a_morelli/vscode_projects/model_training/results/tests/a_probability_trajectories_3.png
-Bin is 9.62 years wide, from -28.04 to 20.04
-Saved probability trajectories plot to /home/a_morelli/vscode_projects/model_training/results/tests/a_probability_trajectories_5.png
-Bin is 4.81 years wide, from -28.04 to 20.04
-Saved probability trajectories plot to /home/a_morelli/vscode_projects/model_training/results/tests/a_probability_trajectories_10.png
-Bin is 2.40 years wide, from -28.04 to 20.04
-Saved probability trajectories plot to /home/a_morelli/vscode_projects/model_training/results/tests/a_probability_trajectories_20.png
-Bin is 1.60 years wide, from -28.04 to 20.04
-Saved probability trajectories plot to /home/a_morelli/vscode_projects/model_training/results/tests/a_probability_trajectories_30.png
+First value of unique_id in df: B5K5R6F2
+Unique values of lateralite column in df: [ 0. nan  1.]
+Value counts of lateralite column in df:
+lateralite
+0.0    55085
+NaN    27214
+1.0     4737
+Name: count, dtype: int64
+Columns of df dataframe: ['grid_pattern', 'avail_pattern', 'unique_id', 'split', 'rempli_seulq11', 'rempli_seulq12', 'case_grid_pattern', 'ident_projet', 'lateralite']
+Number of rows where split is 'impute': 27214
+split
+train    41875
+test      8974
+val       8973
+Name: count, dtype: int64
+lateralite       0.0       1.0
+split                         
+test        0.920771  0.079229
+train       0.920812  0.079188
+val         0.920874  0.079126
+Lateralite value counts for each split:
+Split: train
+lateralite
+0.0    38559
+1.0     3316
+Name: count, dtype: int64
+Split: val
+lateralite
+0.0    8263
+1.0     710
+Name: count, dtype: int64
+Split: test
+lateralite
+0.0    8263
+1.0     711
+Name: count, dtype: int64
+Split: impute
+lateralite
+NaN    27214
+Name: count, dtype: int64
+Dataframe with lateralite column saved to /home/a_morelli/datasets/id_lists/handedness_training_set_2_10_26.parquet
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5920310
+Job ID: 5944338
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n24
+Nodelist: n04
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-09-29 17:14:47
-Job ended at:   2026-09-29 17:15:20
-Job Wall-clock time: 00:00:33
-CPU Utilized: 00:00:16
-CPU Efficiency: 12.12% of 00:02:12 core-walltime
-Memory Utilized: 510.12 MB
-Memory Efficiency: 3.11% of 16.00 GB
+Job started at: 2026-10-02 12:26:02
+Job ended at:   2026-10-02 12:26:33
+Job Wall-clock time: 00:00:31
+CPU Utilized: 00:00:22
+CPU Efficiency: 17.74% of 00:02:04 core-walltime
+Memory Utilized: 907.73 MB
+Memory Efficiency: 5.54% of 16.00 GB

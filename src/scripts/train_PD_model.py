@@ -97,8 +97,7 @@ RESTORE = False
 version_override =  11
 
 exp_params = {
-    'problem': 'PD', #handedness, PD, 
-    'class_col': 'diag_park_final1_quest',
+    'problem': 'handedness', #handedness, PD, 
     'debug': False,
 
     #debugging
@@ -117,7 +116,8 @@ exp_params = {
     'global_fusion':'late', #early, late
 
     #experiment parameters
-    'data_modality': get_input_modality('window_view'), #mixed_view, window_view, window_view_minimal
+    'merge_shards': False, #automatically set to true if you use handedness as label
+    'data_modality': get_input_modality('window_view_minimal'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
     'label_smoothing': 0.0, #0.0 = no smoothing // 0.1, 0.2, 0.3, 0.4, 0.5; if set to x!=0 -> num_classes=2 and crossentropy is used
@@ -131,11 +131,12 @@ exp_params = {
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
     'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    #censor time is set authomatically to all for pre_training==true and problem in [handedness]
     'filter_modality' : 'digit', 
 
     #model definition
-    'model': 'convnext_tiny',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
-#clip-vit-large-patch14, clip-vit-large-patch14-inter
+    'model': "convnext_tiny",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
     'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
@@ -143,7 +144,8 @@ exp_params = {
     'norm_std': 'PD_window',
     'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
-    'align_train_metrics_to_val': True,  #val and align are set authomatically to none if pre_training is not active 
+    'align_train_metrics_to_val': True,  
+    #val and align are set authomatically: to none if pre_training is not active and PD; to 0.3 and True if problem==handedness
     'min_window_steps': 50,
     'model_parameters': {
         'd_model': 128, 
@@ -165,18 +167,18 @@ exp_params = {
     #in the code based on the view name
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
-    'image_pixel_space_augmentations': ALL,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
+    'image_pixel_space_augmentations': None,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
 
     
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
-    'lr_decay': 0.2, #decay factor for the learning rate of the backbone layers, if use_opt_groups is True
+    'lr_decay': 1.0, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
     'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
-    'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
+    'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
     'num_epochs': 100,
     'max_steps': -1, #N or -1
     'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
@@ -185,12 +187,12 @@ exp_params = {
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'],
+    'layers_to_unfreeze': ['classifier'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
     'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
-    'precision': "16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
+    'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
     #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None
 
@@ -204,6 +206,9 @@ def get_source_path():
     elif exp_params['problem'] == 'PD' and exp_params['pre_training']:
         return "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N"
         #return "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
+    elif exp_params['problem'] == 'handedness':
+        return "/home/a_morelli/models/model_training_logs/handedness/"
+        #return "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
     else:
         raise ValueError(f"Unknown problem type: {exp_params['problem']}")
 SOURCE_PATH = get_source_path()
@@ -282,7 +287,7 @@ def main(exp_params):
     train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
                                                                        grid_dict, transform, 
                                                                        SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
-                                                                       train_df=train_df)
+                                                                       train_df=train_df, merge_shards=exp_params['merge_shards'])
     
     '''p = psutil.Process(os.getpid())
     for i, batch in enumerate(train_loader):
@@ -349,6 +354,7 @@ def override_val_exclusion(train_df, val_exclusion_set, exp_params):
         sampled_ids = random.sample(list(remaining_ids), N)
         val_exclusion_set = all_val_ids - set(sampled_ids)
         print(f"Reduced the number of samples in the validation set from {len(all_val_ids)} to {N} for pre-training. Excluded {len(val_exclusion_set)} samples.", flush=True)
+    
     return val_exclusion_set
 
 def restore(current_version, exp_params):

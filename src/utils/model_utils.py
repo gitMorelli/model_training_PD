@@ -1153,7 +1153,13 @@ def get_vit_transforms(**kwargs):
         raise ValueError("pass model=<the model from get_vit> so the config matches the checkpoint")
 
     cfg = resolve_model_data_config(model)
-    # with in_chans=1 timm already collapses mean/std to a single averaged value
+    in_chans = model.patch_embed.proj.in_channels
+    if in_chans == 1:
+        # timm keeps the checkpoint's 3-channel stats; average them to match the
+        # summed RGB patch-embedding weights
+        cfg['mean'] = (sum(cfg['mean']) / len(cfg['mean']),)
+        cfg['std'] = (sum(cfg['std']) / len(cfg['std']),)
+        cfg['input_size'] = (1, *cfg['input_size'][1:])
 
     if mode == 'resize':
         # square resize, no center crop
@@ -1180,7 +1186,7 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         transform = get_efficientnet_v2_transforms(**kwargs)
     elif name.startswith('vit'):
         model = get_vit(name, mode, pretrained, **kwargs)
-        transform = get_vit_transforms(**kwargs)
+        transform = get_vit_transforms(model=model, **kwargs)
     elif name.startswith('clip-vit'):
         model = get_clip_vit(name, **kwargs)
         transform = get_clip_vit_transforms(name, **kwargs) 

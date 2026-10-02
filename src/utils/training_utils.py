@@ -906,14 +906,31 @@ class ModelPDBase(L.LightningModule):
                 )
         elif self.lora_tuning:
             from timm.optim import param_groups_layer_decay
+            from peft import PeftModel
 
-            param_groups = param_groups_layer_decay(
-                self.model,
+            peft_backbone = next(m for m in self.model.modules() if isinstance(m, PeftModel))
+            encoder = peft_backbone.get_base_model()   # timm model with LoRA layers injected
+
+            nwd = encoder.no_weight_decay() if hasattr(encoder, "no_weight_decay") else set()
+            enc_groups = param_groups_layer_decay(
+                encoder,
                 weight_decay=self.weight_decay,
-                no_weight_decay_list=self.model.no_weight_decay(),
+                no_weight_decay_list=nwd,
                 layer_decay=self.lora_lr_decay,
             )
-            optimizer = torch.optim.AdamW(param_groups, lr=self.lr_backbone)
+            for g in enc_groups:
+                g["lr"] = self.lr_backbone * g.pop("lr_scale", 1.0)
+                g["lr_name"] = "lr_backbone"
+            param_groups.extend(enc_groups)
+
+            n_lrs = len({round(g["lr"], 12) for g in enc_groups})
+            self.write_log(f"[configure_optimizers] LoRA: {len(enc_groups)} encoder groups, "
+                        f"{n_lrs} distinct lrs\n")
+
+            enc_ids = {id(p) for p in encoder.parameters()}
+            rest = [(n, p) for n, p in self.model.named_parameters()
+                    if p.requires_grad and id(p) not in enc_ids]
+            add_group(rest, self.lr_classifier_head, "lr_head")
         else:
             backbone, head = [], []
             for name, param in self.model.named_parameters():
@@ -926,8 +943,7 @@ class ModelPDBase(L.LightningModule):
             add_group(backbone, self.lr_backbone, 'lr_backbone')
             add_group(head, self.lr_classifier_head, 'lr_head')
 
-        if not self.lora_tuning:
-            optimizer = optim.AdamW(param_groups)
+        optimizer = optim.AdamW(param_groups) 
 
         if self.lr_scheduling == 'cosine':
             try:
@@ -2012,6 +2028,22 @@ def get_optimization_groups(model_name,exp_params):
 #Set hyperparameters / metadata
 def set_automatic_hyperparameters(exp_params):
     bar = "=" * 80
+
+    problem = exp_params.get('problem', 'PD')
+    if problem=='handedness':
+        exp_params['class_col'] = 'lateralite' 
+        exp_params['merge_shards'] = True #merge train and val since you are using the PD pre_training shards as trainign set
+        exp_params['filter_missing'] = 'all'
+        exp_params['censor_time'] = 'all'
+        exp_params['val_check_interval'] = 0.3 #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
+        exp_params['align_train_metrics_to_val'] = True
+        '''
+        Split: train -> 0.0    38559 , 1.0     3316
+        Split: val -> 0.0    8263 , 1.0     710
+        '''
+    elif problem=='PD':
+        exp_params['class_col'] = 'diag_park_final1_quest'
+    
     if exp_params.get('label_smoothing', 0.0)!=0.0:
         exp_params['num_classes'] = 2
         msg = (f"Label smoothing is only compatible with the cross entropy loss ->"
@@ -2038,7 +2070,7 @@ def set_automatic_hyperparameters(exp_params):
     if exp_params['pre_training']:
         exp_params['filter_missing'] = 'all'
         exp_params['censor_time'] = 'all'
-    else:
+    elif problem not in ['handedness']:
         exp_params['val_check_interval'] = None #force epoch level logging if i am not doing pre_trainign
         exp_params['align_train_metrics_to_val'] = False
     exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
