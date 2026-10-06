@@ -1085,7 +1085,79 @@ def get_swin_transforms(**kwargs):
         ])
     return transform
 
-def get_vit(name, mode, pretrained, **kwargs):
+# get lora enabled models #
+def _timm_eval_transform(model, mode, in_chans):
+    from timm.data import resolve_model_data_config, create_transform
+
+    cfg = resolve_model_data_config(model)
+    if in_chans == 1:
+        # average the 3-channel stats to match the summed RGB stem/patch weights
+        cfg['mean'] = (sum(cfg['mean']) / len(cfg['mean']),)
+        cfg['std'] = (sum(cfg['std']) / len(cfg['std']),)
+        cfg['input_size'] = (1, *cfg['input_size'][1:])
+    if mode == 'resize':
+        cfg.update(crop_pct=1.0, crop_mode='squash')   # square resize, no center crop
+    return create_transform(**cfg, is_training=False)
+def get_convnext_lora(name, mode, pretrained, **kwargs):
+    """
+    timm ConvNeXt backbone returning pooled, normalized features [B, out_dim].
+
+      - num_classes=0  -> head.fc is Identity; forward() = global pool -> LayerNorm -> flatten
+      - in_chans=1     -> timm sums the pretrained RGB stem weights (same as the old grayscale_version)
+      - _layerK suffix -> keep the first K stages, normalized with the pretrained LayerNorm2d
+                          at the front of stage K+1's downsample (trained on exactly this output)
+    """
+    import timm
+
+    # aliases so existing configs keep working; any timm model name also passes through
+    aliases = {
+        'convnext_tiny':  'convnext_tiny.fb_in1k',
+        'convnext_small': 'convnext_small.fb_in1k',
+        'convnext_base':  'convnext_base.fb_in1k',
+        'convnext_large': 'convnext_large.fb_in1k',
+    }
+
+    grayscale = kwargs.get('grayscale', False)
+    use_final_norm = kwargs.get('final_norm', True)
+    drop_path_rate = kwargs.get('drop_path_rate', 0.0)
+
+    base_name, _, suffix = name.partition('_layer')
+    timm_name = aliases.get(base_name, base_name)
+
+    model = timm.create_model(
+        timm_name,
+        pretrained=pretrained,
+        num_classes=0,
+        in_chans=1 if grayscale else 3,
+        drop_path_rate=drop_path_rate,
+    )
+
+    n_stages = len(model.stages)
+    k = int(suffix) if suffix else n_stages
+    if not 1 <= k <= n_stages:
+        raise ValueError(f"Unsupported stage suffix in {name}. Use _layer1 ... _layer{n_stages}.")
+
+    if k < n_stages:
+        # stages[k].downsample = Sequential(LayerNorm2d(C_k), Conv2d(C_k, C_k+1, 2, 2))
+        norm = model.stages[k].downsample[0]
+        model.stages = nn.Sequential(*list(model.stages[:k]))
+        model.head.norm = norm
+        model.num_features = norm.normalized_shape[0]
+
+    if not use_final_norm:
+        model.head.norm = nn.Identity()
+
+    model.out_dim = model.num_features
+    # pointwise MLP linears inside every block (where most of ConvNeXt's parameters are)
+    model.lora_target_modules = r"stages\.\d+\.blocks\.\d+\.mlp\.(fc1|fc2)"
+    return model
+def get_convnext_lora_transforms(**kwargs):
+    model = kwargs.get('model', None)
+    if model is None:
+        raise ValueError("pass model=<the model from get_convnext> so the config matches the checkpoint")
+    return _timm_eval_transform(model, kwargs.get('mode'), model.stem[0].in_channels)
+
+def get_vit_lora(name, mode, pretrained, **kwargs):
     """
     timm ViT backbone returning pooled features [B, out_dim].
 
@@ -1138,36 +1210,18 @@ def get_vit(name, mode, pretrained, **kwargs):
         model.norm = nn.LayerNorm(model.embed_dim, eps=model.norm.eps)
 
     model.out_dim = model.num_features
-    return model
-def get_vit_transforms(**kwargs):
-    """
-    Eval transforms taken from the checkpoint's own data config, so mean/std,
-    interpolation, crop_pct and input size always match how it was trained.
-    Pass the model built by get_vit as `model=` rather than re-deriving from the name.
-    """
-    from timm.data import resolve_model_data_config, create_transform
+    model.lora_target_modules = r"blocks\.\d+\.attn\.(qkv|proj)"
 
-    mode = kwargs.get('mode',)
+    return model
+def get_vit_lora_transforms(**kwargs):
     model = kwargs.get('model', None)
     if model is None:
         raise ValueError("pass model=<the model from get_vit> so the config matches the checkpoint")
-
-    cfg = resolve_model_data_config(model)
-    in_chans = model.patch_embed.proj.in_channels
-    if in_chans == 1:
-        # timm keeps the checkpoint's 3-channel stats; average them to match the
-        # summed RGB patch-embedding weights
-        cfg['mean'] = (sum(cfg['mean']) / len(cfg['mean']),)
-        cfg['std'] = (sum(cfg['std']) / len(cfg['std']),)
-        cfg['input_size'] = (1, *cfg['input_size'][1:])
-
-    if mode == 'resize':
-        # square resize, no center crop
-        return create_transform(**cfg, is_training=False, crop_pct=1.0, crop_mode='squash')
-    return create_transform(**cfg, is_training=False)
+    return _timm_eval_transform(model, kwargs.get('mode'), model.patch_embed.proj.in_channels)
 
 #Model loading
-def get_model(name="resnet50", mode='classification head', pretrained=True,checkpoint_path=None, **kwargs):
+def get_model(name="resnet50", mode='classification head', pretrained=True,checkpoint_path=None, is_lora=False,
+              **kwargs):
     ''' 
     - name: the name of the model to download/load 
     -mode: 1) classification_head (modifies the last layers of the loaded model and appends an mlp classifier to the model)
@@ -1179,14 +1233,21 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         model = get_resnet(name,mode, pretrained, **kwargs)
         transform = get_resnet_transforms(**kwargs)
     elif name.startswith('convnext'):
-        model = get_convnext(name, mode, pretrained, **kwargs)
-        transform = get_convnext_transforms(**kwargs)
+        if is_lora:
+            model = get_convnext_lora(name, mode, pretrained, **kwargs)
+            transform = get_convnext_lora_transforms(model=model, **kwargs)
+        else:
+            model = get_convnext(name, mode, pretrained, **kwargs)
+            transform = get_convnext_transforms(**kwargs)
     elif name.startswith('efficientnet_v2'):
         model = get_efficientnet_v2(name, mode, pretrained, **kwargs)
         transform = get_efficientnet_v2_transforms(**kwargs)
     elif name.startswith('vit'):
-        model = get_vit(name, mode, pretrained, **kwargs)
-        transform = get_vit_transforms(model=model, **kwargs)
+        if is_lora:
+            model = get_vit_lora(name, mode, pretrained, **kwargs)
+            transform = get_vit_lora_transforms(model=model, **kwargs)
+        else:
+            raise ValueError(f"Model {name} is not supported. Use lora=True for vit models.")
     elif name.startswith('clip-vit'):
         model = get_clip_vit(name, **kwargs)
         transform = get_clip_vit_transforms(name, **kwargs) 

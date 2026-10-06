@@ -11,6 +11,8 @@ import json
 import pickle
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
+import re
+from joblib import Parallel, delayed
 
 from sklearn.metrics import classification_report
 from sklearn.pipeline import Pipeline
@@ -20,6 +22,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV, LogisticRegressionCV
 from sklearn.model_selection import KFold, cross_val_score, StratifiedKFold, RepeatedStratifiedKFold
+from sklearn.metrics import check_scoring
 
 from src.utils.data_loading_utils import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
@@ -59,14 +62,16 @@ params = {
     "nan_ref": "train", # "train", "all=train+val"
 
     #feature importance
-    "importance":"auto", # auto = only computes it if the model has it, "permutation" = always compute permutation importance (model agnostic)
+    "importance":"permutation", # auto = only computes it if the model has it, "permutation" = always compute permutation importance (model agnostic)
+    "group_features": True, #if True it will group the features according to the logic in the function make_groups
+    "n_repeats":10,
 
     "balanced_data": False,
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     "balancing_factor": 3,
 
     'mask_features': True, #if True it will mask the features according to the logic in the function mask_features
-    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit_original', #'X_original' 'digit_original' 'text_original'
 }
 
@@ -160,14 +165,19 @@ def main():
                             target_recall=0.90, plot=True, out_dir_path=save_dir)
         
         if imp_df is not None:
-            per_prop = imp_df.groupby("prop")["importance"].sum().sort_values(ascending=False)
-            per_key  = imp_df.groupby("key")["importance"].sum().sort_values(ascending=False)
-            print(f"Feature importance per property:\n{per_prop}")
-            print(f"Feature importance per key:\n{per_key}")
+            if params.get("group_features", False):   
+                imp_group = imp_df.groupby("group")["importance_mean"].sum().sort_values(ascending=False)
+                print(f"Feature importance per group:\n{imp_group}")
+            else:
+                per_prop = imp_df.groupby("prop")["importance"].sum().sort_values(ascending=False)
+                per_key  = imp_df.groupby("key")["importance"].sum().sort_values(ascending=False)
+                print(f"Feature importance per property:\n{per_prop}")
+                print(f"Feature importance per key:\n{per_key}")
             imp_df.to_csv(os.path.join(save_dir, "feature_importance.csv"), index=False)
             print(f"Feature importance saved to {os.path.join(save_dir, 'feature_importance.csv')}")
         
         if params.get('compute_per_step',False):
+            #[WARNING] I should modify the code so that the per_step results can be computed post_diagnosis even if the model was trained pre_diagnosis
             results_per_step = process_per_step(pipeline, df, reference_df, keep_dict,
                                                 params, verbose=VERBOSE, prop_names=properties)
             for n in [5, 10, 15, 20]:
@@ -679,13 +689,92 @@ def _default_scoring(pipeline, y):
 
 def perm_importance(pipeline, X, y, seed=0, n_repeats=20, scoring=None, n_jobs=-1):
     """Model-agnostic. Pass raw X with NaNs; the imputer lives in the pipeline."""
+    scoring = scoring or _default_scoring(pipeline, y)
+    print(f"Computing permutation importance with {n_repeats} repeats, scoring={scoring}")
     r = permutation_importance(
         pipeline, X, y,
         n_repeats=n_repeats, random_state=seed, n_jobs=n_jobs,
-        scoring=scoring or _default_scoring(pipeline, y),
+        scoring=scoring,
     )
     return r.importances_mean, r.importances_std
 
+def make_groups(columns, patterns, ignore_case=True, add_singletons=False):
+    """Build {group_name: [columns]} from {group_name: regex}.
+
+    Example: make_groups(X.columns, {"size": r"size", "color": r"colou?r"})
+    With add_singletons=True, every column not matched by any pattern
+    becomes its own one-column group, so you can compare groups vs. the rest.
+    """
+    flags = re.IGNORECASE if ignore_case else 0
+    groups = {}
+    for name, pat in patterns.items():
+        cols = [c for c in columns if re.search(pat, str(c), flags)]
+        if not cols:
+            raise ValueError(f"No columns match group {name!r} (pattern {pat!r})")
+        groups[name] = cols
+    if add_singletons:
+        used = {c for cols in groups.values() for c in cols}
+        groups.update({c: [c] for c in columns if c not in used})
+    
+    #assert that every group has the same number of columns, otherwise the permutation importance will be biased
+    group_sizes = [len(cols) for cols in groups.values()]
+    if len(set(group_sizes)) != 1:
+        raise ValueError(f"All groups must have the same number of columns, but got group sizes: {group_sizes}")
+    return groups
+
+
+def _group_drops(pipeline, X, y, scorer, cols, n_repeats, seed, baseline):
+    rng = np.random.default_rng(seed)
+    X_perm = X.copy()
+    drops = np.empty(n_repeats)
+    for i in range(n_repeats):
+        idx = rng.permutation(len(X))
+        # Same row permutation for every column in the group:
+        # within-group structure is kept, link to target/other features is broken.
+        shuffled = X[cols].iloc[idx]
+        shuffled.index = X.index  # keep dtypes (incl. categoricals, NaNs)
+        X_perm[cols] = shuffled
+        drops[i] = baseline - scorer(pipeline, X_perm, y)
+    return drops
+
+
+def group_perm_importance(pipeline, X, y, groups, seed=0, n_repeats=20,
+                          scoring=None, n_jobs=-1):
+    """Permutation importance for groups of columns.
+
+    pipeline : fitted estimator/pipeline (imputer etc. inside it)
+    X        : raw DataFrame (NaNs allowed), ideally a held-out set
+    groups   : dict {group_name: list of column names}, e.g. from make_groups
+    scoring  : anything sklearn accepts (str, callable scorer, None -> .score)
+
+    Returns a DataFrame sorted by mean importance, plus the raw
+    (n_groups, n_repeats) array of score drops.
+    """
+    if not isinstance(X, pd.DataFrame):
+        raise TypeError("X must be a pandas DataFrame so groups can use column names")
+    missing = {c for cols in groups.values() for c in cols} - set(X.columns)
+    if missing:
+        raise KeyError(f"Columns not in X: {sorted(missing)}")
+
+    scorer = check_scoring(pipeline, scoring=scoring)
+    baseline = scorer(pipeline, X, y)
+
+    # Independent, reproducible random streams per group
+    seeds = np.random.SeedSequence(seed).spawn(len(groups))
+    drops = Parallel(n_jobs=n_jobs)(
+        delayed(_group_drops)(pipeline, X, y, scorer, list(cols), n_repeats, s, baseline)
+        for cols, s in zip(groups.values(), seeds)
+    )
+    drops = np.vstack(drops)
+
+    result = pd.DataFrame({
+        "group": list(groups.keys()),
+        "n_columns": [len(c) for c in groups.values()],
+        "importance_mean": drops.mean(axis=1),
+        "importance_std": drops.std(axis=1),
+        "columns": [list(c) for c in groups.values()],
+    }).sort_values("importance_mean", ascending=False, ignore_index=True)
+    return result, drops
 
 def _predict_frame(pipeline, X, ids, y_true, tag=""):
     y_pred = pipeline.predict(X)
@@ -720,7 +809,7 @@ def _split_name_cols(imp_df):
 
 # ============================================================================
 # Single train/val split
-def eval_holdout(bundle: FeatureBundle, params: dict, rep: str, importance="auto"):
+def eval_holdout(bundle: FeatureBundle, params: dict, rep: str, importance="auto", prop_names=None):
     """Respects the `split` column.  Returns (results_df, imp_df)."""
     X, names = bundle.FEATURES[rep], bundle.names[rep]
     #print(names)
@@ -735,14 +824,31 @@ def eval_holdout(bundle: FeatureBundle, params: dict, rep: str, importance="auto
     results_df = _predict_frame(pipeline, X_val, bundle.subjects[va], y_val, tag=rep)
 
     imp = None if importance == "permutation" else intrinsic_importance(pipeline)
+    imp_group=None
     if imp is None:
-        m, s = perm_importance(pipeline, X_val, y_val, seed=params["seed"])
-        imp_df = pd.DataFrame({"feature": names, "importance": m, "std": s})
+        print("Computing permutation importance on the holdout set...")
+        if params.get("group_features", False):
+            print("Grouping features for permutation importance...")
+            regex =  {name: re.escape(name) for name in prop_names}
+            groups = make_groups(names, regex,
+                     add_singletons=True)   # ungrouped columns become their own groups
+            #build X as a DataFrame with columns as names
+            X_val_df = pd.DataFrame(X_val, columns=names)
+            imp_group, drops = group_perm_importance(pipeline, X_val_df, y_val, groups,
+                                            scoring=_default_scoring(pipeline, y_val),
+                                            n_repeats=params.get("n_repeats", 20))
+        else:
+            m, s = perm_importance(pipeline, X_val, y_val, seed=params["seed"], n_repeats=params.get("n_repeats", 20))
+            imp_df = pd.DataFrame({"feature": names, "importance": m, "std": s})
     else:
+        print("Using intrinsic importance from the fitted model...")
         imp_df = pd.DataFrame({"feature": names, "importance": imp})
 
-    imp_df = _split_name_cols(imp_df)
-    imp_df = imp_df.sort_values("importance", ascending=False, ignore_index=True)
+    if imp_group is not None:
+        imp_df = imp_group
+    else:
+        imp_df = _split_name_cols(imp_df)
+        imp_df = imp_df.sort_values("importance", ascending=False, ignore_index=True)
     return results_df, imp_df, pipeline
 # ============================================================================
 
@@ -827,7 +933,7 @@ def process_representation(df, params, verbose=False, prop_names=None):
         return {rep: eval_holdout(bundle, params, rep, importance)
                 for rep in bundle.FEATURES}
 
-    results_df, imp_df, pipeline = eval_holdout(bundle, params, params["representation_type"], importance)
+    results_df, imp_df, pipeline = eval_holdout(bundle, params, params["representation_type"], importance, prop_names=prop_names)
     all_labels = results_df["true_label"].to_numpy()
     all_probs = np.stack([results_df["probability_0"].to_numpy(),
                           results_df["probability_1"].to_numpy()], axis=1)

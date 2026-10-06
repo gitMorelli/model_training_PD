@@ -883,6 +883,123 @@ def explore_covariates():
             print(f"Range: {train_df[col].min()} - {train_df[col].max()}")
         print("####################################")
 
+def inspect_feature_importances():
+    load_path = os.path.join("/home/a_morelli/models/model_training_logs/PD/feature_extraction/",
+                             "17092026/trained_models/xgb/v_6/feature_importance.csv")
+    df = pd.read_csv(load_path)
+    print(f"Columns in the feature importance dataframe: {df.columns.tolist()}")
+
+    per_prop = df.groupby("prop")["importance"].sum().sort_values(ascending=False)
+    for prop, importance in per_prop.items():
+        print(f"Property: {prop}, Total Importance: {importance}")
+    #print(f"Feature importance per key:\n{per_key}")
+    '''
+    per_prop = imp_df.groupby("prop")["importance"].sum().sort_values(ascending=False)
+            per_key  = imp_df.groupby("key")["importance"].sum().sort_values(ascending=False)
+            print(f"Feature importance per property:\n{per_prop}")
+            print(f"Feature importance per key:\n{per_key}")
+            imp_df.to_csv(os.path.join(save_dir, "feature_importance.csv"), index=False)
+            print(f"Feature importance saved to {os.path.join(save_dir, 'feature_importance.csv')}")
+            '''
+
+def compare_feature_importances():
+    load_path_1 = os.path.join("/home/a_morelli/models/model_training_logs/PD/feature_extraction/",
+                             "17092026/trained_models/xgb/v_2/feature_importance.csv")
+    load_path_2 = os.path.join("/home/a_morelli/models/model_training_logs/PD/feature_extraction/",
+                             "17092026/trained_models/xgb/v_6/feature_importance.csv")
+    df_1 = pd.read_csv(load_path_1)
+    df_2 = pd.read_csv(load_path_2)
+
+    per_prop_1 = df_1.groupby("prop")["importance"].sum().sort_values(ascending=False)
+    per_prop_2 = df_2.groupby("prop")["importance"].sum().sort_values(ascending=False)
+
+    #get the five best properties for each dataframe
+    best_props_1 = per_prop_1.head(5)
+    best_props_2 = per_prop_2.head(5)
+    #for each best property of the first df show the importande, the importance in the second df and the difference
+    print("Comparison of feature importances:")
+    for prop in best_props_1.index:
+        importance_1 = best_props_1[prop]
+        importance_2 = per_prop_2.get(prop, 0)
+        difference = importance_1 - importance_2
+        print(f"Property: {prop}, Importance in df1: {importance_1}, Importance in df2: {importance_2}, Difference: {difference}")
+    print("\n")
+    for prop in best_props_2.index:
+        importance_2 = best_props_2[prop]
+        importance_1 = per_prop_1.get(prop, 0)
+        difference = importance_2 - importance_1
+        print(f"Property: {prop}, Importance in df2: {importance_2}, Importance in df1: {importance_1}, Difference: {difference}")
+
+def compare_group_feature_importances(version_1="v_19", version_2="v_20",
+                                      top_n=5, save_dir="/home/a_morelli/vscode_projects/model_training/results/tests"):
+    from matplotlib import pyplot as plt
+    BASE_DIR = ("/home/a_morelli/models/model_training_logs/PD/feature_extraction/"
+            "17092026/trained_models/xgb")
+
+
+    def _comparison_table(best, other_all, name_this, name_other):
+        """One row per top group: importance here, importance in the other model, difference."""
+        rows = []
+        for prop, imp in best.items():
+            imp_other = other_all.get(prop, 0.0)
+            rows.append({
+                "Group": prop,
+                f"Importance {name_this}": imp,
+                f"Importance {name_other}": imp_other,
+                "Difference": imp - imp_other,
+            })
+        return pd.DataFrame(rows)
+
+
+    def _save_table_png(df, title, out_path, fmt="{:.4f}", dpi=300):
+        """Render a DataFrame as a clean table image for slides."""
+        cell_text = [[str(row.iloc[0])] + [fmt.format(v) for v in row.iloc[1:]]
+                    for _, row in df.iterrows()]
+
+        fig, ax = plt.subplots(figsize=(8, 0.4 * (len(df) + 1)))
+        ax.axis("off")
+        table = ax.table(cellText=cell_text, colLabels=list(df.columns),
+                        cellLoc="center", bbox=[0, 0, 1, 1])
+        table.auto_set_font_size(False)
+        table.set_fontsize(11)
+        table.auto_set_column_width(col=list(range(len(df.columns))))
+
+        diff_col = list(df.columns).index("Difference")
+        for (r, c), cell in table.get_celld().items():
+            cell.set_edgecolor("#cccccc")
+            if r == 0:  # header
+                cell.set_facecolor("#2f4b7c")
+                cell.set_text_props(color="white", weight="bold")
+            elif c == diff_col:  # tint positive / negative differences
+                val = df.iloc[r - 1, diff_col]
+                cell.set_facecolor("#e3f2e1" if val > 0 else "#f9e0e0" if val < 0 else "white")
+            else:
+                cell.set_facecolor("white" if r % 2 else "#f5f7fa")
+
+        ax.set_title(title, fontsize=13, fontweight="bold", pad=10)
+        fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+
+    df_1 = pd.read_csv(os.path.join(BASE_DIR, version_1, "feature_importance.csv"))
+    df_2 = pd.read_csv(os.path.join(BASE_DIR, version_2, "feature_importance.csv"))
+
+    per_prop_1 = df_1.groupby("group")["importance_mean"].sum().sort_values(ascending=False)
+    per_prop_2 = df_2.groupby("group")["importance_mean"].sum().sort_values(ascending=False)
+
+    table_1 = _comparison_table(per_prop_1.head(top_n), per_prop_2, version_1, version_2)
+    table_2 = _comparison_table(per_prop_2.head(top_n), per_prop_1, version_2, version_1)
+
+    os.makedirs(save_dir, exist_ok=True)
+    path_1 = os.path.join(save_dir, f"top_groups_{version_1}_vs_{version_2}.png")
+    path_2 = os.path.join(save_dir, f"top_groups_{version_2}_vs_{version_1}.png")
+    _save_table_png(table_1, f"Top {top_n} groups in {version_1}", path_1)
+    _save_table_png(table_2, f"Top {top_n} groups in {version_2}", path_2)
+
+    print(table_1.to_string(index=False), "\n")
+    print(table_2.to_string(index=False))
+    print(f"\nSaved:\n  {path_1}\n  {path_2}")
+    return table_1, table_2
+
 # Prepare datasets #
 def prepare_handedness_datasets():
     source_folder = "/home/a_morelli/datasets/id_lists/"
@@ -951,6 +1068,11 @@ def prepare_handedness_datasets():
     #merge the df_rest and df_to_impute dataframes
     df = pd.concat([df_rest, df_to_impute], ignore_index=True)
 
+    #impute NaN values with -1
+    df['lateralite'] = df['lateralite'].fillna(-1)
+    #convert the lateralite column to int
+    df['lateralite'] = df['lateralite'].astype(int)
+
     #get the lateralite value counts for each split
     print("Lateralite value counts for each split:")
     for split in df['split'].unique():
@@ -963,4 +1085,4 @@ def prepare_handedness_datasets():
     print(f"Dataframe with lateralite column saved to {save_path}")
 
 if __name__ == "__main__":
-    prepare_handedness_datasets()
+    compare_group_feature_importances()

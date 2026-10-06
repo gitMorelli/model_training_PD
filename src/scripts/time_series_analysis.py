@@ -19,14 +19,23 @@ from src.utils.data_loading_utils import prepare_exclusion_sets_PD, return_file_
 from src.utils.data_loading_utils import questionnaires_to_keep
 from src.debug.PD_model_evaluation import  analyze_results
 from sklearn.inspection import permutation_importance
-from src.debug.PD_model_evaluation import tee_stdout, plot_probability_trajectories
+from src.debug.PD_model_evaluation import tee_stdout, plot_probability_trajectories, roc_auc_over_time
 from src.scripts.t_on_representations import balance_data, reshape_features, mask_features, add_info_to_df 
 
 HOME_PATH = "/home/a_morelli/models/model_training_logs/PD/"
+def get_input_file_path(name):
+    if name=="statistics":
+        input_file = os.path.join(HOME_PATH, "feature_extraction/17092026/statistics_PD.csv")
+    elif name=="trained_features":
+        input_file = os.path.join(HOME_PATH, "feature_extraction/17092026/trained_models/xgb/v_13/results_per_step.csv")
+    elif name=="trained_deep":
+        #input_file = os.path.join(HOME_PATH, "resnet18_model_results/checkpoints/v_36/per_step_predictions.csv")
+        input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv")
+    return input_file
 params = {
 
-    "input_file":os.path.join(HOME_PATH, "feature_extraction/17092026/statistics_PD.csv"),
-    "signal_column": 'cell_gap_run_v_mean_mean', #'cell_contour_jitter_rms_mean', #cell_sigma_x_mean
+    "input_file":get_input_file_path("trained_deep"),
+    "signal_column": 'cell_sigma_y_mean', #'cell_contour_jitter_rms_mean', #cell_sigma_x_mean
     
     "class_col": 'diag_park_final1_quest',
     #To put for compatibility with code
@@ -49,17 +58,19 @@ params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = r
 
 def get_type_of_input(params):
     out = None
-    if 'feature_extraction' in params["input_file"]:
+    if 'statistics' in params["input_file"]:
         out = "feature"
-    else:
+    elif 'checkpoints' in params["input_file"]:
         out = "DL"
+    elif 'results_per_step' in params["input_file"]:
+        out = "ML_on_features"
     return out
 params["type_of_input"] = get_type_of_input(params)
 
 
 VERBOSE = True
 SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/time_series_analysis"
-EXPERIMENT = "time_series_comparison" #"plot_property" #"time_series_comparison"
+EXPERIMENT = "statistical_analysis" #"statistical_analysis" #"time_series_comparison" #"plot_property" 
 os.makedirs(SAVE_PATH, exist_ok=True)
 
 def main():
@@ -71,12 +82,12 @@ def main():
     reference_df = balance_data(reference_df, params, column="unique_id")
 
     df = load_file(params) 
-    df = balance_data(df, params)
 
     if params["type_of_input"] == "feature": #i save in the same format as the representation file -> subj_id,q,mo,rep -> i can use the same logic
+        df = balance_data(df, params)
         df,properties = reshape_features(df, keep_cols=["split"])
         if params["mask_features"]:
-            df = mask_features(df, params) #masking features for the representation
+            df,keep_dict  = mask_features(df, params) #masking features for the representation
         df = add_info_to_df(df, params) #adding the class_col to the df
         #print("[DEBUG: Columns]",df.columns)
         #print(df.head())
@@ -86,15 +97,20 @@ def main():
         #assert 1==0
         df = df[df['split'] == 'val'] #only keep validation set for the analysis
         df = add_case_dt(df, reference_df, properties, n_slots=13) #adding the case_dt to the df
-    else:
+        #normalize the signal columns to be between 0 and 1, using min-max normalization
+        for p in properties:
+            df[p] = (df[p] - df[p].min()) / (df[p].max() - df[p].min())
+    elif params["type_of_input"] == "DL":
+        #print([col for col in df.columns]) #-> ['unique_id', 'slot', 'true_label', 'predicted_label', 'probability_0', 'probability_1', 'case_dt']
+        params['signal_column']='probability_1'
+        properties = None
+    elif params["type_of_input"] == "ML_on_features":
+        #print([col for col in df.columns]) #-> ['unique_id', 'slot', 'true_label', 'predicted_label', 'probability_0', 'probability_1', 'case_dt']
         params['signal_column']='probability_1'
         properties = None
     
     print(EXPERIMENT)
     if EXPERIMENT == "time_series_comparison":
-        #normalize the signal columns to have mean 0 and std 1
-        for p in properties:
-            df[p] = (df[p] - df[p].mean()) / df[p].std()
         compare_signals(df, signal_columns=properties, n_steps=10, step_is_years=False,
                     class_names=("negative", "positive"), min_count=1, power=2,
                     save_path=SAVE_PATH, save_name="signal_comparison", only_common_rows=False)
@@ -106,6 +122,19 @@ def main():
                                                 signal_column=params['signal_column'], plot_difference=True, show_points=False)
             score = weighted_abs_diff_sum(diff)
             print(f"Score for {params['signal_column']}: {score}")
+
+        if params['signal_column'] == 'probability_1':
+            #compute the ROC AUC over time
+            res,_ = roc_auc_over_time(
+                df, step=2,window=2, pred_col=params['signal_column'], true_col="true_label",
+                save_path=SAVE_PATH, save_name="roc_auc_over_time.png",percentiles=(5, 99)
+            )
+    elif EXPERIMENT == "statistical_analysis":
+        import src.utils.longitudinal_analysis as la
+        plot_save_path = os.path.dirname(params['input_file'])
+        plot_save_path = os.path.join(plot_save_path, "GLMM_results.png")
+        la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label"}, 
+                             logit=True, eps=1e-4, path=plot_save_path)
 
 
 # ----------------------------------------------------------------------------
@@ -424,9 +453,11 @@ def get_args():
     return parser.parse_args()
 
 def load_file(params):
-    if params["type_of_input"] == "representation":
-        pass
+    if params["type_of_input"] == "DL":
+        df = pd.read_csv(params["input_file"])
     elif params["type_of_input"] == "feature":
+        df = pd.read_csv(params["input_file"])
+    elif params["type_of_input"] == "ML_on_features":
         df = pd.read_csv(params["input_file"])
     return df
 

@@ -94,7 +94,7 @@ def get_input_modality(name):
         return ['X_window','_X_window']+ ['digit_window' , '_digit_window']+ ['text_window', '_text_window']
 
 RESTORE = False
-version_override =  11
+version_override =  2
 
 exp_params = {
     'problem': 'handedness', #handedness, PD, 
@@ -121,9 +121,9 @@ exp_params = {
     'num_tiles': 3,
     'use_grid': True,
     'label_smoothing': 0.0, #0.0 = no smoothing // 0.1, 0.2, 0.3, 0.4, 0.5; if set to x!=0 -> num_classes=2 and crossentropy is used
-    'use_balanced_weights': False,
+    'use_balanced_weights': True,
     'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': False, #note that this and balace_validation are independent
+    'balanced_data': True, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
@@ -179,7 +179,7 @@ exp_params = {
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
     'batch_size': 4,
     'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
-    'num_epochs': 100,
+    'num_epochs': 10,
     'max_steps': -1, #N or -1
     'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
@@ -187,7 +187,7 @@ exp_params = {
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier'],
+    'layers_to_unfreeze': ['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
@@ -271,6 +271,11 @@ def main(exp_params):
 
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
     train_df, *_ = preprocess_PD_csv(train_df,exp_params['selected_properties'], split_col='split')
+
+    #print the value counts for each unique value of the split column
+    print(f"train_df split value counts:\n{train_df['split'].value_counts()}", flush=True)
+    return
+    
 
     n_local,n_global = _selected_properties_get_dims(exp_params, train_df)
     print(f"n_local: {n_local}, n_global: {n_global}", flush=True)
@@ -592,19 +597,21 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
 
 #model loading
 def model_initialization(write_log,exp_params, verbose=True,val=False, n_local=0, n_global=0, **kwargs):
-    backbone,transform = get_model(name=exp_params['model'], pretrained=exp_params.get('pretrained', True),grayscale=exp_params['to_grayscale'])
+
+    lora_tuning = exp_params.get('lora_tuning', False)
+    backbone,transform = get_model(name=exp_params['model'], pretrained=exp_params.get('pretrained', True),
+                                   grayscale=exp_params['to_grayscale'], is_lora=lora_tuning)
     print("############# Model backbone loaded! #############")
     transform = get_transforms(exp_params, transform)
     out=test_output(exp_params['input_size'], backbone, channels=exp_params['num_channels']) #test the output of the backbone to determine the number of features for the classification head
     in_features = out.shape[1]  
 
-    lora_tuning = exp_params.get('lora_tuning', False)
-
     if lora_tuning:
-        cfg = LoraConfig(
-            r=8, lora_alpha=16, lora_dropout=0.05, bias="none",
-            target_modules=r"blocks\.\d+\.attn\.(qkv|proj)",   # regex, fullmatch
-        )
+        target = getattr(backbone, 'lora_target_modules', None)
+        if target is None:
+            raise ValueError(f"No LoRA target modules defined for {exp_params['model']}")
+        cfg = LoraConfig(r=8, lora_alpha=16, lora_dropout=0.05, bias="none",
+                        target_modules=target)
         backbone = get_peft_model(backbone, cfg)
         #model.print_trainable_parameters()
     

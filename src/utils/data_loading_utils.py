@@ -1739,6 +1739,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
     )
 
     if cross_val or merge_shards:
+        print("[DEBUG] Merging train and val shards, cross_val:", cross_val, "merge_shards:", merge_shards)
         train_shards = sorted(glob.glob(SHARD_PATTERN_train))
         val_shards   = sorted(glob.glob(SHARD_PATTERN_val))
         all_shards   = train_shards + val_shards
@@ -2044,7 +2045,9 @@ def generate_exclusion_set_hand(csv_source,exp_params,split='train', original_da
     csv_data = csv_data[csv_data['split'] == split]
     if verbose:
         print(f"[Prepare exclusion] [pre] Number of samples in {split} set: {len(csv_data)}")
-    all_original_ids = set(original_data[original_data['split']==split]['unique_id'].unique())
+    #the shards will be put together -> i will always iterate on train+val ->
+    #e.g. during validation i have to exclude all the ids from all the other splits part the ones i will select
+    all_original_ids = set(original_data['unique_id'].unique())
 
     mask = _exclude_subjects_by_pattern(exp_params, csv_data, split=split, verbose=verbose)
     #subjects_with_no_pre_avail_q_data = csv_data[~mask]['unique_id'].unique()
@@ -2057,7 +2060,7 @@ def generate_exclusion_set_hand(csv_source,exp_params,split='train', original_da
             print(f"Balancing the dataset for {split} set with balancing factor {exp_params['balancing_factor']})")
 
         #keep balancing factor ids in each group for each case, sampling with priority from the at_least_warning==0 controls
-        n_target = int(exp_params['balancing_factor'])
+        n_target = int(exp_params['balancing_factor'])*len(csv_data[csv_data[class_col] == 1]) #number of controls to keep = balancing_factor * number of cases
         seed = exp_params['seed']
         
         #select n_target ids in the class_col==0 group 
@@ -2099,6 +2102,7 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
             print('#' * 50)
 
     if class_col in ['lateralite']:
+        print("[DEBUG] Handedness specific balancing")
         exclusion_set = generate_exclusion_set_hand(csv_data,exp_params, split='train',original_data=original_data, 
                                                 class_col=class_col, verbose=verbose) 
         val_exclusion_set = generate_exclusion_set_hand(csv_data,exp_params, split='val', original_data=original_data, 

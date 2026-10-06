@@ -53,6 +53,7 @@ from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDC
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.scripts.train_PD_model import model_initialization, preprocess_PD_csv
 
+
 def get_last_best_checkpoint(checkpoint_dir,version):
     checkpoint_files = glob.glob(os.path.join(checkpoint_dir,f"v_{version}", "*best*.ckpt"))
     checkpoint_to_load = max(checkpoint_files, key=os.path.getctime) if checkpoint_files else None
@@ -61,12 +62,12 @@ def get_last_best_checkpoint(checkpoint_dir,version):
     print(f"Checkpoint to load: {checkpoint_name}", flush=True)
     return checkpoint_to_load
 
-experiment = "PD"#"pre_trained_models/E3N" # "PD"
+experiment = "PD" #"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'resnet18' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'convnext_tiny' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='36'
-override_parameters=False
+version='21'
+override_parameters=True
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #get the most recent ckpt file with best in the name 
@@ -341,6 +342,7 @@ def get_per_step_results(outputs, train_df,class_names=None):
 
     return result_df.sort_values(["unique_id", "slot"]).reset_index(drop=True)
 
+  
 def plot_probability_trajectories(df, n_steps=20, ax=None,
                                   class_names=("negative", "positive"),
                                   min_count=1, show_points=True,
@@ -348,11 +350,14 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
                                   save_name="probability_trajectories", step_is_years=False,
                                   signal_column="probability_1",
                                   plot_difference=False, diff_ax=None,
-                                  diff_save_name=None):
+                                  diff_save_name=None, y_pad_frac=0.02):
     """Average probability_1 across subjects on a binned case_dt axis.
     Rows are binned to N equal-width steps between min and max case_dt.
     Each class (true_label 0 / 1) gets a mean curve with a ±SEM band.
     Bins with fewer than `min_count` subjects are dropped from that class.
+ 
+    The y-axis of each plot spans the lowest to the highest edge of the
+    ±SEM bands drawn on it, padded by `y_pad_frac` of that span.
  
     If `plot_difference` is True, a second figure shows the difference
     mean(class 1) - mean(class 0) per bin, with error
@@ -363,6 +368,15 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
  
     Returns `stats`, or `(stats, diff)` when `plot_difference` is True.
     """
+    def _band_ylim(ax, lows, highs, pad_frac):
+        """Set y-limits to the lowest/highest band edge, padded by pad_frac of the span."""
+        if not lows:
+            return
+        y_lo = float(np.nanmin(np.concatenate(lows)))
+        y_hi = float(np.nanmax(np.concatenate(highs)))
+        pad = pad_frac * ((y_hi - y_lo) or 1)
+        ax.set_ylim(y_lo - pad, y_hi + pad)
+
     d = df.dropna(subset=(signal_column, "case_dt", "true_label")).copy()
     if d.empty:
         raise ValueError(f"no rows with {signal_column}, case_dt, and true_label")
@@ -370,8 +384,8 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
     lo, hi = d["case_dt"].min(), d["case_dt"].max()
     if step_is_years:
         delta = hi - lo
-        #determine the number of bins in which to divide the range of case_dt into equal-width bins of 1 year (as close as possible)
-        #-> n_steps=2y with delta=6y -> n_steps=3, if delta=5y -> n_steps=ceil(5/2)=3
+        # number of equal-width bins so each is as close as possible to n_steps years
+        # -> n_steps=2y with delta=6y -> 3 bins; delta=5y -> ceil(5/2)=3 bins
         n_steps = int(np.ceil(delta / n_steps))
         print(f"step_is_years=True, delta={delta}, n_steps={n_steps}")
     width_bin_years = (hi - lo) / n_steps
@@ -390,6 +404,7 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
         _, ax = plt.subplots(figsize=(9, 5))
  
     palette = {0: "#3B8BD4", 1: "#D85A30"}
+    band_lows, band_highs = [], []
     for label, name in zip((0, 1), class_names):
         s = stats[stats["true_label"] == label].sort_values("_bin")
         if s.empty:
@@ -398,6 +413,8 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
         m = s["mean"].to_numpy()
         e = s["sem"].fillna(0).to_numpy()
         color = palette[label]
+        band_lows.append(m - e)
+        band_highs.append(m + e)
  
         # raw rows behind the curve — jittered horizontally within each bin
         if show_points:
@@ -423,9 +440,7 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
     ax.axhline(0.5, color="gray", lw=0.7, ls="--", alpha=0.6)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(signal_column)
-    pad = 0.02 * (d[signal_column].max() - d[signal_column].min() or 1)
-    ax.set_ylim(d[signal_column].min() - pad,
-                d[signal_column].max() + pad)
+    _band_ylim(ax, band_lows, band_highs, y_pad_frac)
     ax.grid(True, axis="y", alpha=0.25, linewidth=0.5)
     ax.legend(loc="best", frameon=False)
  
@@ -481,6 +496,7 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
     diff_ax.set_xlabel(xlabel)
     diff_ax.set_ylabel(f"Δ {signal_column} ({class_names[1]} − {class_names[0]})")
     diff_ax.set_xlim(ax.get_xlim())  # align x-axis with the main plot
+    _band_ylim(diff_ax, [m - e], [m + e], y_pad_frac)
     diff_ax.grid(True, axis="y", alpha=0.25, linewidth=0.5)
     diff_ax.legend(loc="best", frameon=False)
  
@@ -491,7 +507,6 @@ def plot_probability_trajectories(df, n_steps=20, ax=None,
         print(f"Saved difference plot to {diff_path}")
  
     return stats, diff
-
  
 def roc_auc_over_time(
     df,
@@ -560,7 +575,7 @@ def roc_auc_over_time(
         times = data[time_col].to_numpy()
         rows, curves = [], {}
         for t in grid:
-            last = data[times <= t + 1e-9].drop_duplicates(subset=id_col, keep="last")
+            last = data[times <= t + 1e-9].drop_duplicates(subset=id_col, keep="last") #keep the last row per subject
             if window is not None:
                 last = last[last[time_col] > t - window + 1e-9]
     
