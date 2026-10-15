@@ -40,7 +40,7 @@ import html
 from functools import cached_property
 
 import src.debug.debug_utils.pd_training_data_analysis as pd_train_analysis
-from src.utils.data_loading_utils import merge_properties_from_full_dataset_PD
+from utils.data_loading.data_loading_utils import merge_properties_from_full_dataset_PD
 #PATHS
 
 metadata = {

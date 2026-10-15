@@ -35,7 +35,7 @@ for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
 
 # Your module holding extract_image_properties / _binarize / _cell_features / ...
 from utils.handwriting_features import extract_image_properties  
-from utils.data_loading_utils import return_file_paths, load_grid_dict, grid_lookup
+from utils.data_loading.data_loading_utils import return_file_paths, load_grid_dict, grid_lookup
 
 VARIANTS = ("X", "hand", "hand_sentences_full", "number", "number_random")
 

@@ -42,7 +42,7 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.train_PD_model \
-    --num_workers 22
+    --num_workers 24
 echo "PYTORCH_CUDA_ALLOC_CONF=$PYTORCH_CUDA_ALLOC_CONF"
 nvidia-smi --query-gpu=name,memory.total --format=csv
 

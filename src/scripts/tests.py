@@ -15,7 +15,7 @@ import pickle
 import time
 
 
-from src.utils.data_loading_utils import pre_load_grid_data,prepare_pre_training
+from utils.data_loading import pre_load_grid_data,prepare_pre_training
 from src.debug.PD_model_evaluation import plot_probability_trajectories
 
 def test_read_json(tar_path="/mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A0C5I2D5.tar"):

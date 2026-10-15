@@ -33,8 +33,8 @@ import psutil
 import math
 from peft import LoraConfig, get_peft_model
 
-from src.utils.data_loading_utils import prepare_loaders_PD, load_grid_dict, synthetic_data_override
-from src.utils.data_loading_utils import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
+from utils.data_loading import prepare_loaders_PD, load_grid_dict, synthetic_data_override
+from utils.data_loading import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel, load_ln_checkpoint, FlexibleSequenceQuestionnaireModel
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
@@ -94,7 +94,7 @@ def get_input_modality(name):
         return ['X_window','_X_window']+ ['digit_window' , '_digit_window']+ ['text_window', '_text_window']
 
 RESTORE = False
-version_override =  2
+version_override =  1
 
 exp_params = {
     'problem': 'handedness', #handedness, PD, 
@@ -117,14 +117,14 @@ exp_params = {
 
     #experiment parameters
     'merge_shards': False, #automatically set to true if you use handedness as label
-    'data_modality': get_input_modality('window_view_minimal'), #mixed_view, window_view, window_view_minimal
+    'data_modality': get_input_modality('window_view_2'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
     'label_smoothing': 0.0, #0.0 = no smoothing // 0.1, 0.2, 0.3, 0.4, 0.5; if set to x!=0 -> num_classes=2 and crossentropy is used
     'use_balanced_weights': True,
-    'balancing_factor': 3, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
+    'balancing_factor': 10, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
     'balanced_data': True, #note that this and balace_validation are independent
-    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
+    'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
@@ -135,7 +135,7 @@ exp_params = {
     'filter_modality' : 'digit', 
 
     #model definition
-    'model': "convnext_tiny",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model': "resnet18",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
     #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
@@ -148,7 +148,7 @@ exp_params = {
     #val and align are set authomatically: to none if pre_training is not active and PD; to 0.3 and True if problem==handedness
     'min_window_steps': 50,
     'model_parameters': {
-        'd_model': 128, 
+        'd_model': 64, 
         'n_heads': 4, # -> for each head 128/4 = 32 is the hidden dimension during the attention computation 
         'n_layers':1,
         'ff_mult':2, # the hidden dimension of the feedforward layer is ff_mult*d_model
@@ -173,25 +173,25 @@ exp_params = {
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
-    'lr_decay': 1.0, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
-    'lr_backbone': 1e-4,
-    'lr_classifier_head': 1e-3,
+    'lr_decay': 0.4, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
+    'lr_backbone': 1e-5,
+    'lr_classifier_head': 1e-4,
     'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 4,
-    'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
-    'num_epochs': 10,
+    'batch_size': 8,
+    'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
+    'num_epochs': 100,
     'max_steps': -1, #N or -1
-    'patience': 10, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
+    'patience': 20, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-8, #the timm-style convention (base/100)
+    'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
     'input_size': 224,
-    'layers_to_unfreeze': ['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'],
+    'layers_to_unfreeze': ['all'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
-    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
     #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None
@@ -273,9 +273,7 @@ def main(exp_params):
     train_df, *_ = preprocess_PD_csv(train_df,exp_params['selected_properties'], split_col='split')
 
     #print the value counts for each unique value of the split column
-    print(f"train_df split value counts:\n{train_df['split'].value_counts()}", flush=True)
-    return
-    
+    print(f"[DEBUG] train_df split value counts:\n{train_df['split'].value_counts()}", flush=True)
 
     n_local,n_global = _selected_properties_get_dims(exp_params, train_df)
     print(f"n_local: {n_local}, n_global: {n_global}", flush=True)

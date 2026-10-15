@@ -23,7 +23,7 @@ import shutil
 #from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks import Callback
 
-from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset
+from utils.data_loading.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 

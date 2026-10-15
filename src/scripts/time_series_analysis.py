@@ -13,10 +13,8 @@ import io
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm
 
-from src.utils.data_loading_utils import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
-from src.utils.data_loading_utils import prepare_exclusion_sets_PD, return_file_paths
-from src.utils.data_loading_utils import questionnaires_to_keep
+from utils.data_loading import prepare_exclusion_sets_PD, return_file_paths
 from src.debug.PD_model_evaluation import  analyze_results
 from sklearn.inspection import permutation_importance
 from src.debug.PD_model_evaluation import tee_stdout, plot_probability_trajectories, roc_auc_over_time
@@ -34,7 +32,7 @@ def get_input_file_path(name):
     return input_file
 params = {
 
-    "input_file":get_input_file_path("trained_deep"),
+    "input_file":get_input_file_path("trained_features"),
     "signal_column": 'cell_sigma_y_mean', #'cell_contour_jitter_rms_mean', #cell_sigma_x_mean
     
     "class_col": 'diag_park_final1_quest',
@@ -129,12 +127,24 @@ def main():
                 df, step=2,window=2, pred_col=params['signal_column'], true_col="true_label",
                 save_path=SAVE_PATH, save_name="roc_auc_over_time.png",percentiles=(5, 99)
             )
-    elif EXPERIMENT == "statistical_analysis":
+    elif EXPERIMENT == "statistical_analysis": 
+        '''#get the max and min value of the signal column
+        min_value = df[params['signal_column']].min()
+        max_value = df[params['signal_column']].max()
+        print(f"Min value of {params['signal_column']}: {min_value}")
+        print(f"Max value of {params['signal_column']}: {max_value}")
+        return'''
+        if params['censor_time'] == 'pre_diagnosis':
+            print("Censoring time to pre-diagnosis, excluding case_dt>0")
+            df = df[df['case_dt'] <= 0]
         import src.utils.longitudinal_analysis as la
         plot_save_path = os.path.dirname(params['input_file'])
-        plot_save_path = os.path.join(plot_save_path, "GLMM_results.png")
-        la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label"}, 
-                             logit=True, eps=1e-4, path=plot_save_path)
+        dof_spline = 4
+        log_path = os.path.join(plot_save_path, f"results_LMM_{dof_spline}_{params['censor_time']}.txt") #copy prints also to a log file in the checkpoint folder
+        with tee_stdout(log_path):
+            plot_save_path = os.path.join(plot_save_path, f"LMM_results_{dof_spline}_{params['censor_time']}.png")
+            la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label"}, 
+                                logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline, run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200)
 
 
 # ----------------------------------------------------------------------------

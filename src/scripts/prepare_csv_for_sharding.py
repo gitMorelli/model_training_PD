@@ -19,7 +19,7 @@ from typing import Callable, Optional, Iterable
 
 from src.utils.image_processing import convert_background_to_white, get_tiles, recolor_border_via_profiles
 from src.utils.file_utils import get_id_data_from_h5_file 
-from src.utils.data_loading_utils import prepare_pre_training
+from utils.data_loading.data_loading_utils import prepare_pre_training
 
 params={
     'LIST_OF_IDS_PD_PATH': "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet",

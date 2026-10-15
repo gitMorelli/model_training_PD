@@ -31,10 +31,6 @@ from scipy import stats
 
 warnings.filterwarnings("ignore")  # MixedLM is chatty about convergence/boundary warnings
 
-SPLINE_DF = 4  # flexibility of the time trend; 3-5 is typical, check sensitivity
-TIME_TERM = f"cr(time, df={SPLINE_DF}, constraints='center')"  # natural cubic regression spline
-
-
 # ----------------------------------------------------------------------------
 # 0. Example data (replace with your own DataFrame)
 # ----------------------------------------------------------------------------
@@ -73,9 +69,9 @@ def fit_mixed(formula, df, reml=False, re_formula="~time"):
     return result
 
 
-def fit_full_and_null(df):
-    full = fit_mixed(f"y ~ {TIME_TERM} * C(group)", df)  # class-specific trajectories
-    null = fit_mixed(f"y ~ {TIME_TERM}", df)             # one shared trajectory
+def fit_full_and_null(df, time_term):
+    full = fit_mixed(f"y ~ {time_term} * C(group)", df)  # class-specific trajectories
+    null = fit_mixed(f"y ~ {time_term}", df)             # one shared trajectory
     return full, null
 
 
@@ -88,17 +84,17 @@ def lrt(full, null):
     return stat, dof, stats.chi2.sf(stat, dof)
 
 
-def permutation_lrt(df, n_perm=200, seed=0):
+def permutation_lrt(df, time_term, n_perm=200, seed=0):
     """Shuffle class labels between SUBJECTS (never between observations)."""
     rng = np.random.default_rng(seed)
-    full, null = fit_full_and_null(df)
+    full, null = fit_full_and_null(df, time_term)
     observed, _, _ = lrt(full, null)
     labels = df.groupby("subject")["group"].first()
     perm_stats = []
     for _ in range(n_perm):
         shuffled = pd.Series(rng.permutation(labels.values), index=labels.index)
         d = df.assign(group=df["subject"].map(shuffled))
-        f, n = fit_full_and_null(d)
+        f, n = fit_full_and_null(d, time_term)
         perm_stats.append(2 * (f.llf - n.llf))
     p = (1 + np.sum(np.array(perm_stats) >= observed)) / (n_perm + 1)
     return observed, p
@@ -164,7 +160,7 @@ def significant_intervals(curve):
 # ----------------------------------------------------------------------------
 # 4. Change-point model: profile likelihood for the onset tau
 # ----------------------------------------------------------------------------
-def changepoint_profile(df, tau_grid=None, level=0.95):
+def changepoint_profile(df, time_term,tau_grid=None, level=0.95):
     """y = f(t) + delta * 1[class 2] * (t - tau)_+ + random effects.
 
     Assumes the classes are IDENTICAL before tau and diverge linearly after.
@@ -179,7 +175,7 @@ def changepoint_profile(df, tau_grid=None, level=0.95):
     llf = []
     for tau in tau_grid:
         d = df.assign(hinge=is_g2 * np.maximum(df["time"].values - tau, 0))
-        llf.append(fit_mixed(f"y ~ {TIME_TERM} + hinge", d).llf)
+        llf.append(fit_mixed(f"y ~ {time_term} + hinge", d).llf)
     llf = np.array(llf)
 
     tau_hat = tau_grid[np.argmax(llf)]
@@ -188,7 +184,7 @@ def changepoint_profile(df, tau_grid=None, level=0.95):
     return tau_hat, ci, pd.DataFrame({"tau": tau_grid, "llf": llf})
 
 
-def cluster_bootstrap_tau(df, n_boot=200, tau_grid=None, seed=0):
+def cluster_bootstrap_tau(df, time_term,n_boot=200, tau_grid=None, seed=0):
     """Resample whole SUBJECTS with replacement, re-estimate tau each time."""
     rng = np.random.default_rng(seed)
     subjects = df.groupby("group")["subject"].unique()
@@ -198,7 +194,7 @@ def cluster_bootstrap_tau(df, n_boot=200, tau_grid=None, seed=0):
         for g, subs in subjects.items():  # stratified by class
             for j, s in enumerate(rng.choice(subs, size=len(subs), replace=True)):
                 parts.append(df[df["subject"] == s].assign(subject=f"{s}_b{j}"))
-        tau_b, _, _ = changepoint_profile(pd.concat(parts), tau_grid=tau_grid)
+        tau_b, _, _ = changepoint_profile(pd.concat(parts), time_term=time_term, tau_grid=tau_grid)
         taus.append(tau_b)
     return np.percentile(taus, [2.5, 97.5]), np.array(taus)
 
@@ -244,16 +240,21 @@ def plot_results(df, full, curve, groups, profile=None, path="results.png"):
     fig.savefig(path, dpi=130)
     return path
 
+
+
 preset_columns = {             # your column name -> name used internally
         "subject":"unique_id",
         "group": "true_label",
         "time": "case_dt",
         "y": "probability_1",
     }
-def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None):
+def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, spline_df=4,
+                 run_permutation_test=False, n_perm=200, run_bootstrap=False, n_boot=200):
     '''logit = True            # model logit(probability_1) instead of the raw probability
     logit = 1e-4              # clip probabilities away from 0/1 before the logit
     '''
+    SPLINE_DF = spline_df  # flexibility of the time trend; 3-5 is typical, check sensitivity
+    TIME_TERM = f"cr(time, df={SPLINE_DF}, constraints='center')"  # natural cubic regression spline
 
     def prepare(raw):
         COLUMNS = {v: k for k, v in columns.items()}
@@ -270,7 +271,7 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None):
     print(f"{df['subject'].nunique()} subjects, {len(df)} observations\n")
 
     # Steps 1-2: models and global test
-    full, null = fit_full_and_null(df)
+    full, null = fit_full_and_null(df, TIME_TERM)
     stat, dof, p = lrt(full, null)
     print(f"Global LRT (class affects level or shape): chi2={stat:.2f}, df={dof}, p={p:.3g}")
 
@@ -287,13 +288,15 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None):
         print("No time interval where the difference is significant.")
 
     # Step 4: change-point estimate of the onset
-    tau_hat, tau_ci, profile = changepoint_profile(df)
+    tau_hat, tau_ci, profile = changepoint_profile(df, time_term=TIME_TERM)
     print(f"\nChange-point onset: tau = {tau_hat:.2f}, "
           f"approx. 95% CI [{tau_ci[0]:.2f}, {tau_ci[1]:.2f}]")
 
-    # Step 5 (slow; uncomment for robustness checks)
-    # obs, p_perm = permutation_lrt(df, n_perm=200); print(f"Permutation p = {p_perm:.3g}")
-    # ci_boot, _ = cluster_bootstrap_tau(df, n_boot=200); print(f"Bootstrap tau CI: {ci_boot}")
-
     if path:
         print("\nSaved plot:", plot_results(df, full_reml, curve, groups, profile, path=path))
+
+    # Step 5 (slow; uncomment for robustness checks)
+    if run_permutation_test:
+        obs, p_perm = permutation_lrt(df, TIME_TERM,n_perm=n_perm); print(f"Permutation p = {p_perm:.3g}")
+    if run_bootstrap:
+        ci_boot, _ = cluster_bootstrap_tau(df, TIME_TERM,n_boot=n_boot); print(f"Bootstrap tau CI: {ci_boot}")

@@ -34,7 +34,7 @@ from sklearn.cluster import HDBSCAN
 import umap
 from matplotlib import pyplot as plt
 
-from src.utils.data_loading_utils import load_representations_handedness
+from utils.data_loading.data_loading_utils import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
 
 representation_name = "unique_resnet18_digit_tiles1_aug2"

@@ -2035,8 +2035,13 @@ def set_automatic_hyperparameters(exp_params):
         exp_params['merge_shards'] = True #merge train and val since you are using the PD pre_training shards as trainign set
         exp_params['filter_missing'] = 'all'
         exp_params['censor_time'] = 'all'
-        exp_params['val_check_interval'] = 0.3 #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
-        exp_params['align_train_metrics_to_val'] = True
+        if exp_params['balanced_data'] == False:
+            print("\n[WARNING] You are not balancing, you are training on a large dataset -> setting intermediate validation steps\n")
+            exp_params['val_check_interval'] = 0.3 #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
+            exp_params['align_train_metrics_to_val'] = True
+        else:
+            exp_params['val_check_interval'] = None
+            exp_params['align_train_metrics_to_val'] = False
         '''
         Split: train -> 0.0    38559 , 1.0     3316
         Split: val -> 0.0    8263 , 1.0     710

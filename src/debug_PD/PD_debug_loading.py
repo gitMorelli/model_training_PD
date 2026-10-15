@@ -29,8 +29,8 @@ from collections import defaultdict
 import torch.nn.functional as F
 import pickle
 
-from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, melt_df
-from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
+from utils.data_loading.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, melt_df
+from utils.data_loading.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
 from src.utils.image_processing import ResizeLongestSide
 from src.utils.visualization import debug_images_dataset
 

@@ -13,7 +13,7 @@ import webdataset as wds
 import glob
 from tqdm import tqdm
 
-from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset
+from utils.data_loading import MultiTarSequenceDataset, InMemoryWdsDataset
 from src.utils.model_utils import SimpleMockModel
 
 LIST_OF_IDS_PATH = "/mnt/beegfs01/scratch/a_morelli/extraction/progress.csv"

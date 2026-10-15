@@ -1810,7 +1810,7 @@ class SetClassifierHead(nn.Module):
     def __init__(self, feat_dim, n_classes,
                  d_model=512, view_agg='attention', dropout=0.1,
                  ff_mult=2, use_spread=True, use_count_feature=True,
-                 count_norm=8.0, use_attention_pool=False):
+                 count_norm=8.0, use_attention_pool=False,**kwargs):
         super().__init__()
         self.proj = nn.Linear(feat_dim, d_model) if feat_dim != d_model else nn.Identity()
         self.view_agg = view_agg

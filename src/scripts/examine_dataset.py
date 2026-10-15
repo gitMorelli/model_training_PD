@@ -26,7 +26,7 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 
-from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
+from utils.data_loading import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val, test_handedness_dataset_all
 from src.utils.image_processing import ResizeLongestSide
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
 

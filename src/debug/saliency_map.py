@@ -36,8 +36,8 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
 
-from src.utils.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, melt_df
-from src.utils.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
+from utils.data_loading.data_loading_utils import MultiTarSequenceDataset, InMemoryWdsDataset, melt_df
+from utils.data_loading.data_loading_utils import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_dataset

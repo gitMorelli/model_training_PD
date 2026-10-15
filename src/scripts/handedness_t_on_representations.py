@@ -30,7 +30,7 @@ from sklearn.metrics import classification_report
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.utils.data_loading_utils import load_representations_handedness
+from utils.data_loading.data_loading_utils import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
 
 SOURCE_PATH = "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/feature_extraction/clip-vit-large-patch14-inter_extracted_features/clip_clip-vit-large-patch14-inter_all_tiles1_aug2" 

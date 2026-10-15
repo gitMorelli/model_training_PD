@@ -27,8 +27,8 @@ import numpy as np
 from pathlib import Path
 import json
 
-from src.utils.data_loading_utils import melt_df
-from src.utils.data_loading_utils import prepare_handedness_dataset_all
+from utils.data_loading.data_loading_utils import melt_df
+from utils.data_loading.data_loading_utils import prepare_handedness_dataset_all
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, get_model, test_output, get_classification_head, ConcatenateViews
 from src.utils.model_utils import JoinedModels, unfreeze_layers, load_backbone_from_lightning_ckpt
 from src.utils.visualization import debug_images_dataset
