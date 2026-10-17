@@ -522,6 +522,7 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
     frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities, *_ = batch
     global_properties = getattr(batch, "global_properties", None)   # None instead of an error
     local_properties  = getattr(batch, "local_properties", None)    # None instead of an error
+    mask_properties   = getattr(batch, "view_mask", None)     # None instead of an error
 
  
     seq_ids  = seq_ids.cpu()
@@ -555,6 +556,8 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
         print(f"global_properties ({global_properties.shape}): {global_properties}")
     if local_properties is not None:
         print(f"local_properties ({local_properties.shape}): {local_properties}")
+    if mask_properties is not None:
+        print(f"view_mask ({mask_properties.shape}): {mask_properties}")
 
     # consistency check: lengths must match the frame counts implied by seq_ids
     counts = torch.bincount(seq_ids, minlength=B)

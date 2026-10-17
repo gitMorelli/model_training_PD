@@ -49,7 +49,7 @@ from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, T
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_dataset
 from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std
-from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
+from src.utils.training_utils import PDClassificationModule, load_legacy_state_dict
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.scripts.train_PD_model import model_initialization, preprocess_PD_csv
 
@@ -772,10 +772,14 @@ def store_results(csv_data, results_df, ckpt_path,params):
 
 def litmodel_initialization_from_checkpoint(model, ckpt_path, exp_params):
     if exp_params['grouped']:
-        model_class=ModelPDGrouped
+        raise ValueError("Grouped models are not supported in this function. Please use the appropriate function for grouped models.")
     else:
-        model_class=ModelPDClassification
-    lit_model = model_class.load_from_checkpoint(ckpt_path, write_log=False, model=model, strict=False)
+        model_class=PDClassificationModule
+    try:
+        lit_model = model_class.load_from_checkpoint(ckpt_path, write_log=False, model=model, strict=False)
+    except Exception as e:
+        print(f"Strict loading failed with error: {e}. Attempting to load with legacy")
+        load_legacy_state_dict(model, torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"])
     return lit_model
 # ======================================================================
 # score helpers
