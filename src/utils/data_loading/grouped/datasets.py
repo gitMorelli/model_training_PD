@@ -1,5 +1,5 @@
 import torch
-from src.utils.data_loading.pd_dataloaders import _collate_subject_level
+from src.utils.data_loading.pd_shared_helpers import _collate_subject_level, _make_subject_sequence_builder, _parse_sample_json, _index_images
 
 
 def collate_groups_PD(batch_of_groups, debug=False):
@@ -63,3 +63,52 @@ def collate_variable_sequences_PD_grouped(samples, debug=False):
                                   modalities_list, resized_list, debug=debug)
  
     return (*base, group_ids, torch.tensor(group_seq_ids))
+
+def create_sequence_group_flattener_PD_multiview(transform_func, augmentation_transform_list,
+                                    modality_string_list, original_modality_names,
+                                    exclusion_set, grid_dict, censor_time,
+                                    filter_modality, exp_params=None,huggingface_transform=False,
+                                    invert_color=False, debug=False, train_df=None, is_val=False, **kw):
+    build_sequence = _make_subject_sequence_builder(
+        transform_func, augmentation_transform_list, modality_string_list,
+        original_modality_names, grid_dict, censor_time, filter_modality,
+        huggingface_transform, invert_color, debug, train_df,exp_params=exp_params,
+        is_val=is_val)
+
+    def flatten_groups(src):
+        for sample in src:
+            json_data = _parse_sample_json(sample)
+            if json_data is None:
+                continue
+
+            image_pool = _index_images(sample, grouped=True)  # subj -> q -> mod
+            group_id = json_data["group_id"]
+
+            '''print("Start debugging dataloader ...")
+            print(image_pool.keys())
+            print("length exclusion set:", len(exclusion_set))
+            print("json -> \n", json_data["subjects"], flush=True)
+            assert 1==0, "debug"'''
+
+            group = []
+            for subject_id, meta in json_data["subjects"].items():
+                if subject_id in exclusion_set:
+                    continue
+
+                rempli_seulq12 = 1  #i ignore the rempli_seul problem for now
+                result = build_sequence(subject_id, meta["last_q"],
+                                        meta["questionnaire_info"],
+                                        image_pool.get(subject_id, {}),meta['case_grid_pattern'], rempli_seulq12)
+                if result is None:
+                    continue
+                sequence, questionnaires, modalities, resized, _, _ = result
+                label = torch.tensor(meta["label"], dtype=torch.long)
+                group.append((sequence, label, subject_id,
+                              questionnaires, modalities, resized))
+
+            # only yield valid groups: exactly one positive, ≥1 control
+            labels = [g[1].item() for g in group]
+            if sum(labels) == 1 and len(group) >= 2:
+                yield group_id, group
+
+    return flatten_groups

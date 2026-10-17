@@ -24,10 +24,10 @@ from sklearn.linear_model import RidgeCV, LogisticRegressionCV
 from sklearn.model_selection import KFold, cross_val_score, StratifiedKFold, RepeatedStratifiedKFold
 from sklearn.metrics import check_scoring
 
-from utils.data_loading import load_representations_handedness
+from src.utils.data_loading import load_representations_handedness
 from src.utils.model_utils import get_sklearn_model
-from utils.data_loading import prepare_exclusion_sets_PD, return_file_paths
-from utils.data_loading import questionnaires_to_keep
+from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths
+from src.utils.data_loading import questionnaires_to_keep
 from src.debug.PD_model_evaluation import  analyze_results
 from sklearn.inspection import permutation_importance
 from src.debug.PD_model_evaluation import tee_stdout

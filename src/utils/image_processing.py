@@ -655,6 +655,8 @@ def get_augmentation_transform(exp_params):
             ])
         elif t_modality == 'window':
             t = t = T.Compose([]) #Identity transform, the windowing is done in the dataset class
+        elif t_modality == 'patch':
+            t = T.Compose([]) #Identity transform, the patching is done in the dataset class
         else:
             raise ValueError(f"Unknown augmentation_transform: {exp_params['apply_augmentation']}")
         return (t_modality,t)
@@ -680,6 +682,8 @@ def get_augmentation_transform(exp_params):
         for t in exp_params['data_modality']:
             if t in modality_to_transform:
                 list_of_transforms.append(get_single_augmentation_transform(modality_to_transform[t]))
+            elif 'patch' in t:
+                list_of_transforms.append(get_single_augmentation_transform('patch'))
             else:
                 raise ValueError(f"Unknown data_modality: {t}")
         return list_of_transforms

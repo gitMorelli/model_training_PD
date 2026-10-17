@@ -1,9 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=train_PD
-#--output=/home/a_morelli/vscode_projects/model_training/results/train_PD_pretraining.out
-#--error=/home/a_morelli/vscode_projects/model_training/results/train_PD_pretraining.err
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train_PD.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD.err
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train_PD_recover.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD_recover.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=4             # Number of CPU cores per task
@@ -12,7 +10,7 @@
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:t4:1
 #--gres=gpu:h100:1
 #--exclude=gpu01,gpu02,gpu04
 

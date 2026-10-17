@@ -33,16 +33,21 @@ import psutil
 import math
 from peft import LoraConfig, get_peft_model
 
-from utils.data_loading import prepare_loaders_PD, load_grid_dict, synthetic_data_override
-from utils.data_loading import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
-from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel, load_ln_checkpoint, FlexibleSequenceQuestionnaireModel
-from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
+from src.utils.data_loading import prepare_loaders_PD, load_grid_dict, synthetic_data_override
+from src.utils.data_loading import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
+from src.utils.models import SequenceQuestionnaireModel, SetQuestionnaireModel, load_ln_checkpoint, FlexibleSequenceQuestionnaireModel, ModularModel
+from src.utils.models import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
-from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache, TimeLoader, get_optimization_groups
-from src.utils.training_utils import set_automatic_hyperparameters, MemMonitor, BatchTimer, ThroughputMonitor, WriteProbe
 from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
 from src.utils.tabular_data_utils import preprocess_PD_csv
+
+from src.utils.training_utils import (DataShape, EvalConfig, LossConfig, OptimConfig, SchedulerConfig,
+                         PDClassificationModule, attach_write_log,
+                         default_callbacks, trainer_kwargs,
+                         set_automatic_hyperparameters, get_optimization_groups)
+from src.utils.training_utils.pd_training.callbacks.diagnostics import (BestMetricTracker, ClearCache, 
+                                                                        TimeLoader, MemMonitor, BatchTimer, ThroughputMonitor, WriteProbe)
 
 def pre_trained_weights(name):
     if name is None:
@@ -92,17 +97,22 @@ def get_input_modality(name):
         return ['X_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
     elif name=='window_debug_aug':
         return ['X_window','_X_window']+ ['digit_window' , '_digit_window']+ ['text_window', '_text_window']
+    elif name=='patch_view':
+        n_x=12
+        n_d=8
+        n_t=6
+        return ['X_patch' for _ in range(n_x)]+ ['digit_patch' for _ in range(n_d)]+['text_patch' for _ in range(n_t)]
 
 RESTORE = False
 version_override =  1
 
 exp_params = {
-    'problem': 'handedness', #handedness, PD, 
+    'problem': 'PD', #handedness, PD, 
     'debug': False,
 
     #debugging
     'debugging_callbacks':True,
-    'fast_dev_run': False, #can be False, None or True, False and None have same behavior
+    'fast_dev_run': True, #can be False, None or True, False and None have same behavior
     'pass_example_input_array': False,
 
     #training modality
@@ -117,14 +127,14 @@ exp_params = {
 
     #experiment parameters
     'merge_shards': False, #automatically set to true if you use handedness as label
-    'data_modality': get_input_modality('window_view_2'), #mixed_view, window_view, window_view_minimal
+    'data_modality': get_input_modality('patch_view'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
     'label_smoothing': 0.0, #0.0 = no smoothing // 0.1, 0.2, 0.3, 0.4, 0.5; if set to x!=0 -> num_classes=2 and crossentropy is used
     'use_balanced_weights': True,
     'balancing_factor': 10, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': True, #note that this and balace_validation are independent
-    'balance_validation': True, #if True the validation set is balanced, if False it is not balanced
+    'balanced_data': False, #note that this and balace_validation are independent
+    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
     'majority_class_id': 0, 
     'threshold_num': 1,
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
@@ -135,20 +145,36 @@ exp_params = {
     'filter_modality' : 'digit', 
 
     #model definition
-    'model': "resnet18",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model': "resnet18_32",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
     #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
     'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
-    'norm_mu': 'PD_window', #imagenet,handedness,mnist,PD_window
-    'norm_std': 'PD_window',
+    'norm_mu': 'imagenet', #imagenet,handedness,mnist,PD_window
+    'norm_std': 'imagenet',
     'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
     'align_train_metrics_to_val': True,  
     #val and align are set authomatically: to none if pre_training is not active and PD; to 0.3 and True if problem==handedness
     'min_window_steps': 50,
     'model_parameters': {
-        'd_model': 64, 
+        #Pooling options
+        'use_view_groups':True, #if True uses the view_groups parameter to group the views by modality, if False uses the view_mask parameter to mask the views
+        'modalities': None, #None or a list of modalities to keep, e.g. ['digit_window', 'text_window'] or ['X_crop', 'digit_crop', 'text_crop']
+        #with none all modalities are kept
+        'view_agg':'hierarchical', #hierarchical' pools within each modality, then across modalities;  
+        #'mean', 'max', 'lse', 'attention', 'pma', 'transformer', 'concat'-> pools across all views with a single attention layer; "mean" pools across all views with a simple mean; "max" pools across all views with a simple max
+        'view_kwargs': dict(
+            intra={'A': 'attention', 'B': 'attention', 'C': 'attention'},
+            inter='concat', 
+            modality_dropout=0.1, view_dropout=0.1, dropout_level='subject',
+            view_pos= True, #if True uses a positional embedding (moality+order in modality)
+            modality_emb = True, #if True uses a learned embedding per modality (added to views in flat mode, to the modality tokens in hierarchical mode).
+            modality_norm = True, #if True uses a separate LayerNorm per modality on the crop features.
+            ),
+
+        #sequence model
+        'd_model': 128, 
         'n_heads': 4, # -> for each head 128/4 = 32 is the hidden dimension during the attention computation 
         'n_layers':1,
         'ff_mult':2, # the hidden dimension of the feedforward layer is ff_mult*d_model
@@ -162,7 +188,8 @@ exp_params = {
     },
 
     #Transforms definitions
-    'custom_transform': None, #'pad_resize_normalize',#'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+    'custom_transform': 'pad_resize_normalize', #'pad_resize_normalize',#'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+    'input_size': 32,
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
@@ -173,12 +200,12 @@ exp_params = {
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
-    'lr_decay': 0.4, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
-    'lr_backbone': 1e-5,
+    'lr_decay': 0.5, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
+    'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-4,
-    'lr_scheduling': 'cosine', #'cosine' # 'cosine', 'step', None
-    'batch_size': 8,
-    'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
+    'lr_scheduling': 'cosine', #'cosine' # "two_stage", 'step', None
+    'batch_size': 4,
+    'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
     'num_epochs': 100,
     'max_steps': -1, #N or -1
     'patience': 20, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
@@ -186,12 +213,11 @@ exp_params = {
     'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
-    'input_size': 224,
     'layers_to_unfreeze': ['all'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
-    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
     #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None
@@ -302,9 +328,9 @@ def main(exp_params):
     if DEBUG_IMGS:
         debug(train_loader,val_loader,exp_params)
     
-    lit_model = litmodel_initialization(model,counts,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
+    lit_model, shape, eval_cfg = litmodel_initialization(model,counts,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
 
-    trainer, metrics_tracker = trainer_definition(current_version, exp_params, lit_model)
+    trainer, metrics_tracker = trainer_definition(current_version, exp_params, lit_model, shape,eval_cfg)
     
     exp_params['timestamp'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     exp_params['best_epoch'] = "N/A (Cancelled)"
@@ -420,7 +446,7 @@ def validity_checks(exp_params):
         raise ValueError("Error: you have selected grouped=False but the data_folder contains 'group' in its name. Please check your settings.")
     
 
-def trainer_definition(current_version, exp_params, lit_model, cv=None):
+def trainer_definition(current_version, exp_params, lit_model, shape,eval_cfg, cv=None):
     # names the module actually logs
     _MAX_METRICS = {"val/pr_auc", "val/f1_pos", "val/mcc", "val/acc", "val/balanced_acc"}
     _MIN_METRICS = {"val/loss", "val/loss_unweighted"}
@@ -512,15 +538,8 @@ def trainer_definition(current_version, exp_params, lit_model, cv=None):
     )
     metrics_tracker = BestMetricTracker()
 
-    optional = ['precision', 'accumulate_grad_batches', 'gradient_clip_val', 'fast_dev_run']
+    optional = ['precision', 'gradient_clip_val', 'fast_dev_run']
     extra_kwargs = {k: exp_params[k] for k in optional if exp_params.get(k) is not None}
-
-    # consistency: total_steps in the module was computed from this number
-    if extra_kwargs.get('accumulate_grad_batches', 1) != lit_model.accumulate_grad_batches:
-        raise ValueError(
-            f"accumulate_grad_batches mismatch: Trainer="
-            f"{extra_kwargs.get('accumulate_grad_batches', 1)} vs lit_model="
-            f"{lit_model.accumulate_grad_batches}; the LR schedule length would be wrong.")
 
     # windows shorter than min_window_steps are dropped -> only the tail is logged
     if getattr(lit_model, "align_train_metrics_to_val", False):
@@ -536,17 +555,16 @@ def trainer_definition(current_version, exp_params, lit_model, cv=None):
     extra_callbacks = ([ClearCache(), ThroughputMonitor(), MemMonitor()]
                        if exp_params['debugging_callbacks'] else [])
     trainer = L.Trainer(
-        max_epochs=exp_params['num_epochs'],
+        **trainer_kwargs(shape, eval_cfg),
         max_steps=exp_params.get('max_steps', -1),
         min_epochs=exp_params.get('min_epochs', 1),   # FIX 6: blocks early stop + selection
         logger=tb_logger,
         accelerator="auto",
-        callbacks=[checkpoint_callback, early_stop_callback,
+        callbacks=default_callbacks(exp_params['lr_scheduling']) + [checkpoint_callback, early_stop_callback,
                    metrics_tracker, periodic_ckpt] + extra_callbacks,
         profiler="simple",
         enable_progress_bar=False,
         **extra_kwargs,
-        **lit_model.trainer_val_kwargs
     )
     return trainer, metrics_tracker
 
@@ -561,42 +579,48 @@ def debug(train_dataloader,val_dataloader,exp_params):
 def litmodel_initialization(model, counts,write_log, define_optimization_groups,exp_params, exclusion_set, verbose):
     additional_kwargs={
     }
+    attach_write_log(write_log)   # once, before building the module
+    
     if exp_params['grouped']:
-        model_class=ModelPDGrouped
+        raise NotImplementedError("Grouped training is not implemented in this version of the code.")
+        '''model_class=ModelPDGrouped
         additional_kwargs['bce_aux_weight'] = exp_params['bce_aux_weight']
         total_units = compute_unique_groups(exp_params, exclusion_set) #the total number of unique groups after filtering
         if verbose:
-            print(f"Total unique groups in training set after filtering: {total_units}")
+            print(f"Total unique groups in training set after filtering: {total_units}")'''
     else:
-        model_class=ModelPDClassification
-        additional_kwargs['class_counts']= counts
-        additional_kwargs['num_classes']= exp_params['num_classes']
-        additional_kwargs['use_balanced_weights']= exp_params['use_balanced_weights']
-        #additional_kwargs['balancing_factor']= exp_params['balancing_factor']
-        additional_kwargs['balanced_data']= exp_params['balanced_data']
-        additional_kwargs['val_check_interval']= exp_params['val_check_interval']
-        additional_kwargs['align_train_metrics_to_val']= exp_params['align_train_metrics_to_val']
-        additional_kwargs['min_window_steps']= exp_params['min_window_steps']
         total_units = sum(counts)  # total number of samples in all classes
-    if exp_params.get('pass_example_input_array', False):
-        example_input_array = model_class.make_example_input(k=exp_params['num_tiles'], n_slots=13, C=exp_params['num_channels'], 
-                                                            H=exp_params['input_size'], W=exp_params['input_size'])
-    else:
-        example_input_array = None
-    lit_model = model_class(write_log,model=model,total_units=total_units,lr_backbone=exp_params['lr_backbone'], 
-                         lr_classifier_head=exp_params['lr_classifier_head'], example_input_array=example_input_array, 
-                         opt_groups=define_optimization_groups, num_epochs=exp_params['num_epochs'], lr_scheduling=exp_params['lr_scheduling'],
-                         weight_decay=exp_params['weight_decay'], warmup_fraction=exp_params['warmup_fraction'], 
-                         eta_min_cosine=exp_params['eta_min_cosine'], batch_size=exp_params['batch_size'],
-                         accumulate_grad_batches=exp_params['accumulate_grad_batches'], world_size=1,
-                         lora_tuning=exp_params['lora_tuning'], lora_lr_decay=exp_params['lr_decay'],
-                         **additional_kwargs)
-    return lit_model
+        shape = DataShape(total_units=total_units, batch_size=exp_params['batch_size'], world_size=1,
+                  accumulate_grad_batches=exp_params['accumulate_grad_batches'], num_epochs=exp_params['num_epochs'])
+        eval_cfg = EvalConfig(val_check_interval=exp_params['val_check_interval'], align_train_metrics_to_val=exp_params['align_train_metrics_to_val'],
+                              min_window_steps=exp_params['min_window_steps'])
+        sched = SchedulerConfig(kind=exp_params['lr_scheduling'], warmup_fraction=exp_params['warmup_fraction'], 
+                                eta_min=exp_params['eta_min_cosine'])
+        loss_cfg = LossConfig(use_balanced_weights=exp_params['use_balanced_weights'], balancing_factor=exp_params['balancing_factor'], 
+                              balanced_data=exp_params['balanced_data'])
+        
+        lit_model = PDClassificationModule(
+            model, counts, shape, num_classes=exp_params['num_classes'],
+            optim_cfg=OptimConfig(lr_backbone=exp_params['lr_backbone'], lr_head=exp_params['lr_classifier_head'],
+                                  lora_lr_decay=exp_params['lr_decay'], weight_decay=exp_params['weight_decay'],lora_tuning=exp_params['lora_tuning']),
+            loss_cfg=loss_cfg, sched_cfg=sched, eval_cfg=eval_cfg,
+        )
+    
+    return lit_model, shape, eval_cfg
 
 #model loading
+def _build_view_groups(modalities):
+    unique_modalities = list(set(modalities))
+    #count how many times each unique modality appears in the modalities list
+    counts = {modality: modalities.count(modality) for modality in unique_modalities}
+    return counts
 def model_initialization(write_log,exp_params, verbose=True,val=False, n_local=0, n_global=0, **kwargs):
-
+    n_slots = 13  # This is a fixed value based on your description
     lora_tuning = exp_params.get('lora_tuning', False)
+    view_groups = _build_view_groups(exp_params['data_modality']) if exp_params.get('use_view_groups', False) else None
+    print("[DEBUG] view_groups:", view_groups, flush=True)
+    kwargs['view_groups'] = view_groups
+
     backbone,transform = get_model(name=exp_params['model'], pretrained=exp_params.get('pretrained', True),
                                    grayscale=exp_params['to_grayscale'], is_lora=lora_tuning)
     print("############# Model backbone loaded! #############")
@@ -614,15 +638,17 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, n_local=0
         #model.print_trainable_parameters()
     
     if exp_params['model_structure'] == 'SequenceQuestionnaireModel':
-        n_slots = 13  # This is a fixed value based on your description
         model = SequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, view_agg='attention', 
                                            **kwargs)
     elif exp_params['model_structure'] == 'SetQuestionnaireModel':
         model = SetQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], view_agg='attention', **kwargs)
     elif exp_params['model_structure'] == 'FlexibleSequenceQuestionnaireModel':
-        n_slots = 13  # This is a fixed value based on your description
 
         model = FlexibleSequenceQuestionnaireModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, 
+                                                   n_local=n_local, n_global=n_global, 
+                                                   global_fusion=exp_params.get('global_fusion', 'late'), **kwargs)
+    elif exp_params['model_structure'] == 'ModularModel':
+        model = ModularModel(backbone,feat_dim=in_features, n_classes=exp_params['num_classes'], n_slots=n_slots, 
                                                    n_local=n_local, n_global=n_global, 
                                                    global_fusion=exp_params.get('global_fusion', 'late'), **kwargs)
     else:
