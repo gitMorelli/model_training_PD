@@ -36,7 +36,7 @@ from peft import LoraConfig, get_peft_model
 from src.utils.data_loading import prepare_loaders_PD, load_grid_dict, synthetic_data_override
 from src.utils.data_loading import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
 from src.utils.models import SequenceQuestionnaireModel, SetQuestionnaireModel, load_ln_checkpoint, FlexibleSequenceQuestionnaireModel, ModularModel
-from src.utils.models import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
+from src.utils.models import get_model, test_output, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
@@ -98,13 +98,13 @@ def get_input_modality(name):
     elif name=='window_debug_aug':
         return ['X_window','_X_window']+ ['digit_window' , '_digit_window']+ ['text_window', '_text_window']
     elif name=='patch_view':
-        n_x=12
-        n_d=8
+        n_x=20
+        n_d=10
         n_t=6
         return ['X_patch' for _ in range(n_x)]+ ['digit_patch' for _ in range(n_d)]+['text_patch' for _ in range(n_t)]
 
 RESTORE = False
-version_override =  1
+version_override =  7
 
 exp_params = {
     'problem': 'PD', #handedness, PD, 
@@ -112,7 +112,7 @@ exp_params = {
 
     #debugging
     'debugging_callbacks':True,
-    'fast_dev_run': True, #can be False, None or True, False and None have same behavior
+    'fast_dev_run': False, #can be False, None or True, False and None have same behavior
     'pass_example_input_array': False,
 
     #training modality
@@ -130,8 +130,15 @@ exp_params = {
     'data_modality': get_input_modality('patch_view'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
+    #loss options
     'label_smoothing': 0.0, #0.0 = no smoothing // 0.1, 0.2, 0.3, 0.4, 0.5; if set to x!=0 -> num_classes=2 and crossentropy is used
     'use_balanced_weights': True,
+    'loss_name': 'standard', # 'standard' or 'silent'
+    'loss_kwargs':{
+        'pi': 0.03, #the share of positives among normal-looking cases (P(y=1 | no visible signs)); 1-recall=P(no visible signs | y=1)
+        'learnable_pi': False
+    },
+    #balancing
     'balancing_factor': 10, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
     'balanced_data': False, #note that this and balace_validation are independent
     'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
@@ -165,7 +172,7 @@ exp_params = {
         'view_agg':'hierarchical', #hierarchical' pools within each modality, then across modalities;  
         #'mean', 'max', 'lse', 'attention', 'pma', 'transformer', 'concat'-> pools across all views with a single attention layer; "mean" pools across all views with a simple mean; "max" pools across all views with a simple max
         'view_kwargs': dict(
-            intra={'A': 'attention', 'B': 'attention', 'C': 'attention'},
+            intra='attention', 
             inter='concat', 
             modality_dropout=0.1, view_dropout=0.1, dropout_level='subject',
             view_pos= True, #if True uses a positional embedding (moality+order in modality)
@@ -183,7 +190,7 @@ exp_params = {
         'use_spread': False, #add a variance feature of dimension d_model to the average d_model feature
         'use_count_feature': False,
         'use_attention_pool': False, #if true overrides use_spread and use_count_feature 
-        'seq_model':'gru', #causal_gru (bidirectional has no impact, predictions are returned per_step)
+        'seq_model':'causal_gru', #causal_gru (bidirectional has no impact, predictions are returned per_step)
         'bidirectional':True,
     },
 
@@ -597,7 +604,7 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
         sched = SchedulerConfig(kind=exp_params['lr_scheduling'], warmup_fraction=exp_params['warmup_fraction'], 
                                 eta_min=exp_params['eta_min_cosine'])
         loss_cfg = LossConfig(use_balanced_weights=exp_params['use_balanced_weights'], balancing_factor=exp_params['balancing_factor'], 
-                              balanced_data=exp_params['balanced_data'])
+                              balanced_data=exp_params['balanced_data'], loss_name=exp_params['loss_name'], **exp_params['loss_kwargs'])
         
         lit_model = PDClassificationModule(
             model, counts, shape, num_classes=exp_params['num_classes'],
@@ -609,15 +616,14 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
     return lit_model, shape, eval_cfg
 
 #model loading
+from collections import Counter
 def _build_view_groups(modalities):
-    unique_modalities = list(set(modalities))
-    #count how many times each unique modality appears in the modalities list
-    counts = {modality: modalities.count(modality) for modality in unique_modalities}
-    return counts
+    return dict(Counter(modalities))
+
 def model_initialization(write_log,exp_params, verbose=True,val=False, n_local=0, n_global=0, **kwargs):
     n_slots = 13  # This is a fixed value based on your description
     lora_tuning = exp_params.get('lora_tuning', False)
-    view_groups = _build_view_groups(exp_params['data_modality']) if exp_params.get('use_view_groups', False) else None
+    view_groups = _build_view_groups(exp_params['data_modality']) if exp_params['model_parameters'].get('use_view_groups', False) else None
     print("[DEBUG] view_groups:", view_groups, flush=True)
     kwargs['view_groups'] = view_groups
 

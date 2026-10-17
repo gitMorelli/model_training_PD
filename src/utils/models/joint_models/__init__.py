@@ -1,11 +1,11 @@
 from .FlexibleSequenceQuestionnaireModel import FlexibleSequenceQuestionnaireModel
 from .ModularModel import ModularModel
-from .SequenceFlexibleClassifierHead import SequenceFlexibleClassifierHead
+from .SequenceQuestionnaireModel import SequenceQuestionnaireModel
 from .SetQuestionnaireModel import SetQuestionnaireModel
 
 __all__ = [
     "FlexibleSequenceQuestionnaireModel",
     "ModularModel",
-    "SequenceFlexibleClassifierHead",
+    "SequenceQuestionnaireModel",
     "SetQuestionnaireModel",
 ]

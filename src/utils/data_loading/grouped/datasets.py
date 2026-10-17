@@ -1,5 +1,6 @@
 import torch
-from src.utils.data_loading.pd_shared_helpers import _collate_subject_level, _make_subject_sequence_builder, _parse_sample_json, _index_images
+from src.utils.data_loading.pd_shared_helpers import _make_subject_sequence_builder, _parse_sample_json, _index_images
+from src.utils.data_loading.pd_shared_helpers import _collate_subject_level
 
 
 def collate_groups_PD(batch_of_groups, debug=False):

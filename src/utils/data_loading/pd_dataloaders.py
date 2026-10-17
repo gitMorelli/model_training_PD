@@ -32,26 +32,22 @@ from src.utils.handwriting_features import extract_image_properties
 from src.utils.image_processing import augment_frame
 
 from src.utils.data_loading.grid_loading import grid_lookup
-from src.utils.data_loading.pd_shared_helpers import _make_subject_sequence_builder, _parse_sample_json, _index_images
+from src.utils.data_loading.pd_shared_helpers import _make_subject_sequence_builder, _parse_sample_json, _index_images,_collate_subject_level
 from src.utils.data_loading.grouped.datasets import collate_groups_PD, create_sequence_group_flattener_PD_multiview
 
-class SubjectBatch(NamedTuple):
-    frames: torch.Tensor            # or list of dicts if debug
-    seq_ids: torch.Tensor
-    slot_ids: torch.Tensor
-    lengths: torch.Tensor
-    labels: torch.Tensor
-    resized: list
-    subject_ids: list
-    modalities: list
-    global_properties: Optional[torch.Tensor] = None   # (N, m1)
-    local_properties: Optional[torch.Tensor] = None     # (sum T_i, m2)
-    view_mask: Optional[torch.Tensor] = None  # (N, k) boolean mask for which views are present (not imputed)
+
 OPTIONAL_FIELD_SPECS = {
     "global_properties": (6, lambda vals: torch.stack(vals, dim=0)),   # (N, m1)
     "local_properties":  (7, lambda vals: torch.cat(vals, dim=0)),     # (sum T_i, m2)
-    "view_mask":         (8, lambda vals: torch.stack(vals, dim=0)),   # (N, k)
+    "view_mask":         (8, lambda vals: torch.cat(vals, dim=0)),   # (sum T_i, k)
 }
+modalities_map = {
+        'X': 'X',
+        'text': 'hand',
+        'digit': 'number_random',
+        'digitOrdered': 'number',
+        'sent': 'hand_sentences_full'
+    }
 
 def _maybe_aggregate(samples, field_name):
     idx, agg = OPTIONAL_FIELD_SPECS[field_name]
@@ -115,8 +111,8 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
             if result is None:
                 continue
 
-            sequence, questionnaires, modalities, resized_list, global_properties, local_properties = result
-            yield sequence, label, subject_id, questionnaires, modalities, resized_list, global_properties, local_properties
+            sequence, questionnaires, modalities, resized_list, global_properties, local_properties, view_mask  = result
+            yield sequence, label, subject_id, questionnaires, modalities, resized_list, global_properties, local_properties, view_mask 
 
     return flatten_samples
 
@@ -137,43 +133,6 @@ def collate_variable_sequences_PD(samples, debug=False):
                                    global_properties=global_properties,
                                    local_properties=local_properties, view_mask=view_mask)
 
-def _collate_subject_level(sequences, labels, subject_ids, questionnaires,
-                            modalities_list, resized_list, debug=False,
-                            global_properties=None, local_properties=None, view_mask=None):
-    if debug:
-        lengths = torch.tensor([len(seq) for seq in sequences])
-    else:
-        lengths = torch.tensor([seq.shape[0] for seq in sequences])
-
-    seq_ids, slot_ids = [], []
-    resized, modalities = [], []
-    if debug:
-        frames = []
-    else:
-        frames = torch.cat(sequences, dim=0)
-
-    for b, qs in enumerate(questionnaires):
-        for i, q in enumerate(qs):
-            seq_ids.append(b)
-            slot_ids.append(int(q) - 1)
-            resized.append(resized_list[b][i])
-            modalities.append(modalities_list[b][i])
-            if debug:
-                frames.append(sequences[b][i])
-
-    return SubjectBatch(
-        frames=frames,
-        seq_ids=torch.tensor(seq_ids),
-        slot_ids=torch.tensor(slot_ids),
-        lengths=lengths,
-        labels=labels,
-        resized=resized,
-        subject_ids=subject_ids,
-        modalities=modalities,
-        global_properties=global_properties,
-        local_properties=local_properties,
-        view_mask=view_mask,
-    )
 
 #------ Build dataset --------
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
@@ -183,13 +142,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
-    modalities_map = {
-        'X': 'X',
-        'text': 'hand',
-        'digit': 'number_random',
-        'digitOrdered': 'number',
-        'sent': 'hand_sentences_full'
-    }
+    
     if isinstance(modality, list):
         modality_string = [m.split('_')[0] for m in modality]  # Normalize to base modality names (keep original name for debugging)
         modality_string = [modalities_map[m] for m in modality_string if m in modalities_map]

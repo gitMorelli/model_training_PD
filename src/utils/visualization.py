@@ -557,7 +557,9 @@ def debug_print_batch_meta(batch, subject_ids=None, slot_to_q=None, max_subjects
     if local_properties is not None:
         print(f"local_properties ({local_properties.shape}): {local_properties}")
     if mask_properties is not None:
-        print(f"view_mask ({mask_properties.shape}): {mask_properties}")
+        print(f"view_mask ({mask_properties.shape}): {mask_properties[:2]} ...")
+    else:
+        print("view_mask: None")
 
     # consistency check: lengths must match the frame counts implied by seq_ids
     counts = torch.bincount(seq_ids, minlength=B)

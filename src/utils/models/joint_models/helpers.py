@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+
 #Wrappers
 class JoinedModels(nn.Module):
     def __init__(self, vision_model, classifier):

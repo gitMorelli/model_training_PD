@@ -35,6 +35,18 @@ from src.utils.data_loading.grid_loading import grid_lookup
 
 # Globals
 ALL_MODALITIES = ['hand', 'number_random', 'X']
+class SubjectBatch(NamedTuple):
+    frames: torch.Tensor            # or list of dicts if debug
+    seq_ids: torch.Tensor
+    slot_ids: torch.Tensor
+    lengths: torch.Tensor
+    labels: torch.Tensor
+    resized: list
+    subject_ids: list
+    modalities: list
+    global_properties: Optional[torch.Tensor] = None   # (N, m1)
+    local_properties: Optional[torch.Tensor] = None     # (sum T_i, m2)
+    view_mask: Optional[torch.Tensor] = None  # (N, k) boolean mask for which views are present (not imputed)
 
 window_size_dict = {
         'hand': 100,
@@ -88,12 +100,12 @@ def _index_images(sample, grouped):
 
 def _decode_image(raw_image_data, num):
     imputed = False
-    if isinstance(raw_image_data, bytes):
-        img = Image.open(io.BytesIO(raw_image_data)).convert('RGB')
-    elif num <= 0 or raw_image_data is None:
+    if num <= 0 or raw_image_data is None:
         # modality not present -> impute a blank image
         img = Image.new('RGB', (224, 224), color=(255, 255, 255))
         imputed = True
+    elif isinstance(raw_image_data, bytes):
+        img = Image.open(io.BytesIO(raw_image_data)).convert('RGB')
     else:
         img = raw_image_data
     return img, imputed
@@ -310,6 +322,16 @@ def _patch_sampling(x_coords, y_coords, img, augmentation_transform, n_x, impute
     img_view = augmentation_transform[1](img_view)  # apply the callable transform
     return img_view, count_windows
 
+def _get_all_modalities_in_order(modality_string_list):
+    """Return a list of all modalities in the order they should be processed.
+    the input is the list of views with the names converted to the standard -> correct order but duplicates"""
+    all_modalities = []
+    for modality in modality_string_list:
+        if modality not in all_modalities:
+            all_modalities.append(modality)
+
+    return all_modalities
+
 def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
                                    modality_string_list, original_modality_names,
                                    grid_dict, censor_time, filter_modality,
@@ -337,7 +359,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
 
         feature_extraction = (exp_params or {}).get('feature_extraction', False)
 
-        for current_mode in ALL_MODALITIES:
+        modalities_to_process = _get_all_modalities_in_order(modality_string_list)
+        for current_mode in modalities_to_process:
             num, grid = grid_lookup(grid_dict, original_id, 'q' + str(X), current_mode)
 
             # indexes of modality_string_list matching the current mode
@@ -350,6 +373,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             raw_image_data = images_for_q.get(current_mode.lower())
 
             img,imputed = _decode_image(raw_image_data, num)
+            #print(imputed, num)
             
             
             if synth_transform: #i am creating synthetic time-series
@@ -467,7 +491,7 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             return None
 
         sequence = frames if debug else torch.stack(frames, dim=0)  # (T_i, n_views, C, H, W)
-        return sequence, questionnaires, modalities, resized_list, global_properties, local_properties, masks
+        return sequence, questionnaires, modalities, resized_list, global_properties, local_properties, torch.stack(masks, dim=0)  # (T_i, n_views)
 
     return build_subject_sequence
 
@@ -596,3 +620,40 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
 
 # MARK: collate functions
 
+def _collate_subject_level(sequences, labels, subject_ids, questionnaires,
+                            modalities_list, resized_list, debug=False,
+                            global_properties=None, local_properties=None, view_mask=None):
+    if debug:
+        lengths = torch.tensor([len(seq) for seq in sequences])
+    else:
+        lengths = torch.tensor([seq.shape[0] for seq in sequences])
+
+    seq_ids, slot_ids = [], []
+    resized, modalities = [], []
+    if debug:
+        frames = []
+    else:
+        frames = torch.cat(sequences, dim=0)
+
+    for b, qs in enumerate(questionnaires):
+        for i, q in enumerate(qs):
+            seq_ids.append(b)
+            slot_ids.append(int(q) - 1)
+            resized.append(resized_list[b][i])
+            modalities.append(modalities_list[b][i])
+            if debug:
+                frames.append(sequences[b][i])
+
+    return SubjectBatch(
+        frames=frames,
+        seq_ids=torch.tensor(seq_ids),
+        slot_ids=torch.tensor(slot_ids),
+        lengths=lengths,
+        labels=labels,
+        resized=resized,
+        subject_ids=subject_ids,
+        modalities=modalities,
+        global_properties=global_properties,
+        local_properties=local_properties,
+        view_mask=view_mask,
+    )
