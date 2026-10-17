@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from ..batch import PDBatch
 from ..config import DataShape, EvalConfig, LossConfig, OptimConfig, SchedulerConfig
-from ..losses import (ClassificationLoss, binary_pos_weight, inverse_frequency_weights,
+from ..losses import (ClassificationLoss,SilentPositiveLoss, binary_pos_weight, inverse_frequency_weights,
                       n_stat_classes, validate_class_counts)
 from ..metrics import build_score_metrics, logits_to_preds, probs_and_preds, scores_for_metrics
 from .base import PDModuleBase
@@ -58,8 +58,14 @@ class PDClassificationModule(PDModuleBase):
         self.per_step = detect_per_step(model)
 
         if loss_cfg.use_balanced_weights and num_classes == 1:
-            self.criterion = ClassificationLoss(
-                num_classes, pos_weight=binary_pos_weight(counts, loss_cfg.balancing_factor))
+            if loss_cfg.loss_name == "silent":
+                self.criterion = SilentPositiveLoss(
+                    pi=loss_cfg.pi,
+                    learnable_pi=loss_cfg.learnable_pi,
+                    pos_weight=binary_pos_weight(counts, loss_cfg.balancing_factor))
+            else:
+                self.criterion = ClassificationLoss(
+                    num_classes, pos_weight=binary_pos_weight(counts, loss_cfg.balancing_factor))
         elif loss_cfg.use_balanced_weights:
             self.criterion = ClassificationLoss(
                 num_classes, class_weights=inverse_frequency_weights(counts, loss_cfg.balancing_factor))

@@ -88,11 +88,16 @@ class SchedulerConfig:
 
 @dataclass(frozen=True)
 class LossConfig:
+    loss_name: str = "standard"  # standard | silent
     use_balanced_weights: bool = True
     # 0.0 -> no balancing, 1.0 -> full inverse-frequency balancing
     balancing_factor: float = 1.0
     # informational only (whether the sampler already balances the data)
     balanced_data: bool = False
+
+    #for silent loss
+    pi: float = 0.1
+    learnable_pi: bool = False
 
 
 @dataclass(frozen=True)
