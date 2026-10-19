@@ -51,6 +51,7 @@ class PDClassificationModule(PDModuleBase):
         super().__init__(model, data_shape, num_classes=num_classes, optim_cfg=optim_cfg,
                          sched_cfg=sched_cfg, eval_cfg=eval_cfg,
                          example_input_array=example_input_array)
+        self.predict_subsets = None #on which subsets to compute predictions
         self.save_hyperparameters(ignore=["model", "example_input_array"])
 
         self.class_counts = counts.tolist()
@@ -131,24 +132,41 @@ class PDClassificationModule(PDModuleBase):
         self.log("val/loss_unweighted", self._loss(self.criterion_unweighted, logits, targets, b),
                  on_epoch=True, batch_size=bsz)
         return None
+    
+    def _supports_subsets(self):
+        return (callable(getattr(self.model, 'forward_subsets', None))
+                and getattr(self.model.classifier, 'modality_aware', False))
 
-    def predict_step(self, batch, batch_idx):
-        b = PDBatch.from_collate(batch)
-        outputs = self(*b.model_args(), **b.covariates())
+    def _pack(self, outputs, b, present=None, tok_present=None):
         token_logits, subject_logits = outputs if self.per_step else (None, outputs)
-
         probs, preds = probs_and_preds(subject_logits, self.num_classes)
         out = {"probs": probs.detach().cpu(),
                "preds": preds.detach().cpu(),
                "labels": b.labels.detach().cpu().flatten(),
                "subject_ids": b.subject_ids}
+        if present is not None:
+            out["present"] = present.detach().cpu()     # (B,) subject has real crops in subset
         if self.per_step:
             tok_probs, tok_preds = probs_and_preds(token_logits, self.num_classes)
             out.update(tok_probs=tok_probs.detach().cpu(),
-                       tok_preds=tok_preds.detach().cpu(),
-                       tok_seq_ids=b.seq_ids.detach().cpu(),
-                       tok_slot_ids=b.slot_ids.detach().cpu())
+                    tok_preds=tok_preds.detach().cpu(),
+                    tok_seq_ids=b.seq_ids.detach().cpu(),
+                    tok_slot_ids=b.slot_ids.detach().cpu())
+            if tok_present is not None:
+                out["tok_present"] = tok_present.detach().cpu()
         return out
+
+    def predict_step(self, batch, batch_idx):
+        b = PDBatch.from_collate(batch)
+        if not self.predict_subsets:
+            return self._pack(self(*b.model_args(), **b.covariates()), b)
+        if self.predict_subsets and not self._supports_subsets():
+            raise ValueError('predict_subsets needs a model with forward_subsets and view_groups')
+        outs, present, tok_present = self.model.forward_subsets(
+            *b.model_args(), subsets=self.predict_subsets,
+            return_token_present=True, **b.covariates())
+        return {name: self._pack(o, b, present[name], tok_present[name])
+                for name, o in outs.items()}
 
     # ---- base-class hooks ----------------------------------------------------------------
     def train_score_metrics(self):

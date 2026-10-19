@@ -1,9 +1,4 @@
-import tarfile
-import time
-import io
 import torch
-from PIL import Image, ImageOps
-from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 import os
 import pandas as pd
@@ -11,18 +6,10 @@ import torch.nn as nn
 import time
 import webdataset as wds
 import glob
-from tqdm import tqdm
-import torch.optim as optim
-from torchvision import models
-import torchvision.utils as vutils
 import lightning as L
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
-from lightning.pytorch.loggers import TensorBoardLogger
-from torchmetrics.classification import MulticlassRecall
 import random
 import shutil
-#from lightning.pytorch.loggers import CSVLogger
-from lightning.pytorch.callbacks import Callback
+
 import re
 import signal
 import sys
@@ -41,16 +28,13 @@ import sys, os, contextlib
 from matplotlib import cm
 from matplotlib.colors import Normalize
 from sklearn.metrics import roc_auc_score, roc_curve
+from torchmetrics.functional.classification import binary_average_precision
 
 
-from utils.data_loading import melt_df, prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD, return_file_paths
-from utils.data_loading import prepare_handedness_dataset, prepare_handedness_dataset_all, generate_exclusion_set_val
-from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
-from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
+from src.utils.data_loading import prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD, return_file_paths
 from src.utils.visualization import debug_images_dataset
-from src.utils.image_processing import ResizeLongestSide, get_augmentation_transform, get_transforms, get_mu_std
+from src.utils.image_processing import  get_mu_std
 from src.utils.training_utils import PDClassificationModule, load_legacy_state_dict
-from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.scripts.train_PD_model import model_initialization, preprocess_PD_csv
 
 
@@ -64,10 +48,10 @@ def get_last_best_checkpoint(checkpoint_dir,version):
 
 experiment = "PD" #"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'convnext_tiny' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'resnet18_32'#'resnet18_32' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='21'
-override_parameters=True
+version='9'
+override_parameters=False
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #get the most recent ckpt file with best in the name 
@@ -160,51 +144,184 @@ def main(exp_params):
     trainer = L.Trainer(
         max_epochs=1,
         logger = tb_logger,
-        accelerator="auto"                # Automatically selects GPU/CPU/MPu
+        accelerator="auto" ,               # Automatically selects GPU/CPU/MPu
+        #precision='bf16-mixed'
     )
+    '''res= trainer.validate(lit_model, val_loader)
+    print(res[0]['val/pr_auc'], flush=True)
+    return'''
 
+    has_subsets = callable(getattr(lit_model.model, 'get_modalities_names', None))
+    if has_subsets:
+        from itertools import combinations
+        modalities_names = lit_model.model.get_modalities_names()
+        print(f"Model supports subsets. Modalities names: {modalities_names}", flush=True)
+        #compute the combinations of modalities to predict on
+        modalities_combinations = [None]+ [list(c) for r in range(1, len(modalities_names) + 1) for c in combinations(modalities_names, r)]
+        lit_model.predict_subsets = modalities_combinations
+        print(f"Predicting on subsets: {lit_model.predict_subsets}", flush=True)
+    
     outputs = trainer.predict(lit_model, dataloaders=val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
-    results_df, all_probs, all_preds, all_labels = get_result_df(outputs)
+    results = get_result_dfs_per_group(outputs, class_names=None)
+
+    results_matched=None
+    if exp_params['matched_validation']:
+        print("#" * 50)
+        print(f"Evaluating model on matched validation set using checkpoint: {ckpt_path}")
+        outputs_matched = trainer.predict(lit_model, dataloaders=matched_val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
+        results_matched = get_result_dfs_per_group(outputs_matched, class_names=None)
+    
+    results_training=None
+    if exp_params['predict_on_train']:
+        outputs_training = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
+        results_training = get_result_dfs_per_group(outputs_training, class_names=None)
+    
+    results_df_per_step=None
+    if hasattr(lit_model, 'per_step') and lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
+        print("#" * 50)
+        print(f"Evaluating model on per_step predictions")
+        results_df_per_step = get_per_step_results_per_group(outputs, train_df, class_names=None)
     
     print(f"Evaluating model on validation set using checkpoint: {ckpt_path}")
 
-    log_path = os.path.join(save_path, f"stats.txt") #copy prints also to a log file in the checkpoint folder
+    for k in results.keys():
+        print(f"Processing results for group: {k}", flush=True)
+        process_results_per_group(save_path, k, results, results_df_per_step, results_matched, results_training,
+                                 exp_params, csv_data)
+
+def process_results_per_group(save_path,group_name,results, results_df_per_step, results_matched, results_training
+                              , exp_params, csv_data):
+    if group_name == "all":
+        log_path = os.path.join(save_path, f"stats.txt") #copy prints also to a log file in the checkpoint folder
+    else:
+        save_path = os.path.join(save_path, group_name)
+        os.makedirs(save_path, exist_ok=True)
+        log_path = os.path.join(save_path, f"stats.txt") #copy prints also to a log file in the checkpoint folder
     with tee_stdout(log_path):
         return_model_info(exp_params)
 
+        results_df, all_probs, all_preds, all_labels = results[group_name]
         analyze_results(all_probs, all_labels, results_df, split="validation",
                         pos_label=1, threshold=None, strategy="youden",
                         target_recall=0.90, plot=True, out_dir_path=save_path)
         
-        if exp_params['matched_validation']:
-            print("#" * 50)
-            print(f"Evaluating model on matched validation set using checkpoint: {ckpt_path}")
-            outputs_matched = trainer.predict(lit_model, dataloaders=matched_val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
-            results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = get_result_df(outputs_matched)
+        if results_matched is not None:
+            results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = results_matched[group_name]
             analyze_results(all_probs_matched, all_labels_matched, results_df_matched, split="matched_validation",
                             pos_label=1, threshold=None, strategy="youden",
                             target_recall=0.90, plot=True, out_dir_path=save_path)
         
-        if hasattr(lit_model, 'per_step') and lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
-            print("#" * 50)
-            print(f"Evaluating model on per_step predictions")
-            results_df_per_step = get_per_step_results(outputs, train_df)
-            plot_probability_trajectories(results_df_per_step, n_steps=20, ax=None,
+        if results_df_per_step is not None: #the trained model returns predictions per step, i can aggregate those
+            results_to_process = results_df_per_step[group_name]
+            plot_probability_trajectories(results_to_process, n_steps=20, ax=None,
                                   class_names=("negative", "positive"),
                                   min_count=1, save_path=save_path)
             #save the per_step results in a csv file
             results_df_per_step.to_csv(os.path.join(save_path, f"per_step_predictions.csv"), index=False)
 
-        if exp_params['predict_on_train']:
-            outputs = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
-            results_df_train, all_probs, all_preds, all_labels = get_result_df(outputs)
+        if results_training is not None:
+            results_df_train, all_probs, all_preds, all_labels = results_training[group_name]
             analyze_results(all_preds, all_labels, results_df, split="train")
 
             #concatenate the result dataframes
             results_complete = pd.concat([results_df, results_df_train], ignore_index=True)
             results_df = results_complete.copy()
     
-    store_results(csv_data, results_df, save_path,exp_params)
+    store_results(csv_data, results_df, save_path,exp_params, group_name=group_name)
+
+def get_per_step_results_per_group(outputs, train_df, class_names=None):
+    """{subset_name: per-step DataFrame}; handles old and per-subset outputs."""
+    if not outputs:
+        return {}
+    if "probs" in outputs[0]:                                  # old format
+        return {"all": get_per_step_results(outputs, train_df, class_names)}
+    return {name: get_per_step_results([b[name] for b in outputs], train_df, class_names)
+            for name in outputs[0]}
+def get_per_step_results(outputs, train_df,class_names=None):
+    """Per-timestep predictions from a per_step=True run.
+
+    Returns one row per (subject, slot), sorted subject-major then by slot.
+    Empty if the run wasn't per-step (nothing to assemble).
+    """
+    if not outputs or "tok_probs" not in outputs[0]:
+        return pd.DataFrame()
+
+    tok_probs = torch.cat([b["tok_probs"] for b in outputs]).cpu().float().numpy()
+    tok_preds = torch.cat([b["tok_preds"] for b in outputs]).cpu().float().numpy()
+
+    # seq_ids index into each batch's subject_ids list, so map them per-batch
+    # before concatenating — a global cat would collide across batches.
+    subj, label, slot = [], [], []
+    for b in outputs:
+        sids = b["subject_ids"]                            # list, len = B_batch
+        labels_b = b["labels"].cpu().numpy()               # (B_batch,)
+        seq_b  = b["tok_seq_ids"].cpu().numpy()            # (n_tok_batch,)
+        slot_b = b["tok_slot_ids"].cpu().numpy()
+        subj.extend(sids[i] for i in seq_b)
+        label.extend(labels_b[i] for i in seq_b)
+        slot.extend(slot_b.tolist())
+
+    n_classes = tok_probs.shape[1] 
+    if class_names is None:
+        class_names = list(range(n_classes))
+    assert len(class_names) == n_classes
+
+    df = pd.DataFrame({
+        "unique_id":       subj,
+        "slot":            slot,
+        "true_label":      label,
+        "predicted_label": tok_preds,
+    })
+    for i, name in enumerate(class_names):
+        df[f"probability_{name}"] = tok_probs[:, i]
+    
+    def add_case_dt(result_df, train_df, n_slots=13):
+        """Attach case_dt to result_df by matching (unique_id, slot=i) to
+        train_df's case_dt_dateq{i+1}. Missing pairs get NaN."""
+        cols = [f"case_dt_dateq{i}" for i in range(1, n_slots + 1)]
+
+        long = (train_df[["unique_id", *cols]]
+                .melt(id_vars="unique_id", value_vars=cols,
+                    var_name="_col", value_name="case_dt"))
+        long["slot"] = long["_col"].str.removeprefix("case_dt_dateq").astype(int) - 1
+
+        return result_df.merge(long[["unique_id", "slot", "case_dt"]],
+                            on=["unique_id", "slot"], how="left")
+    
+    if "tok_present" in outputs[0]:
+        df["has_modality_data"] = torch.cat([b["tok_present"] for b in outputs]).numpy()
+    result_df = add_case_dt(df, train_df)
+
+    return result_df.sort_values(["unique_id", "slot"]).reset_index(drop=True)
+def get_result_dfs_per_group(outputs, class_names=None):
+    """Returns {subset_name: (results_df, all_probs, all_preds, all_labels)}.
+    Handles both the old flat output and the per-subset output."""
+    if "probs" in outputs[0]:                       # old format (predict_subsets = None)
+        return {"all": get_result_df(outputs, class_names)}
+    return {name: get_result_df([batch[name] for batch in outputs], class_names)
+            for name in outputs[0]}
+def get_result_df(outputs, class_names=None):
+    all_probs = torch.cat([batch["probs"] for batch in outputs]).detach().cpu()
+    all_preds = torch.cat([batch["preds"] for batch in outputs]).detach().cpu()
+    all_labels = torch.cat([batch["labels"] for batch in outputs]).detach().cpu()
+    all_subjects = [sid for batch in outputs for sid in batch["subject_ids"]]
+
+    n_classes = all_probs.shape[1]
+    if class_names is None:
+        class_names = range(n_classes)
+    assert len(class_names) == n_classes
+
+    results_df = pd.DataFrame({
+        "unique_id": all_subjects,
+        "true_label": all_labels.numpy(),
+        "predicted_label": all_preds.float().numpy(),
+    })
+    probs_np = all_probs.float().numpy()
+    for i, name in enumerate(class_names):
+        results_df[f"probability_{name}"] = probs_np[:, i]
+
+    return results_df, all_probs, all_preds, all_labels
+
 
 def override_val_exclusion(train_df, val_exclusion_set, exp_params):
     if exp_params['pre_training']:
@@ -287,62 +404,6 @@ def tee_stdout(path, mode="w"):
         finally:
             sys.stdout = old
 
-def get_per_step_results(outputs, train_df,class_names=None):
-    """Per-timestep predictions from a per_step=True run.
-
-    Returns one row per (subject, slot), sorted subject-major then by slot.
-    Empty if the run wasn't per-step (nothing to assemble).
-    """
-    if not outputs or "tok_probs" not in outputs[0]:
-        return pd.DataFrame()
-
-    tok_probs = torch.cat([b["tok_probs"] for b in outputs]).cpu().numpy()
-    tok_preds = torch.cat([b["tok_preds"] for b in outputs]).cpu().numpy()
-
-    # seq_ids index into each batch's subject_ids list, so map them per-batch
-    # before concatenating — a global cat would collide across batches.
-    subj, label, slot = [], [], []
-    for b in outputs:
-        sids = b["subject_ids"]                            # list, len = B_batch
-        labels_b = b["labels"].cpu().numpy()               # (B_batch,)
-        seq_b  = b["tok_seq_ids"].cpu().numpy()            # (n_tok_batch,)
-        slot_b = b["tok_slot_ids"].cpu().numpy()
-        subj.extend(sids[i] for i in seq_b)
-        label.extend(labels_b[i] for i in seq_b)
-        slot.extend(slot_b.tolist())
-
-    n_classes = tok_probs.shape[1] 
-    if class_names is None:
-        class_names = list(range(n_classes))
-    assert len(class_names) == n_classes
-
-    df = pd.DataFrame({
-        "unique_id":       subj,
-        "slot":            slot,
-        "true_label":      label,
-        "predicted_label": tok_preds,
-    })
-    for i, name in enumerate(class_names):
-        df[f"probability_{name}"] = tok_probs[:, i]
-    
-    def add_case_dt(result_df, train_df, n_slots=13):
-        """Attach case_dt to result_df by matching (unique_id, slot=i) to
-        train_df's case_dt_dateq{i+1}. Missing pairs get NaN."""
-        cols = [f"case_dt_dateq{i}" for i in range(1, n_slots + 1)]
-
-        long = (train_df[["unique_id", *cols]]
-                .melt(id_vars="unique_id", value_vars=cols,
-                    var_name="_col", value_name="case_dt"))
-        long["slot"] = long["_col"].str.removeprefix("case_dt_dateq").astype(int) - 1
-
-        return result_df.merge(long[["unique_id", "slot", "case_dt"]],
-                            on=["unique_id", "slot"], how="left")
-    
-    result_df = add_case_dt(df, train_df)
-
-    return result_df.sort_values(["unique_id", "slot"]).reset_index(drop=True)
-
-  
 def plot_probability_trajectories(df, n_steps=20, ax=None,
                                   class_names=("negative", "positive"),
                                   min_count=1, show_points=True,
@@ -716,27 +777,6 @@ def roc_auc_over_time(
  
     return res, res_window
 
-def get_result_df(outputs, class_names=None):
-    all_probs = torch.cat([batch["probs"] for batch in outputs]).detach().cpu()
-    all_preds = torch.cat([batch["preds"] for batch in outputs]).detach().cpu()
-    all_labels = torch.cat([batch["labels"] for batch in outputs]).detach().cpu()
-    all_subjects = [sid for batch in outputs for sid in batch["subject_ids"]]
-
-    n_classes = all_probs.shape[1]
-    if class_names is None:
-        class_names = range(n_classes)
-    assert len(class_names) == n_classes
-
-    results_df = pd.DataFrame({
-        "unique_id": all_subjects,
-        "true_label": all_labels.numpy(),
-        "predicted_label": all_preds.numpy(),
-    })
-    probs_np = all_probs.numpy()
-    for i, name in enumerate(class_names):
-        results_df[f"probability_{name}"] = probs_np[:, i]
-
-    return results_df, all_probs, all_preds, all_labels
 
 def analyze_results_old(all_preds, all_labels, results_df,split="validation"):
     # 3. Convert to numpy arrays for statistics calculation
@@ -756,7 +796,7 @@ def analyze_results_old(all_preds, all_labels, results_df,split="validation"):
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         print(results_df.head(10))
 
-def store_results(csv_data, results_df, ckpt_path,params):
+def store_results(csv_data, results_df, ckpt_path,params, group_name=None):
     merged_df = pd.merge(csv_data, results_df, on='unique_id', how='left')
     #check for duplicate rows
     if merged_df.duplicated(subset=['unique_id']).any():
@@ -778,8 +818,12 @@ def litmodel_initialization_from_checkpoint(model, ckpt_path, exp_params):
     try:
         lit_model = model_class.load_from_checkpoint(ckpt_path, write_log=False, model=model, strict=False)
     except Exception as e:
+        from src.utils.training_utils import DataShape
         print(f"Strict loading failed with error: {e}. Attempting to load with legacy")
-        load_legacy_state_dict(model, torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"])
+        ckpt = torch.load(ckpt_path, map_location="cpu")
+        class_counts = (1,1) # Placeholder; replace with actual class counts if available
+        lit_model = PDClassificationModule(model, class_counts, DataShape(total_units=1), num_classes=1)
+        load_legacy_state_dict(lit_model, ckpt["state_dict"])
     return lit_model
 # ======================================================================
 # score helpers
@@ -790,7 +834,6 @@ def _as_pos_scores(all_scores, pos_label=1):
     if s.ndim == 2 and s.shape[1] == 2:
         s = s[:, pos_label]
     return s.ravel()
-
 
 def _as_prob_matrix(all_scores, num_classes=None):
     """Return an (N, C) probability matrix from various score shapes.
@@ -864,7 +907,6 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90, pos_labe
  
     raise ValueError(f"unknown strategy: {strategy}")
 
-
 def _plot_roc_curve_binary(y_true, y_scores, pos_label=1, threshold=None,
                            path=None, name="model", data_path=None):
     """Plot a ROC curve and optionally dump the curve data to `data_path` (.npz)."""
@@ -916,7 +958,6 @@ def _plot_roc_curve_binary(y_true, y_scores, pos_label=1, threshold=None,
     _draw_roc_curves([curve], path=path)
     return curve
 
-
 def _load_roc_curve(data_path):
     """Load a curve saved by _plot_roc_curve_binary."""
     with np.load(data_path, allow_pickle=False) as d:
@@ -925,7 +966,6 @@ def _load_roc_curve(data_path):
                     "youden_fpr", "youden_tpr", "youden_j", "youden_threshold"):
             out[key] = float(d[key])
         return out
-
 
 def _draw_roc_curves(curves, path=None, title=None, show_youden=True):
     """Draw one or more ROC curves (dicts from _plot_roc_curve_binary / _load_roc_curve)."""
@@ -961,7 +1001,6 @@ def _draw_roc_curves(curves, path=None, title=None, show_youden=True):
         plt.close(fig)
     else:
         plt.show()
-
 
 def _plot_roc_curve_with_previous(y_true, y_scores, prev_data_paths, pos_label=1,
                                   threshold=None, path=None, compare_path=None,

@@ -159,7 +159,7 @@ exp_params = {
     'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
     'norm_mu': 'imagenet', #imagenet,handedness,mnist,PD_window
     'norm_std': 'imagenet',
-    'model_structure': 'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+    'model_structure': 'ModularModel',#'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
     'align_train_metrics_to_val': True,  
     #val and align are set authomatically: to none if pre_training is not active and PD; to 0.3 and True if problem==handedness
@@ -190,12 +190,12 @@ exp_params = {
         'use_spread': False, #add a variance feature of dimension d_model to the average d_model feature
         'use_count_feature': False,
         'use_attention_pool': False, #if true overrides use_spread and use_count_feature 
-        'seq_model':'causal_gru', #causal_gru (bidirectional has no impact, predictions are returned per_step)
+        'seq_model':'gru', #causal_gru (bidirectional has no impact, predictions are returned per_step)
         'bidirectional':True,
     },
 
     #Transforms definitions
-    'custom_transform': 'pad_resize_normalize', #'pad_resize_normalize',#'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+    'custom_transform': '2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
     'input_size': 32,
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
@@ -209,7 +209,7 @@ exp_params = {
     'use_opt_groups': True,
     'lr_decay': 0.5, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
     'lr_backbone': 1e-4,
-    'lr_classifier_head': 1e-4,
+    'lr_classifier_head': 1e-3,
     'lr_scheduling': 'cosine', #'cosine' # "two_stage", 'step', None
     'batch_size': 4,
     'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
@@ -220,7 +220,7 @@ exp_params = {
     'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
-    'layers_to_unfreeze': ['all'],
+    'layers_to_unfreeze': ['classifier','layer4'],
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,

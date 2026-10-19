@@ -131,6 +131,45 @@ class TransformerMixer(nn.Module):
         seq = torch.cat([self.cls.expand(B, -1, -1), x], dim=1)
         mask = torch.cat([torch.zeros(B, 1, dtype=torch.bool, device=dev), pad_mask], dim=1)
         return self.enc(seq, src_key_padding_mask=mask)[:, 0], None
+
+class CausalTransformerMixer(nn.Module):
+    """Rung 5b: causal (decoder-only style) encoder. Output at step t sees only steps <= t.
+
+    Per-step outputs, same contract as CausalGRUMixer: returns (B, L, d), padded slots zeroed.
+    Works with any padding layout (right-padded or holes), so no compact layout needed.
+    """
+    needs_compact, wants_raw_values = False, False
+
+    def __init__(self, d, n_heads=8, n_layers=4, ff_mult=4, dropout=0.1):
+        super().__init__()
+        layer = nn.TransformerEncoderLayer(
+            d, n_heads, dim_feedforward=ff_mult * d, dropout=dropout,
+            batch_first=True, norm_first=True)
+        self.enc = nn.TransformerEncoder(layer, n_layers, norm=nn.LayerNorm(d),
+                                         enable_nested_tensor=False)
+        self.n_heads = n_heads
+        self.out_dim = d
+        self.per_step = True
+
+    @staticmethod
+    def _attn_mask(pad_mask, n_heads):
+        """Bool mask (B*heads, L, L), True = blocked. Blocks future keys and padded keys.
+
+        The diagonal is always left open so no query row is fully masked (a padded query
+        whose earlier keys are all padding would otherwise give NaN). That only affects
+        padded queries, whose outputs are zeroed anyway; valid queries never see pad keys.
+        """
+        B, L = pad_mask.shape
+        dev = pad_mask.device
+        future = torch.ones(L, L, dtype=torch.bool, device=dev).triu(1)      # (L, L)
+        m = future.unsqueeze(0) | pad_mask.unsqueeze(1)                       # (B, L, L)
+        m = m & ~torch.eye(L, dtype=torch.bool, device=dev)
+        return m.repeat_interleave(n_heads, dim=0)                            # (B*h, L, L)
+
+    def forward(self, x, pad_mask, lengths, values=None):
+        mask = self._attn_mask(pad_mask, self.n_heads)
+        out = self.enc(x, mask=mask)                                          # (B, L, d)
+        return out * (~pad_mask).unsqueeze(-1).to(out.dtype), None
     
 MIXERS = {
     'mean':        lambda d, c: MeanMixer(d),
@@ -149,4 +188,7 @@ MIXERS = {
                                                  n_layers=c.get('n_layers', 4),
                                                  ff_mult=c.get('ff_mult', 4),
                                                  dropout=c.get('dropout', 0.1)),
+    'causal_transformer': lambda d, c: CausalTransformerMixer(
+        d, n_heads=c.get('n_heads', 8), n_layers=c.get('n_layers', 4),
+        ff_mult=c.get('ff_mult', 4), dropout=c.get('dropout', 0.1)),
 }

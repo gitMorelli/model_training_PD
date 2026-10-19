@@ -1000,6 +1000,17 @@ def compare_group_feature_importances(version_1="v_19", version_2="v_20",
     print(f"\nSaved:\n  {path_1}\n  {path_2}")
     return table_1, table_2
 
+def inspect_individual_curves():
+    from src.debug.PD_model_evaluation import plot_probability_trajectories_2, plot_probability_trajectories
+    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/per_step_predictions.csv"
+    #load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/pre_diagnosis/per_step_predictions.csv"
+    predictions = pd.read_csv(load_path)
+    save_path = "/home/a_morelli/vscode_projects/model_training/results/tests"
+    for n in [5, 20]:
+        plot_probability_trajectories(predictions, n_steps=n, ax=None,
+                                    class_names=("negative", "positive"),
+                                    min_count=1, save_path=save_path, save_name=f"probability_trajectories_{n}")
+        
 # Prepare datasets #
 def prepare_handedness_datasets():
     source_folder = "/home/a_morelli/datasets/id_lists/"
@@ -1085,4 +1096,15 @@ def prepare_handedness_datasets():
     print(f"Dataframe with lateralite column saved to {save_path}")
 
 if __name__ == "__main__":
-    compare_group_feature_importances()
+    df = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
+    columns = df.columns
+    for col in columns:
+        print(f"Column: {col}")
+
+    df['group'] = df['unique_id'].str.split('_').str[1]
+    #select the first group in the df and print the following columns: unique_id, case_dt_dateq{1..13}, diag_park_final1_quest, case_control
+    first_group = df['group'].unique()[0]
+    print(f"First group: {first_group}")
+    group_df = df[df['group'] == first_group]
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(group_df[['unique_id'] + ['diag_park_final1_quest', 'case_control'] + [f'case_dt_dateq{i}' for i in range(1, 14)] ])

@@ -581,6 +581,21 @@ class SyntheticTransform:
 def get_transforms(exp_params, transform):
     if exp_params['custom_transform'] is None:
         return transform
+    elif exp_params['custom_transform'] == 'crop_normalize':
+        return T.Compose([
+            T.CenterCrop(exp_params['input_size']),   # crops if larger, zero-pads (centered) if smaller
+            T.ToTensor(),
+            T.Normalize(mean=exp_params['norm_mu'],
+                        std=exp_params['norm_std']),
+        ])
+    elif exp_params['custom_transform'] == '2xcrop_resize_normalize':
+            return T.Compose([
+                T.CenterCrop(2*exp_params['input_size']),   # crops if larger, zero-pads (centered) if smaller
+                T.Resize((exp_params['input_size'], exp_params['input_size'])),
+                T.ToTensor(),
+                T.Normalize(mean=exp_params['norm_mu'],
+                            std=exp_params['norm_std']),
+            ])
     elif exp_params['custom_transform'] == 'pad_resize_normalize':
         return T.Compose(
                 [

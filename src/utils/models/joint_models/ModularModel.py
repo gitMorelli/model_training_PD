@@ -187,14 +187,19 @@ class SequenceModularHead(nn.Module):
         if self.global_late is not None:
             g = self.global_late(global_properties.to(z.dtype))         # (B, D)
             z = z + (g.unsqueeze(1) if z.dim() == 3 else g)
-        logits = self.head(self.drop(z))
+        z = self.drop(z)
+        with torch.autocast(device_type=z.device.type, enabled=False):
+            logits = self.head(z.float())
+        #logits = self.head(z) 
 
         if getattr(self.mixer, 'per_step', False):
             n_tok = seq_ids.numel()
             idx = order if order is not None else torch.arange(n_tok, device=dev)
             tok_logits = logits.new_zeros(n_tok, logits.size(-1))
             tok_logits[idx] = logits[rows, cols]
-            last = logits[torch.arange(B, device=dev), (lens - 1).clamp(min=0)]
+            last_col = torch.zeros(B, dtype=torch.long, device=dev).scatter_reduce(
+                0, rows, cols, 'amax', include_self=True)
+            last = logits[torch.arange(B, device=dev), last_col]
             logits = (tok_logits, last)
 
         if not (return_view_attn or return_slot_attn):
@@ -244,6 +249,72 @@ class ModularModel(nn.Module):
                                view_mask=mask,
                                return_view_attn=return_view_attn,
                                return_slot_attn=return_slot_attn)
+    def get_modalities_names(self):
+        """Return the names of the modalities used by the model, if available."""
+        return self.classifier.view_pool.names
+
+    def subset_name(self, subset):
+        """'all' for None, else modality names joined in view_groups order, e.g. 'A+C'."""
+        if subset is None:
+            return 'all'
+        names = self.classifier.view_pool.names
+        idx = sorted({names.index(m) if isinstance(m, str) else int(m) for m in subset})
+        return '+'.join(names[i] for i in idx)
+ 
+    def forward_subsets(self, frames, seq_ids, slot_ids, lengths, subsets,
+                        local_properties=None, global_properties=None, view_mask=None,
+                        return_view_attn=False, return_slot_attn=False,
+                        return_token_present=False):
+        """Predictions for several modality subsets from ONE pass of the vision model.
+ 
+        Call in eval mode (model.eval(), under torch.no_grad()): the CNN features of a crop
+        don't depend on the subset, so they are computed once on the union of crops any
+        subset needs, and only the (cheap) head is run once per subset. Each result is
+        identical to forward(..., modalities=subset).
+ 
+        subsets: list of subsets, each a list of modality names/indices, or None for all,
+                 e.g. [None, ['A'], ['B'], ['C'], ['A', 'C']].
+        Returns
+          outputs: {name: what forward() returns for that subset}   (name from subset_name)
+          present: {name: (B,) bool} True if the subject has at least one real crop in the
+                   subset. Subjects with False are predicted from properties alone; you may
+                   want to report metrics with and without them.
+          tok_present (only if return_token_present=True):
+                   {name: (N,) bool} True if that token (slot) has at least one real crop in
+                   the subset; same order as seq_ids / per-step token logits.
+        """
+        if self.training:
+            raise RuntimeError('forward_subsets is for evaluation: call model.eval() first')
+        N, k = frames.shape[:2]
+        dev, B = frames.device, lengths.size(0)
+        build = self.classifier.build_view_mask
+        masks = {self.subset_name(s): build(view_mask, s, N, k, dev) for s in subsets}
+ 
+        if any(m is None for m in masks.values()):
+            union = None
+        else:
+            union = torch.stack(list(masks.values())).any(0)
+        feats = self._features(frames, union)
+ 
+        outputs, present, tok_present = {}, {}, {}
+        for name, m in masks.items():
+            outputs[name] = self.classifier(
+                feats, N, k, seq_ids, slot_ids, lengths,
+                local_properties=local_properties, global_properties=global_properties,
+                view_mask=m, return_view_attn=return_view_attn,
+                return_slot_attn=return_slot_attn)
+            tok = (torch.ones(N, dtype=torch.bool, device=dev) if m is None else m.any(1))
+            present[name] = torch.zeros(B, dtype=torch.bool, device=dev).index_put_(
+                (seq_ids,), tok, accumulate=True)
+            tok_present[name] = tok
+        if return_token_present:
+            return outputs, present, tok_present
+        return outputs, present
+
+'''
+present[name] is a (B,) bool that says whether a subject has at least one real crop in that subset. A subject with none gets a prediction from properties alone. 
+Report metrics on all subjects and on just the covered ones, otherwise e.g. “B only” looks worse than it is.
+'''
 
 '''
 view_mask -> which crops are real

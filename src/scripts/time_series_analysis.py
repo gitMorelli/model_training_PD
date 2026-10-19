@@ -13,7 +13,6 @@ import io
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm
 
-from src.utils.model_utils import get_sklearn_model
 from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths
 from src.debug.PD_model_evaluation import  analyze_results
 from sklearn.inspection import permutation_importance
@@ -32,7 +31,7 @@ def get_input_file_path(name):
     return input_file
 params = {
 
-    "input_file":get_input_file_path("trained_features"),
+    "input_file":get_input_file_path("trained_deep"),
     "signal_column": 'cell_sigma_y_mean', #'cell_contour_jitter_rms_mean', #cell_sigma_x_mean
     
     "class_col": 'diag_park_final1_quest',
@@ -49,6 +48,9 @@ params = {
     'mask_features': True, #if True it will mask the features according to the logic in the function mask_features
     'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit_original', #'X_original' 'digit_original' 'text_original'
+
+    #statistical analysis parameters
+    'time_model': 'quadratic', #spline or quadratic
 }
 
 params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths('PD', 
@@ -142,9 +144,10 @@ def main():
         dof_spline = 4
         log_path = os.path.join(plot_save_path, f"results_LMM_{dof_spline}_{params['censor_time']}.txt") #copy prints also to a log file in the checkpoint folder
         with tee_stdout(log_path):
-            plot_save_path = os.path.join(plot_save_path, f"LMM_results_{dof_spline}_{params['censor_time']}.png")
+            plot_save_path = os.path.join(plot_save_path, f"LMM_results_{params['time_model']}_{dof_spline}_{params['censor_time']}.png")
             la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label"}, 
-                                logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline, run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200)
+                                logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline, 
+                                time_model=params['time_model'], run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200)
 
 
 # ----------------------------------------------------------------------------

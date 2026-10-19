@@ -249,12 +249,17 @@ preset_columns = {             # your column name -> name used internally
         "y": "probability_1",
     }
 def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, spline_df=4,
-                 run_permutation_test=False, n_perm=200, run_bootstrap=False, n_boot=200):
+                 run_permutation_test=False, n_perm=200, run_bootstrap=False, n_boot=200, time_model="spline"):
     '''logit = True            # model logit(probability_1) instead of the raw probability
     logit = 1e-4              # clip probabilities away from 0/1 before the logit
     '''
     SPLINE_DF = spline_df  # flexibility of the time trend; 3-5 is typical, check sensitivity
-    TIME_TERM = f"cr(time, df={SPLINE_DF}, constraints='center')"  # natural cubic regression spline
+    if time_model == "spline":
+        TIME_TERM = f"cr(time, df={spline_df}, constraints='center')"
+    elif time_model == "quadratic":
+        TIME_TERM = "(center(time) + I(center(time)**2))"
+    else:
+        raise ValueError("time_model must be 'spline' or 'quadratic'")
 
     def prepare(raw):
         COLUMNS = {v: k for k, v in columns.items()}

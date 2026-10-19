@@ -1,35 +1,144 @@
-Checkpoint to load: best-51-015340-0.3795.ckpt
-                                Group  Importance v_19  Importance v_20  Difference
-         cell_contour_jitter_rms_mean         0.012790         0.002665    0.010125
-                    cell_sigma_x_mean         0.008745         0.002982    0.005763
-cell_branchpoints_per_100_skel_px_std         0.008334         0.003339    0.004995
-            cell_skeleton_length_mean         0.007480        -0.000616    0.008096
-    cell_contour_reversals_per_px_std         0.006360         0.002960    0.003399 
 
-                                 Group  Importance v_20  Importance v_19  Difference
-    cell_contour_reversals_per_px_mean         0.008211        -0.001332    0.009543
-             cell_stroke_width_p10_std         0.007731         0.001030    0.006700
-          trend_bbox_height_slope_norm         0.007681         0.000417    0.007264
-cell_branchpoints_per_100_skel_px_mean         0.006751         0.000875    0.005876
-          cell_bbox_width_per_comp_std         0.006438         0.006026    0.000413
+================================================================================
+>>> [LR SCALING] Scaling learning rates with effective batch size 64 (base 256): lr_backbone=2.5e-05, lr_classifier_head=0.00025
+================================================================================
 
-Saved:
-  /home/a_morelli/vscode_projects/model_training/results/tests/top_groups_v_19_vs_v_20.png
-  /home/a_morelli/vscode_projects/model_training/results/tests/top_groups_v_20_vs_v_19.png
+Checkpoint to load: best-08-001332-0.3219.ckpt
+Column: unique_id
+Column: split
+Column: case_control
+Column: last_avail_q
+Column: rempli_pattern
+Column: case_pattern
+Column: grid_pattern
+Column: case_grid_pattern
+Column: diag_park_final1_quest
+Column: at_least_warning
+Column: case_dt_dateq1
+Column: case_dt_dateq2
+Column: case_dt_dateq3
+Column: case_dt_dateq4
+Column: case_dt_dateq5
+Column: case_dt_dateq6
+Column: case_dt_dateq7
+Column: case_dt_dateq8
+Column: case_dt_dateq9
+Column: case_dt_dateq10
+Column: case_dt_dateq11
+Column: case_dt_dateq12
+Column: case_dt_dateq13
+Column: q_1_num_X
+Column: q_2_num_X
+Column: q_3_num_X
+Column: q_4_num_X
+Column: q_5_num_X
+Column: q_6_num_X
+Column: q_7_num_X
+Column: q_8_num_X
+Column: q_9_num_X
+Column: q_10_num_X
+Column: q_11_num_X
+Column: q_12_num_X
+Column: q_13_num_X
+Column: q_1_num_text
+Column: q_2_num_text
+Column: q_3_num_text
+Column: q_4_num_text
+Column: q_5_num_text
+Column: q_6_num_text
+Column: q_7_num_text
+Column: q_8_num_text
+Column: q_9_num_text
+Column: q_10_num_text
+Column: q_11_num_text
+Column: q_12_num_text
+Column: q_13_num_text
+Column: q_1_num_digit
+Column: q_2_num_digit
+Column: q_3_num_digit
+Column: q_4_num_digit
+Column: q_5_num_digit
+Column: q_6_num_digit
+Column: q_7_num_digit
+Column: q_8_num_digit
+Column: q_9_num_digit
+Column: q_10_num_digit
+Column: q_11_num_digit
+Column: q_12_num_digit
+Column: q_13_num_digit
+Column: etudegp
+Column: profq2
+Column: lateralite
+Column: relative_age
+Column: birth_date
+Column: follow_up_time
+Column: rempli_seulq12
+First group: 0001
+        unique_id  diag_park_final1_quest  case_control  case_dt_dateq1  \
+0   A6K2W8Y9_0001                       1             1      -19.958932   
+1   A8I0J0Q5_0001                       0             0      -19.958932   
+2   M3B7N4R2_0001                       0             0      -19.958932   
+3   C6B7M5Z8_0001                       0             0      -19.958932   
+4   A2U0T8E9_0001                       0             0      -19.958932   
+5   B1X0B8K6_0001                       0             0      -19.958932   
+6   D6R6Q8E7_0001                       0             0      -19.958932   
+7   A7D4Z8U6_0001                       0             0      -19.958932   
+8   B6D8M3N1_0001                       0             0      -19.958932   
+9   A4X9I0J0_0001                       0             0      -19.958932   
+10  A1H1R6D9_0001                       0             0      -19.958932   
+
+    case_dt_dateq2  case_dt_dateq3  case_dt_dateq4  case_dt_dateq5  \
+0       -17.456537      -15.958932      -14.455852      -12.210815   
+1       -17.456537      -15.958932      -14.455852      -12.210815   
+2       -17.456537      -15.958932      -14.455852      -12.210815   
+3       -17.456537      -15.958932      -14.455852      -12.210815   
+4       -17.456537      -15.958932      -14.455852      -12.210815   
+5       -17.456537      -15.958932      -14.455852      -12.210815   
+6       -17.456537      -15.958932      -14.455852      -12.210815   
+7       -17.456537      -15.958932      -14.455852      -12.210815   
+8       -17.456537      -15.958932      -14.455852      -12.210815   
+9       -17.456537      -15.958932      -14.455852      -12.210815   
+10      -17.456537      -15.958932      -14.455852      -12.210815   
+
+    case_dt_dateq6  case_dt_dateq7  case_dt_dateq8  case_dt_dateq9  \
+0        -8.941821       -6.554415       -3.950719       -0.908966   
+1        -8.941821       -6.554415       -3.950719       -0.908966   
+2        -8.941821       -6.554415       -3.950719       -0.908966   
+3        -8.941821       -6.554415       -3.950719       -0.908966   
+4        -8.941821       -6.554415       -3.950719       -0.908966   
+5        -8.941821       -6.554415       -3.950719       -0.908966   
+6        -8.941821       -6.554415       -3.950719       -0.908966   
+7        -8.941821       -6.554415       -3.950719       -0.908966   
+8        -8.941821       -6.554415       -3.950719       -0.908966   
+9        -8.941821       -6.554415       -3.950719       -0.908966   
+10       -8.941821       -6.554415       -3.950719       -0.908966   
+
+    case_dt_dateq10  case_dt_dateq11  case_dt_dateq12  case_dt_dateq13  
+0          2.505133              NaN              NaN              NaN  
+1          2.505133              NaN              NaN              NaN  
+2          2.505133              NaN              NaN              NaN  
+3          2.505133              NaN              NaN              NaN  
+4          2.505133              NaN              NaN              NaN  
+5          2.505133              NaN              NaN              NaN  
+6          2.505133              NaN              NaN              NaN  
+7          2.505133              NaN              NaN              NaN  
+8          2.505133              NaN              NaN              NaN  
+9          2.505133              NaN              NaN              NaN  
+10         2.505133              NaN              NaN              NaN  
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 5993049
+Job ID: 6150996
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n16
+Nodelist: n10
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-10-05 17:27:11
-Job ended at:   2026-10-05 17:27:33
-Job Wall-clock time: 00:00:22
-CPU Utilized: 00:00:13
-CPU Efficiency: 14.77% of 00:01:28 core-walltime
-Memory Utilized: 2.50 MB
-Memory Efficiency: 0.02% of 16.00 GB
+Job started at: 2026-10-19 13:00:15
+Job ended at:   2026-10-19 13:00:42
+Job Wall-clock time: 00:00:27
+CPU Utilized: 00:00:12
+CPU Efficiency: 11.11% of 00:01:48 core-walltime
+Memory Utilized: 675.28 MB
+Memory Efficiency: 4.12% of 16.00 GB

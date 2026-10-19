@@ -25,6 +25,7 @@ def logits_to_preds(logits: torch.Tensor, num_classes: int) -> torch.Tensor:
 
 def probs_and_preds(logits: torch.Tensor, num_classes: int):
     """-> ((N, C) probabilities, (N,) predictions); C == 2 for a BCE head."""
+    logits = logits.float()
     if num_classes == 1:
         p1 = torch.sigmoid(logits).flatten()
         return torch.stack([1 - p1, p1], dim=1), (logits > 0.0).long().flatten()
@@ -34,6 +35,7 @@ def probs_and_preds(logits: torch.Tensor, num_classes: int):
 def scores_for_metrics(logits: torch.Tensor, num_classes: int) -> torch.Tensor:
     """Scores in the shape the collection from `build_score_metrics` expects:
     binary -> (N,) positive-class probability; multiclass -> (N, C)."""
+    logits = logits.float()
     if n_stat_classes(num_classes) == 2:
         if num_classes == 1:
             return torch.sigmoid(logits).reshape(-1)
