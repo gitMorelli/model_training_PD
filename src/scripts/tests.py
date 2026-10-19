@@ -1010,7 +1010,20 @@ def inspect_individual_curves():
         plot_probability_trajectories(predictions, n_steps=n, ax=None,
                                     class_names=("negative", "positive"),
                                     min_count=1, save_path=save_path, save_name=f"probability_trajectories_{n}")
-        
+
+def explore_per_step_subject_curves():
+    df = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
+    columns = df.columns
+    for col in columns:
+        print(f"Column: {col}")
+
+    df['group'] = df['unique_id'].str.split('_').str[1]
+    #select the first group in the df and print the following columns: unique_id, case_dt_dateq{1..13}, diag_park_final1_quest, case_control
+    first_group = df['group'].unique()[0]
+    print(f"First group: {first_group}")
+    group_df = df[df['group'] == first_group]
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(group_df[['unique_id'] + ['diag_park_final1_quest', 'case_control'] + [f'case_dt_dateq{i}' for i in range(1, 14)] ])
 # Prepare datasets #
 def prepare_handedness_datasets():
     source_folder = "/home/a_morelli/datasets/id_lists/"
@@ -1095,16 +1108,62 @@ def prepare_handedness_datasets():
     df.to_parquet(save_path, index=False)
     print(f"Dataframe with lateralite column saved to {save_path}")
 
-if __name__ == "__main__":
-    df = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
+def prepare_case_dt_datasets():
+    source_folder = "/home/a_morelli/datasets/id_lists/"
+    path_training_set = os.path.join(source_folder, "PD_training_set_20_07_26.parquet")
+    path_df_with_times = os.path.join(source_folder, "final_table_for_matching_splitted_13_7_26.csv")
+    df_w_times = pd.read_csv(path_df_with_times)
+    df = pd.read_parquet(path_training_set)
+    '''columns = df_w_times.columns
+    for col in columns:
+        print(f"Column: {col}")
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(df_w_times.head())'''
+    to_convert = [f'dateq{i}' for i in range(1, 14)]+['date_suivi_diag1_quest','birth_date']
+    #convert the columns in to_convert to datetime format
+    for col in to_convert:
+        df_w_times[col] = pd.to_datetime(df_w_times[col], errors='coerce', format='%Y-%m-%d')
+    #create a new column age_q{i} for i in 1..13 
+    for i in range(1, 14):
+        df_w_times[f'age_q{i}'] = (df_w_times[f'dateq{i}'] - df_w_times['birth_date']).dt.days / 365.25
+    df_w_times['age_at_d'] = (df_w_times['date_suivi_diag1_quest'] - df_w_times['birth_date']).dt.days / 365.25
+    
+
+    #keep only these columns in df: unique_id,case_control
+    df = df[['unique_id', 'case_control']]
+    #add the group column to df
+    df['group'] = df['unique_id'].str.split('_').str[1]
+    df['ident_projet'] = df['unique_id'].str.split('_').str[0]
+    #sort the df dataframe by group and then by case_control (case_control==1 first)
+    #df = df.sort_values(by=['group', 'case_control'], ascending=[True, False])
+    #create a case_id column by associating all rows in the same group with the same ident_projet (that of the first row in the group with case_control==1)
+    df['case_id'] = df.groupby('group')['ident_projet'].transform(lambda x: x.iloc[0] if (df.loc[x.index, 'case_control'] == 1).any() else x.iloc[0])
+    #get the 'age_at_d' column value from df_w_times and add it to the corresponding rows in df based on the 'case_id' and 'ident_projet' columns
+    df = df.merge(
+        df_w_times[['ident_projet', 'age_at_d']].rename(columns={'ident_projet': 'case_id'}),
+        on='case_id', how='left'
+    )
+    #add the columns case_dt_dateq{i} for i in 1..13 from df_w_times: case_dt_dateq{i}='age_at_d'-'age_q{i}' for the corresponding ident_projet
+    for i in range(1, 14):
+        df = df.merge(df_w_times[['ident_projet', f'age_q{i}']], 
+                      on='ident_projet', how='left')
+        df[f'case_dt_dateq{i}'] = df[f'age_q{i}'] - df['age_at_d'] 
+        #drop the age_q{i} column
+        df = df.drop(columns=[f'age_q{i}'])
+
+    
     columns = df.columns
     for col in columns:
         print(f"Column: {col}")
-
-    df['group'] = df['unique_id'].str.split('_').str[1]
-    #select the first group in the df and print the following columns: unique_id, case_dt_dateq{1..13}, diag_park_final1_quest, case_control
-    first_group = df['group'].unique()[0]
-    print(f"First group: {first_group}")
-    group_df = df[df['group'] == first_group]
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-        print(group_df[['unique_id'] + ['diag_park_final1_quest', 'case_control'] + [f'case_dt_dateq{i}' for i in range(1, 14)] ])
+        print(df.head(30))
+
+    #save the df dataframe to a parquet file
+    timestamp = pd.Timestamp.now().strftime("%d_%m_%y")
+    save_path = os.path.join(source_folder, f"dt_{timestamp}.parquet")
+    df.to_parquet(save_path, index=False)
+    print(f"Dataframe with case_dt columns saved to {save_path}")
+    return
+
+if __name__ == "__main__":
+    prepare_case_dt_datasets()

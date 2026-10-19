@@ -13,11 +13,12 @@ import io
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm
 
-from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths
+from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
 from src.debug.PD_model_evaluation import  analyze_results
 from sklearn.inspection import permutation_importance
 from src.debug.PD_model_evaluation import tee_stdout, plot_probability_trajectories, roc_auc_over_time
-from src.scripts.t_on_representations import balance_data, reshape_features, mask_features, add_info_to_df 
+from src.scripts.t_on_representations import balance_data, reshape_features, mask_features, add_info_to_df
+from utils.data_loading.absolute_path_helpers import return_dt_path 
 
 HOME_PATH = "/home/a_morelli/models/model_training_logs/PD/"
 def get_input_file_path(name):
@@ -30,8 +31,10 @@ def get_input_file_path(name):
         input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv")
     return input_file
 params = {
-
+    #input info
     "input_file":get_input_file_path("trained_deep"),
+    "force_case_dt": False, #if True it will force the case_dt to the value in the time_df, if False it will use the case_dt in the input_file
+
     "signal_column": 'cell_sigma_y_mean', #'cell_contour_jitter_rms_mean', #cell_sigma_x_mean
     
     "class_col": 'diag_park_final1_quest',
@@ -70,13 +73,15 @@ params["type_of_input"] = get_type_of_input(params)
 
 VERBOSE = True
 SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/time_series_analysis"
-EXPERIMENT = "statistical_analysis" #"statistical_analysis" #"time_series_comparison" #"plot_property" 
+EXPERIMENT = "plot_property" #"statistical_analysis" #"time_series_comparison" #"plot_property" 
 os.makedirs(SAVE_PATH, exist_ok=True)
 
 def main():
     start = time.time()
 
     #splits = ["train", "val", "test"]
+    time_df_path = return_dt_path(params['list_of_ids_paths'])
+    time_df = pd.read_parquet(time_df_path)
     
     reference_df = pd.read_parquet(params['list_of_ids_paths'])
     reference_df = balance_data(reference_df, params, column="unique_id")
@@ -96,7 +101,7 @@ def main():
         print(properties)
         #assert 1==0
         df = df[df['split'] == 'val'] #only keep validation set for the analysis
-        df = add_case_dt(df, reference_df, properties, n_slots=13) #adding the case_dt to the df
+        df = add_case_dt(df, time_df, properties, n_slots=13) #adding the case_dt to the df
         #normalize the signal columns to be between 0 and 1, using min-max normalization
         for p in properties:
             df[p] = (df[p] - df[p].min()) / (df[p].max() - df[p].min())
@@ -104,10 +109,12 @@ def main():
         #print([col for col in df.columns]) #-> ['unique_id', 'slot', 'true_label', 'predicted_label', 'probability_0', 'probability_1', 'case_dt']
         params['signal_column']='probability_1'
         properties = None
+        df = force_case_dt(df, time_df, params) #adding the case_dt to the df
     elif params["type_of_input"] == "ML_on_features":
         #print([col for col in df.columns]) #-> ['unique_id', 'slot', 'true_label', 'predicted_label', 'probability_0', 'probability_1', 'case_dt']
         params['signal_column']='probability_1'
         properties = None
+        df = force_case_dt(df, time_df, params) #adding the case_dt to the df
     
     print(EXPERIMENT)
     if EXPERIMENT == "time_series_comparison":
@@ -142,7 +149,7 @@ def main():
         import src.utils.longitudinal_analysis as la
         plot_save_path = os.path.dirname(params['input_file'])
         dof_spline = 4
-        log_path = os.path.join(plot_save_path, f"results_LMM_{dof_spline}_{params['censor_time']}.txt") #copy prints also to a log file in the checkpoint folder
+        log_path = os.path.join(plot_save_path, f"results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}.txt") #copy prints also to a log file in the checkpoint folder
         with tee_stdout(log_path):
             plot_save_path = os.path.join(plot_save_path, f"LMM_results_{params['time_model']}_{dof_spline}_{params['censor_time']}.png")
             la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label"}, 
@@ -153,6 +160,22 @@ def main():
 # ----------------------------------------------------------------------------
 # helpers signal comaprison
 # ----------------------------------------------------------------------------
+def force_case_dt(df, time_df,params):
+    """Force the case_dt to the value from time_df (because it may be wrong in files before 19/10/26)"""
+    if not params['force_case_dt']:
+        return df
+    long = time_df.melt(
+        id_vars='unique_id',
+        value_vars=[f'case_dt_dateq{i}' for i in range(1, 14)],
+        var_name='slot',
+        value_name='case_dt',
+    )
+    long['slot'] = long['slot'].str.removeprefix('case_dt_dateq').astype(int)
+
+    # Replace case_dt in df with the matching value
+    df = df.drop(columns='case_dt').merge(long, on=['unique_id', 'slot'], how='left')
+    return df
+
 def _resolve_edges(case_dt, n_steps, step_is_years):
     """Same binning logic as plot_probability_trajectories."""
     lo, hi = case_dt.min(), case_dt.max()

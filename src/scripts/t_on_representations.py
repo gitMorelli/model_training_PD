@@ -24,9 +24,9 @@ from sklearn.linear_model import RidgeCV, LogisticRegressionCV
 from sklearn.model_selection import KFold, cross_val_score, StratifiedKFold, RepeatedStratifiedKFold
 from sklearn.metrics import check_scoring
 
-from src.utils.data_loading import load_representations_handedness
-from src.utils.model_utils import get_sklearn_model
-from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths
+
+from src.utils.models import get_sklearn_model
+from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
 from src.utils.data_loading import questionnaires_to_keep
 from src.debug.PD_model_evaluation import  analyze_results
 from sklearn.inspection import permutation_importance
@@ -178,7 +178,9 @@ def main():
         
         if params.get('compute_per_step',False):
             #[WARNING] I should modify the code so that the per_step results can be computed post_diagnosis even if the model was trained pre_diagnosis
-            results_per_step = process_per_step(pipeline, df, reference_df, keep_dict,
+            time_df_path = return_dt_path(params['list_of_ids_paths'])
+            time_df = pd.read_parquet(time_df_path)
+            results_per_step = process_per_step(pipeline, df, time_df, keep_dict,
                                                 params, verbose=VERBOSE, prop_names=properties)
             for n in [5, 10, 15, 20]:
                 statistics,diff = plot_probability_trajectories(results_per_step, n_steps=n, ax=None,

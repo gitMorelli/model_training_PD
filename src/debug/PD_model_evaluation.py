@@ -31,7 +31,7 @@ from sklearn.metrics import roc_auc_score, roc_curve
 from torchmetrics.functional.classification import binary_average_precision
 
 
-from src.utils.data_loading import prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD, return_file_paths
+from src.utils.data_loading import prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD, return_file_paths, return_dt_path
 from src.utils.visualization import debug_images_dataset
 from src.utils.image_processing import  get_mu_std
 from src.utils.training_utils import PDClassificationModule, load_legacy_state_dict
@@ -180,7 +180,9 @@ def main(exp_params):
     if hasattr(lit_model, 'per_step') and lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
         print("#" * 50)
         print(f"Evaluating model on per_step predictions")
-        results_df_per_step = get_per_step_results_per_group(outputs, train_df, class_names=None)
+        time_df_path = return_dt_path(exp_params['list_of_ids_paths'])
+        time_df = pd.read_parquet(time_df_path)
+        results_df_per_step = get_per_step_results_per_group(outputs, time_df, class_names=None)
     
     print(f"Evaluating model on validation set using checkpoint: {ckpt_path}")
 
