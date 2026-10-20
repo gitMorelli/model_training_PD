@@ -14,7 +14,7 @@ from typing import Callable
 
 from lightning.pytorch.utilities import rank_zero_only
 
-PACKAGE_LOGGER = "pd_training"
+PACKAGE_LOGGER = "src.utils.training_utils.pd_training"
 
 
 class WriteLogHandler(logging.Handler):

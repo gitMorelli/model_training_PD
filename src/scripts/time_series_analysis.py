@@ -18,7 +18,7 @@ from src.debug.PD_model_evaluation import  analyze_results
 from sklearn.inspection import permutation_importance
 from src.debug.PD_model_evaluation import tee_stdout, plot_probability_trajectories, roc_auc_over_time
 from src.scripts.t_on_representations import balance_data, reshape_features, mask_features, add_info_to_df
-from utils.data_loading.absolute_path_helpers import return_dt_path 
+
 
 HOME_PATH = "/home/a_morelli/models/model_training_logs/PD/"
 def get_input_file_path(name):
@@ -33,7 +33,7 @@ def get_input_file_path(name):
 params = {
     #input info
     "input_file":get_input_file_path("trained_deep"),
-    "force_case_dt": False, #if True it will force the case_dt to the value in the time_df, if False it will use the case_dt in the input_file
+    "force_case_dt": True, #if True it will force the case_dt to the value in the time_df, if False it will use the case_dt in the input_file
 
     "signal_column": 'cell_sigma_y_mean', #'cell_contour_jitter_rms_mean', #cell_sigma_x_mean
     
@@ -73,7 +73,7 @@ params["type_of_input"] = get_type_of_input(params)
 
 VERBOSE = True
 SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/time_series_analysis"
-EXPERIMENT = "plot_property" #"statistical_analysis" #"time_series_comparison" #"plot_property" 
+EXPERIMENT = "statistical_analysis" #"statistical_analysis" #"time_series_comparison" #"plot_property" 
 os.makedirs(SAVE_PATH, exist_ok=True)
 
 def main():
@@ -125,7 +125,7 @@ def main():
         for n in [5, 10, 15, 20]:
             statistics,diff = plot_probability_trajectories(df, n_steps=n, ax=None,
                                                 class_names=("negative", "positive"),
-                                                min_count=1, save_path=SAVE_PATH, save_name=f"{params['signal_column']}_probability_trajectories_{n}", 
+                                                min_count=1, save_path=SAVE_PATH, save_name=f"force_{params['signal_column']}_probability_trajectories_{n}", 
                                                 signal_column=params['signal_column'], plot_difference=True, show_points=False)
             score = weighted_abs_diff_sum(diff)
             print(f"Score for {params['signal_column']}: {score}")
@@ -149,9 +149,9 @@ def main():
         import src.utils.longitudinal_analysis as la
         plot_save_path = os.path.dirname(params['input_file'])
         dof_spline = 4
-        log_path = os.path.join(plot_save_path, f"results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}.txt") #copy prints also to a log file in the checkpoint folder
+        log_path = os.path.join(plot_save_path, f"force_results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}.txt") #copy prints also to a log file in the checkpoint folder
         with tee_stdout(log_path):
-            plot_save_path = os.path.join(plot_save_path, f"LMM_results_{params['time_model']}_{dof_spline}_{params['censor_time']}.png")
+            plot_save_path = os.path.join(plot_save_path, f"force_LMM_results_{params['time_model']}_{dof_spline}_{params['censor_time']}.png")
             la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label"}, 
                                 logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline, 
                                 time_model=params['time_model'], run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200)

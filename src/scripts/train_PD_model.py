@@ -47,7 +47,8 @@ from src.utils.training_utils import (DataShape, EvalConfig, LossConfig, OptimCo
                          default_callbacks, trainer_kwargs,
                          set_automatic_hyperparameters, get_optimization_groups)
 from src.utils.training_utils.pd_training.callbacks.diagnostics import (BestMetricTracker, ClearCache, 
-                                                                        TimeLoader, MemMonitor, BatchTimer, ThroughputMonitor, WriteProbe)
+                                                                        TimeLoader, MemMonitor, BatchTimer, ThroughputMonitor, WriteProbe,
+                                                                        ParameterSummary)
 
 def pre_trained_weights(name):
     if name is None:
@@ -97,6 +98,8 @@ def get_input_modality(name):
         return ['X_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
     elif name=='window_debug_aug':
         return ['X_window','_X_window']+ ['digit_window' , '_digit_window']+ ['text_window', '_text_window']
+    elif name=='window_3x_2d_1t':
+        return ['X_window' for _ in range(3)]+['digit_window' for _ in range(2)]+ ['text_window']
     elif name=='patch_view':
         n_x=20
         n_d=10
@@ -127,7 +130,7 @@ exp_params = {
 
     #experiment parameters
     'merge_shards': False, #automatically set to true if you use handedness as label
-    'data_modality': get_input_modality('patch_view'), #mixed_view, window_view, window_view_minimal
+    'data_modality': get_input_modality('window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
     #loss options
@@ -152,7 +155,7 @@ exp_params = {
     'filter_modality' : 'digit', 
 
     #model definition
-    'model': "resnet18_32",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model': "resnet18",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
     #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
@@ -190,13 +193,13 @@ exp_params = {
         'use_spread': False, #add a variance feature of dimension d_model to the average d_model feature
         'use_count_feature': False,
         'use_attention_pool': False, #if true overrides use_spread and use_count_feature 
-        'seq_model':'gru', #causal_gru (bidirectional has no impact, predictions are returned per_step)
+        'seq_model':'causal_transformer', #causal_gru (bidirectional has no impact, predictions are returned per_step)
         'bidirectional':True,
     },
 
     #Transforms definitions
-    'custom_transform': '2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-    'input_size': 32,
+    'custom_transform': None, #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+    'input_size': 224, #224,32
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
@@ -210,8 +213,10 @@ exp_params = {
     'lr_decay': 0.5, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
     'lr_backbone': 1e-4,
     'lr_classifier_head': 1e-3,
-    'lr_scheduling': 'cosine', #'cosine' # "two_stage", 'step', None
-    'batch_size': 4,
+    'lr_scheduling': "two_stage", #'cosine' # "two_stage", 'step', None
+    'stage1_fraction': 0.2,
+    'stage1_lr_names': ["lr_head"],
+    'batch_size': 8,
     'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
     'num_epochs': 100,
     'max_steps': -1, #N or -1
@@ -224,7 +229,7 @@ exp_params = {
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
-    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
     #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None

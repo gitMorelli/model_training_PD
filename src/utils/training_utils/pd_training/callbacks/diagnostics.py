@@ -5,7 +5,7 @@ None of these change training; add or drop them in the Trainer's callback list.
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import Sequence, Union
 
 import lightning as L
 import os
@@ -15,12 +15,14 @@ from collections import deque
 import torch
 from lightning.pytorch.callbacks import Callback
 
+
 from ..logging_utils import rank_zero_logger
 
 info, warning = rank_zero_logger(__name__)
 
 _WHITE, _RED, _RESET = "\033[97m", "\033[91m", "\033[0m"
 
+print(__name__)
 
 class ParameterSummary(L.Callback):
     """At the end of the listed epochs (0-based), log every parameter with its
@@ -30,7 +32,7 @@ class ParameterSummary(L.Callback):
     off when the log goes to a file.
     """
 
-    def __init__(self, epochs: Sequence[int] = (0, 5), color: bool = False):
+    def __init__(self, epochs: Sequence[int] = (0, 10), color: bool = True):
         self.epochs = set(epochs)
         self.color = color
 
@@ -81,28 +83,41 @@ class ParameterSummary(L.Callback):
 
 
 class GradientCheck(L.Callback):
-    """After the very first backward pass, log the mean |grad| of parameters
-    whose name contains one of `name_filters`, and warn below `threshold`."""
+    """On the first backward pass of each epoch in `epochs`, log the mean |grad|
+    of parameters whose name contains one of `name_filters` (or of every
+    parameter when `name_filters == "all"`), and warn below `threshold`."""
 
-    def __init__(self, name_filters: Sequence[str] = ("layer4", "classifier"),
+    def __init__(self, name_filters: Union[str, Sequence[str]] = ("layer4", "classifier"),
+                 epochs: Sequence[int] = (0,),
                  threshold: float = 1e-8):
-        self.name_filters = tuple(name_filters)
+        if isinstance(name_filters, str):
+            # "all" -> no filtering; any other single string is one filter,
+            # not a tuple of its characters
+            self.name_filters = None if name_filters == "all" else (name_filters,)
+        else:
+            self.name_filters = tuple(name_filters)
+        self.epochs = {int(e) for e in epochs}
         self.threshold = threshold
-        self._done = False
+        self._batch_idx = None
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        self._batch_idx = batch_idx
 
     def on_after_backward(self, trainer, pl_module):
-        # with gradient accumulation global_step stays 0 for several backwards
-        if self._done:
+        epoch = trainer.current_epoch
+        if epoch not in self.epochs:
             return
-        self._done = True
-        if trainer.global_step != 0:      # resumed run
+        # only the epoch's first batch: covers gradient accumulation (several
+        # backwards per optimizer step) and runs resumed mid-epoch
+        if self._batch_idx != 0:
             return
-        lines = ["--- Gradient check (first batch) ---"]
+        what = "all parameters" if self.name_filters is None else ", ".join(self.name_filters)
+        lines = [f"--- Gradient check (epoch {epoch}, first batch; {what}) ---"]
         model = getattr(pl_module, "model", pl_module)
         for name, p in model.named_parameters():
             if p.grad is None or not p.requires_grad:
                 continue
-            if any(f in name for f in self.name_filters):
+            if self.name_filters is None or any(f in name for f in self.name_filters):
                 g = p.grad.abs().mean().item()
                 lines.append(f"{name}: mean |grad| = {g:.2e}")
                 if g < self.threshold:

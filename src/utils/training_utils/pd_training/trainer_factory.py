@@ -51,11 +51,12 @@ def trainer_kwargs(data_shape: DataShape, eval_cfg: EvalConfig) -> dict:
             **val_check_kwargs(data_shape, eval_cfg)}
 
 
-def default_callbacks(sched_cfg, *, summary_epochs=(0, 5), color=False,
+
+def default_callbacks(sched_cfg, *, gradient_check_epochs=(0, 5, 10), summary_epochs=(0, 5), color=True,
                       gradient_check=True, lr_logging=True) -> List[L.Callback]:
     callbacks: List[L.Callback] = [ParameterSummary(summary_epochs, color=color)]
     if gradient_check:
-        callbacks.append(GradientCheck())
+        callbacks.append(GradientCheck(name_filters="all", epochs=gradient_check_epochs))
     if lr_logging:
         callbacks.append(NamedLRLogger())
     if sched_cfg == "two_stage":

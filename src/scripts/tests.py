@@ -1001,15 +1001,47 @@ def compare_group_feature_importances(version_1="v_19", version_2="v_20",
     return table_1, table_2
 
 def inspect_individual_curves():
-    from src.debug.PD_model_evaluation import plot_probability_trajectories_2, plot_probability_trajectories
-    load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/per_step_predictions.csv"
-    #load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/pre_diagnosis/per_step_predictions.csv"
-    predictions = pd.read_csv(load_path)
-    save_path = "/home/a_morelli/vscode_projects/model_training/results/tests"
-    for n in [5, 20]:
-        plot_probability_trajectories(predictions, n_steps=n, ax=None,
-                                    class_names=("negative", "positive"),
-                                    min_count=1, save_path=save_path, save_name=f"probability_trajectories_{n}")
+    from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
+    from src.scripts.time_series_analysis import force_case_dt
+    import matplotlib.pyplot as plt
+    params = {}
+    params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths('PD', 
+                                                                                                 False, False)
+    params["force_case_dt"] = True
+    preds_df = pd.read_csv("/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv")
+    time_df_path = return_dt_path(params['list_of_ids_paths'])
+    time_df = pd.read_parquet(time_df_path)
+    df = force_case_dt(preds_df, time_df, params)
+
+
+    # One label per id (assumes true_label is constant within an id)
+    id_labels = df.groupby('unique_id')['true_label'].first()
+
+    # 5 random ids from each class
+    selected = pd.concat([
+        id_labels[id_labels == 0].sample(5, random_state=42),
+        id_labels[id_labels == 1].sample(5, random_state=42),
+    ])
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    colors = plt.cm.tab10.colors
+
+    for color, (uid, label) in zip(colors, selected.items()):
+        d = df[df['unique_id'] == uid].sort_values('case_dt')
+        ax.plot(
+            d['case_dt'], d['probability_1'],
+            marker='o', color=color,
+            linestyle='-' if label == 1 else '--',
+            label=f'{uid} (class {label})',
+        )
+
+    ax.set_xlabel('case_dt')
+    ax.set_ylabel('probability_1')
+    ax.set_ylim(0, 1)
+    ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
+    plt.tight_layout()
+    fig.savefig('/home/a_morelli/vscode_projects/model_training/results/tests/probability_1_vs_case_dt.png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
 
 def explore_per_step_subject_curves():
     df = pd.read_parquet("/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet")
@@ -1024,6 +1056,7 @@ def explore_per_step_subject_curves():
     group_df = df[df['group'] == first_group]
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         print(group_df[['unique_id'] + ['diag_park_final1_quest', 'case_control'] + [f'case_dt_dateq{i}' for i in range(1, 14)] ])
+
 # Prepare datasets #
 def prepare_handedness_datasets():
     source_folder = "/home/a_morelli/datasets/id_lists/"
@@ -1166,4 +1199,4 @@ def prepare_case_dt_datasets():
     return
 
 if __name__ == "__main__":
-    prepare_case_dt_datasets()
+    inspect_individual_curves()
