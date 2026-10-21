@@ -130,7 +130,7 @@ exp_params = {
 
     #experiment parameters
     'merge_shards': False, #automatically set to true if you use handedness as label
-    'data_modality': get_input_modality('window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
+    'data_modality': get_input_modality('patch_view'),#'window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
     #loss options
@@ -155,7 +155,7 @@ exp_params = {
     'filter_modality' : 'digit', 
 
     #model definition
-    'model': "resnet18",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model': "resnet18_32",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
     #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
@@ -198,8 +198,8 @@ exp_params = {
     },
 
     #Transforms definitions
-    'custom_transform': None, #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-    'input_size': 224, #224,32
+    'custom_transform': '2xcrop_resize_normalize', #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+    'input_size': 32, #224,32
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
@@ -216,7 +216,7 @@ exp_params = {
     'lr_scheduling': "two_stage", #'cosine' # "two_stage", 'step', None
     'stage1_fraction': 0.2,
     'stage1_lr_names': ["lr_head"],
-    'batch_size': 8,
+    'batch_size': 4,
     'scale_lr_with_batch_size': True, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
     'num_epochs': 100,
     'max_steps': -1, #N or -1
@@ -229,7 +229,7 @@ exp_params = {
     #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
     'seed': 42,
-    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
     #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None
@@ -280,6 +280,7 @@ def main(exp_params):
     args = get_args()
     worker = args.num_workers
     prefetch_factor = exp_params['prefetch_factor'] if worker > 0 else None
+    exp_params['precision'] = _resolve_precision(exp_params['precision'])
 
     print(f"baseline: {rss_gb():.2f}") #0.81
 
@@ -382,6 +383,22 @@ def main(exp_params):
 
 
 #### HELPER FUCNTIONS #### 
+
+def _resolve_precision(requested: str = "bf16-mixed") -> str:
+    if requested != "bf16-mixed":
+        return requested
+    if not torch.cuda.is_available():
+        return "bf16-mixed"  # bf16 autocast also works on CPU
+    # including_emulation=False -> only True on GPUs with native bf16 (Ampere / sm_80+)
+    try:
+        native = torch.cuda.is_bf16_supported(including_emulation=False)
+    except TypeError:  # older PyTorch without that argument
+        native = torch.cuda.get_device_capability()[0] >= 8
+    if native:
+        print("Requested bf16, using native bf16 precision (Ampere or newer GPU).", flush=True)
+    else:
+        print("Requested bf16 but using fp16 (pre-Ampere GPU).", flush=True)
+    return "bf16-mixed" if native else "16-mixed"
 
 def override_val_exclusion(train_df, val_exclusion_set, exp_params):
     if exp_params['pre_training']:
@@ -601,6 +618,7 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
         if verbose:
             print(f"Total unique groups in training set after filtering: {total_units}")'''
     else:
+        write_log(f"Counts of samples per class, used in balancing: {counts}")
         total_units = sum(counts)  # total number of samples in all classes
         shape = DataShape(total_units=total_units, batch_size=exp_params['batch_size'], world_size=1,
                   accumulate_grad_batches=exp_params['accumulate_grad_batches'], num_epochs=exp_params['num_epochs'])
@@ -608,8 +626,7 @@ def litmodel_initialization(model, counts,write_log, define_optimization_groups,
                               min_window_steps=exp_params['min_window_steps'])
         sched = SchedulerConfig(kind=exp_params['lr_scheduling'], warmup_fraction=exp_params['warmup_fraction'], 
                                 eta_min=exp_params['eta_min_cosine'])
-        loss_cfg = LossConfig(use_balanced_weights=exp_params['use_balanced_weights'], balancing_factor=exp_params['balancing_factor'], 
-                              balanced_data=exp_params['balanced_data'], loss_name=exp_params['loss_name'], **exp_params['loss_kwargs'])
+        loss_cfg = LossConfig(use_balanced_weights=exp_params['use_balanced_weights'], balanced_data=exp_params['balanced_data'], loss_name=exp_params['loss_name'], **exp_params['loss_kwargs'])
         
         lit_model = PDClassificationModule(
             model, counts, shape, num_classes=exp_params['num_classes'],

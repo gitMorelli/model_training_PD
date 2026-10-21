@@ -12,6 +12,7 @@ import numpy as np
 import cv2
 import re
 import pickle
+import matplotlib.pyplot as plt
 import time
 
 
@@ -1000,7 +1001,29 @@ def compare_group_feature_importances(version_1="v_19", version_2="v_20",
     print(f"\nSaved:\n  {path_1}\n  {path_2}")
     return table_1, table_2
 
+
+# per_stepanalysis
+def _prepare_dt_df(force=True,preds_path="/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv"):
+    from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
+    from src.scripts.time_series_analysis import force_case_dt
+    import matplotlib.pyplot as plt
+    params = {}
+    params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths('PD', 
+                                                                                                    False, False)
+    params["force_case_dt"] = True
+    preds_df = pd.read_csv(preds_path)
+    if force:
+        time_df_path = return_dt_path(params['list_of_ids_paths'])
+        time_df = pd.read_parquet(time_df_path)
+        df = force_case_dt(preds_df, time_df, params)
+    else:
+        df = preds_df
+    return df
+
 def inspect_individual_curves():
+    '''
+    Enables to plot prob vs case_dt curves for randomly selected subjects to analyze the shape of the curves
+    '''
     from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
     from src.scripts.time_series_analysis import force_case_dt
     import matplotlib.pyplot as plt
@@ -1056,6 +1079,149 @@ def explore_per_step_subject_curves():
     group_df = df[df['group'] == first_group]
     with pd.option_context('display.max_rows', None, 'display.max_columns', None):
         print(group_df[['unique_id'] + ['diag_park_final1_quest', 'case_control'] + [f'case_dt_dateq{i}' for i in range(1, 14)] ])
+
+def _plot_slot_dist_by_case_dt(df, n_bins=10, ncols=5, by_class=False, normalize=False,
+                              filename="slot_dist_by_case_dt_bin.png", dpi=150):
+    """
+    Split case_dt into n_bins equal-width bins (min to max) and, for each bin,
+    plot the distribution of slot. Saves the figure to `filename`.
+
+    by_class  : if True, show side-by-side bars for true_label 0 and 1
+    normalize : if True, show proportions within each bin (and class) instead of counts
+    """
+    edges = np.linspace(df["case_dt"].min(), df["case_dt"].max(), n_bins + 1)
+    bin_idx = pd.cut(df["case_dt"], bins=edges, include_lowest=True, labels=False)
+    slots = np.sort(df["slot"].unique())
+
+    nrows = -(-n_bins // ncols)  # ceil division
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.5 * ncols, 2.8 * nrows),
+                             sharex=True, sharey=normalize, squeeze=False)
+    axes = axes.ravel()
+
+    def slot_counts(sub):
+        c = sub["slot"].value_counts().reindex(slots, fill_value=0)
+        return c / c.sum() if normalize and c.sum() > 0 else c
+
+    for i in range(n_bins):
+        ax = axes[i]
+        df_b = df[bin_idx == i]
+
+        if by_class:
+            width = 0.4
+            for offset, (lbl, color) in zip((-width / 2, width / 2),
+                                            [(0, "steelblue"), (1, "darkorange")]):
+                sub = df_b[df_b["true_label"] == lbl]
+                ax.bar(slots + offset, slot_counts(sub).values, width=width,
+                       color=color, label=f"class {lbl} (n={len(sub)})")
+            ax.legend(fontsize=7)
+        else:
+            ax.bar(slots, slot_counts(df_b).values, color="steelblue")
+
+        ax.set_title(f"case_dt {edges[i]:.4g} – {edges[i + 1]:.4g}\n(n={len(df_b)})", fontsize=9)
+        ax.set_xticks(slots)
+        ax.tick_params(axis="x", labelsize=7)
+
+    # Hide unused panels
+    for ax in axes[n_bins:]:
+        ax.set_visible(False)
+
+    fig.supxlabel("slot")
+    fig.supylabel("proportion" if normalize else "count")
+    fig.suptitle("Distribution of slot per case_dt bin", fontsize=14)
+    fig.tight_layout()
+    fig.savefig(filename, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    return filename
+
+def _plot_dt_dist_by_slot(df, normalize=False,
+                          filename="case_dt_by_slot_and_class.png"):
+    slots = sorted(df["slot"].unique())
+    ncols = 4
+    nrows = -(-len(slots) // ncols)  # ceil division
+
+    # Same bin edges for every slot so panels are comparable
+    bins = np.linspace(df["case_dt"].min(), df["case_dt"].max(), 31)
+
+    classes = [(0, "steelblue"), (1, "darkorange")]
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 3 * nrows),
+                             sharex=True, sharey=normalize)
+    axes = axes.ravel()
+
+    for ax, s in zip(axes, slots):
+        df_s = df[df["slot"] == s]
+        for lbl, color in classes:
+            d = df_s.loc[df_s["true_label"] == lbl, "case_dt"].dropna()
+            weights = np.full(len(d), 1 / len(d)) if normalize and len(d) > 0 else None
+            ax.hist(d, bins=bins, weights=weights, alpha=0.6, color=color,
+                    label=f"class {lbl} (n={len(d)})")
+        ax.set_title(f"Slot {s}")
+        ax.legend(fontsize=8)
+
+    # Hide unused panels
+    for ax in axes[len(slots):]:
+        ax.set_visible(False)
+
+    fig.supxlabel("case_dt")
+    fig.supylabel("proportion within class" if normalize else "count")
+    fig.suptitle("Distribution of case_dt by slot and class"
+                 + (" (normalized)" if normalize else ""), fontsize=14)
+    fig.tight_layout()
+
+    fig.savefig(filename, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+def class_distrib_per_questionnaire(force=True):
+    print("Force case_dt:", force)
+    save_path = "/home/a_morelli/vscode_projects/model_training/src/tests/out"
+    df = _prepare_dt_df(force=force)
+    df['group'] = df['unique_id'].str.split('_').str[1]
+    suffix=''
+    if not force:
+        suffix='_no_force'
+    #check that rows which share group and slot have the same case_dt value, except for NaN values
+    df_check = df.dropna(subset=['case_dt'])
+    grouped = df_check.groupby(['group', 'slot'])['case_dt']
+    inconsistent = grouped.nunique().reset_index()
+    inconsistent = inconsistent[inconsistent['case_dt'] > 1]
+    if not inconsistent.empty:
+        print("Inconsistent case_dt values found for the following group-slot combinations:")
+        #print(inconsistent)
+    else:
+        print("All group-slot combinations have consistent case_dt values.")
+    
+    # Comparing the time distribution within each wave (slot)
+    print("Comparing the time distribution within each wave (slot):")
+    print(df.groupby("true_label")["case_dt"].describe())
+    print(df.groupby(["slot", "true_label"])["case_dt"].mean().unstack())
+
+    #split column properties
+    print("Slot column properties:")
+    print(df.groupby("unique_id")["slot"].nunique().describe() )  # 1 split per subject → nested; >1 → crossed
+    print("Cross-tabulation of slot and true_label:")
+    print(pd.crosstab(df["slot"], df["true_label"], normalize="columns"))
+    print(df.groupby("slot")["case_dt"].describe())
+
+    #get the unique values of th slot column
+    unique_slots = df["slot"].unique()
+    print(f"Unique values of slot column: {unique_slots}")
+    #get per questionnaire class counts
+    counts = (
+        df.groupby("slot")["true_label"]
+        .value_counts()
+        .unstack(fill_value=0)
+        .rename(columns={0: "n_class_0", 1: "n_class_1"})
+    )
+    counts["total"] = counts["n_class_0"] + counts["n_class_1"]
+    counts["pct_class_1"] = counts["n_class_1"] / counts["total"]
+    print(counts)
+
+    #plot q distribution per interval
+    _plot_slot_dist_by_case_dt(df,n_bins=10,by_class=True, normalize=True, 
+                               filename=os.path.join(save_path, "slot_dist_by_case_dt_bin" + suffix + ".png"))
+
+    #plot distribution of case_dt in each slot class
+    _plot_dt_dist_by_slot(df, normalize=True, filename=os.path.join(save_path, "dt_dist_by_slot" + suffix + ".png"))
 
 # Prepare datasets #
 def prepare_handedness_datasets():
@@ -1199,4 +1365,4 @@ def prepare_case_dt_datasets():
     return
 
 if __name__ == "__main__":
-    inspect_individual_curves()
+    class_distrib_per_questionnaire(force=True)

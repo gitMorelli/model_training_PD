@@ -1,0 +1,4 @@
+/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/matplotlib/axes/_axes.py:7104: RuntimeWarning: All-NaN slice encountered
+  xmin = min(xmin, np.nanmin(xi))
+/home/a_morelli/.conda/envs/torch_gpu/lib/python3.10/site-packages/matplotlib/axes/_axes.py:7105: RuntimeWarning: All-NaN slice encountered
+  xmax = max(xmax, np.nanmax(xi))

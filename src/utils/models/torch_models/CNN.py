@@ -141,6 +141,7 @@ def get_convnext_transforms(**kwargs):
             transforms.Normalize(mean=mean, std=std),
         ])
     return transform
+
 def get_resnet(name,mode, pretrained, **kwargs):
     def grayscale_version(model):
         old = model.conv1
@@ -252,20 +253,28 @@ def get_resnet_transforms(**kwargs):
     """
     Returns the transformation pipeline for ResNet.
     """
-    mode=kwargs.get('mode',)
+    mode=kwargs.get('mode','resize')
+    gray_scale = kwargs.get('grayscale', False)
+    if gray_scale:
+        mean=[0.459]
+        std=[0.226] 
+        #luminance weighted sum
+    else:
+        mean=[0.485, 0.456, 0.406]
+        std=[0.229, 0.224, 0.225]
     if mode=='resize':
         transform = transforms.Compose([
             transforms.Resize((224,224), interpolation=transforms.InterpolationMode.BILINEAR),
             #transforms.CenterCrop(224),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=mean, std=std)
         ])
     else:
         transform = transforms.Compose([
             transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.Normalize(mean=mean, std=std),
         ])
     return transform
 

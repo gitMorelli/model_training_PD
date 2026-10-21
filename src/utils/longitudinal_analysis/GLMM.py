@@ -69,9 +69,9 @@ def fit_mixed(formula, df, reml=False, re_formula="~time"):
     return result
 
 
-def fit_full_and_null(df, time_term):
-    full = fit_mixed(f"y ~ {time_term} * C(group)", df)  # class-specific trajectories
-    null = fit_mixed(f"y ~ {time_term}", df)             # one shared trajectory
+def fit_full_and_null(df, time_term, adj=''):
+    full = fit_mixed(f"y ~ {time_term} * C(group){adj}", df)  # class-specific trajectories
+    null = fit_mixed(f"y ~ {time_term}{adj}", df)             # one shared trajectory
     return full, null
 
 
@@ -84,17 +84,17 @@ def lrt(full, null):
     return stat, dof, stats.chi2.sf(stat, dof)
 
 
-def permutation_lrt(df, time_term, n_perm=200, seed=0):
+def permutation_lrt(df, time_term, n_perm=200, seed=0, adj=''):
     """Shuffle class labels between SUBJECTS (never between observations)."""
     rng = np.random.default_rng(seed)
-    full, null = fit_full_and_null(df, time_term)
+    full, null = fit_full_and_null(df, time_term, adj=adj)
     observed, _, _ = lrt(full, null)
     labels = df.groupby("subject")["group"].first()
     perm_stats = []
     for _ in range(n_perm):
         shuffled = pd.Series(rng.permutation(labels.values), index=labels.index)
         d = df.assign(group=df["subject"].map(shuffled))
-        f, n = fit_full_and_null(d, time_term)
+        f, n = fit_full_and_null(d, time_term, adj=adj)
         perm_stats.append(2 * (f.llf - n.llf))
     p = (1 + np.sum(np.array(perm_stats) >= observed)) / (n_perm + 1)
     return observed, p
@@ -103,11 +103,13 @@ def permutation_lrt(df, time_term, n_perm=200, seed=0):
 # ----------------------------------------------------------------------------
 # 3. Difference curve with simultaneous confidence band
 # ----------------------------------------------------------------------------
-def difference_curve(result, df, n_grid=200, n_sim=10000, level=0.95, seed=0):
+def difference_curve(result, df, n_grid=200, n_sim=10000, level=0.95, seed=0, model_split=False, baseline_time=None):
     """Delta(t) = mean(class 2) - mean(class 1), with pointwise and simultaneous bands.
 
     Simultaneous band: draw beta* ~ N(beta_hat, V), compute the max over t of
     |Delta*(t) - Delta_hat(t)| / se(t); its `level` quantile replaces 1.96.
+
+    example: baseline_time=df["time"].quantile(0.05)
     """
     groups = sorted(df["group"].unique())
     # restrict to the time range where BOTH classes have data
@@ -116,10 +118,21 @@ def difference_curve(result, df, n_grid=200, n_sim=10000, level=0.95, seed=0):
     grid = np.linspace(lo, hi, n_grid)
 
     design_info = result.design_info  # remembers spline knots from the fit
-    X = {g: np.asarray(patsy.build_design_matrices(
-            [design_info], pd.DataFrame({"time": grid, "group": g}))[0])
-         for g in groups}
+    if model_split:
+        ref_split = df["split"].mode()[0]
+        X = {g: np.asarray(patsy.build_design_matrices(
+            [design_info], pd.DataFrame({"time": grid, "group": g, "split": ref_split}))[0])
+             for g in groups}
+    else:
+        X = {g: np.asarray(patsy.build_design_matrices(
+                [design_info], pd.DataFrame({"time": grid, "group": g}))[0])
+            for g in groups}
     L = X[groups[1]] - X[groups[0]]               # contrast matrix, one row per grid time
+    if baseline_time is not None:              # contrast: Delta(t) - Delta(baseline_time)
+        i0 = np.argmin(np.abs(grid - baseline_time))
+        L = L - L[i0]
+        keep = np.arange(n_grid) != i0         # se = 0 at the baseline point itself
+        L, grid = L[keep], grid[keep]
 
     beta = result.fe_params.values
     V = result.cov_params().loc[result.fe_params.index, result.fe_params.index].values
@@ -202,22 +215,60 @@ def cluster_bootstrap_tau(df, time_term,n_boot=200, tau_grid=None, seed=0):
 # ----------------------------------------------------------------------------
 # Plot
 # ----------------------------------------------------------------------------
-def plot_results(df, full, curve, groups, profile=None, path="results.png"):
+def _slot_weights(df, tgrid, bw=None):
+    """P(slot | t) on tgrid via Gaussian kernel smoothing of observed (time, slot) pairs."""
+    slots = np.sort(df["split"].unique())
+    t, s = df["time"].values, df["split"].values
+    if bw is None:                                   # Silverman-type rule of thumb
+        bw = 1.06 * np.std(t) * len(t) ** (-0.2)
+    K = np.exp(-0.5 * ((np.asarray(tgrid)[:, None] - t[None, :]) / bw) ** 2)   # grid x obs
+    W = np.column_stack([K[:, s == k].sum(axis=1) for k in slots])
+    return slots, W / W.sum(axis=1, keepdims=True)
+
+
+def _population_curve(full, df, tgrid, g, model_split, weighting="time"):
+    """Fixed-effect prediction for class g; with slots, marginalised over slot."""
+    design_info, beta = full.design_info, full.fe_params.values
+
+    def pred(**cols):
+        newdata = pd.DataFrame({"time": tgrid, "group": g, **cols})
+        return np.asarray(patsy.build_design_matrices([design_info], newdata)[0]) @ beta
+
+    if not model_split:
+        return pred()
+    slots, W = _slot_weights(df, tgrid)
+    if weighting == "uniform":                       # balanced average over all slots
+        W = np.full_like(W, 1 / len(slots))
+    P = np.column_stack([pred(split=k) for k in slots])   # grid x slots
+    return (P * W).sum(axis=1)
+
+
+def plot_results(df, full, curve, groups, profile=None, path="results.png",
+                 model_split=False, weighting="time", show_binned=True, n_bins=15):
     import matplotlib.pyplot as plt
 
     ncols = 3 if profile is not None else 2
     fig, ax = plt.subplots(1, ncols, figsize=(5.5 * ncols, 4.5))
     colors = dict(zip(groups, ["tab:blue", "tab:orange"]))
+    tgrid = curve["time"].values
+    bins = np.quantile(df["time"], np.linspace(0, 1, n_bins + 1))
 
-    design_info = full.design_info
     for g in groups:
         sub = df[df["group"] == g]
         for _, s in sub.groupby("subject"):
             ax[0].plot(s["time"], s["y"], color=colors[g], alpha=0.12, lw=0.8)
-        Xg = np.asarray(patsy.build_design_matrices(
-            [design_info], pd.DataFrame({"time": curve["time"], "group": g}))[0])
-        ax[0].plot(curve["time"], Xg @ full.fe_params.values, color=colors[g], lw=3, label=g)
-    ax[0].set(title="Population trajectories", xlabel="time", ylabel="y")
+        ax[0].plot(tgrid, _population_curve(full, df, tgrid, g, model_split, weighting),
+                   color=colors[g], lw=3, label=g)
+        if show_binned:                              # raw binned means: a visual fit check
+            b = sub.groupby(pd.cut(sub["time"], bins, include_lowest=True), observed=True)
+            ax[0].plot(b["time"].mean(), b["y"].mean(), "o", color=colors[g],
+                       mec="k", ms=5, zorder=5)
+
+    subtitle = ""
+    if model_split:
+        subtitle = "\n(averaged over slots, weighted by P(slot | t))" if weighting == "time" \
+                   else "\n(uniform average over slots)"
+    ax[0].set(title="Population trajectories" + subtitle, xlabel="time", ylabel="y")
     ax[0].legend(title="class")
 
     t = curve["time"]
@@ -247,9 +298,11 @@ preset_columns = {             # your column name -> name used internally
         "group": "true_label",
         "time": "case_dt",
         "y": "probability_1",
+        "split": "slot"
     }
 def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, spline_df=4,
-                 run_permutation_test=False, n_perm=200, run_bootstrap=False, n_boot=200, time_model="spline"):
+                 run_permutation_test=False, n_perm=200, run_bootstrap=False, n_boot=200, time_model="spline", model_split=True,
+                 use_baseline=True):
     '''logit = True            # model logit(probability_1) instead of the raw probability
     logit = 1e-4              # clip probabilities away from 0/1 before the logit
     '''
@@ -260,6 +313,10 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
         TIME_TERM = "(center(time) + I(center(time)**2))"
     else:
         raise ValueError("time_model must be 'spline' or 'quadratic'")
+    if model_split:
+        ADJ = " + C(split) * C(group)"
+    else:
+        ADJ = ""
 
     def prepare(raw):
         COLUMNS = {v: k for k, v in columns.items()}
@@ -276,13 +333,13 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
     print(f"{df['subject'].nunique()} subjects, {len(df)} observations\n")
 
     # Steps 1-2: models and global test
-    full, null = fit_full_and_null(df, TIME_TERM)
+    full, null = fit_full_and_null(df, TIME_TERM, adj=ADJ)
     stat, dof, p = lrt(full, null)
     print(f"Global LRT (class affects level or shape): chi2={stat:.2f}, df={dof}, p={p:.3g}")
 
     # Step 3: difference curve (refit with REML for less biased variance components)
-    full_reml = fit_mixed(f"y ~ {TIME_TERM} * C(group)", df, reml=True)
-    curve, crit, groups = difference_curve(full_reml, df)
+    full_reml = fit_mixed(f"y ~ {TIME_TERM} * C(group){ADJ}", df, reml=True)
+    curve, crit, groups = difference_curve(full_reml, df, model_split=model_split)
     print(f"Simultaneous critical value: {crit:.2f} (vs 1.96 pointwise)")
     intervals = significant_intervals(curve)
     if intervals:
@@ -293,15 +350,31 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
         print("No time interval where the difference is significant.")
 
     # Step 4: change-point estimate of the onset
-    tau_hat, tau_ci, profile = changepoint_profile(df, time_term=TIME_TERM)
+    tau_hat, tau_ci, profile = changepoint_profile(df, time_term=TIME_TERM+ADJ)
     print(f"\nChange-point onset: tau = {tau_hat:.2f}, "
           f"approx. 95% CI [{tau_ci[0]:.2f}, {tau_ci[1]:.2f}]")
 
+    #step 5: interaction between split and group (optional; only if model_split=True)
+    if model_split:
+        '''# fit the additive model
+        add = fit_mixed(f"y ~ {TIME_TERM} * C(group) + C(split)", df)
+        het = fit_mixed(f"y ~ {TIME_TERM} * C(group) + C(split) * C(group)", df)
+        stat, dof, p = lrt(het, add)   # does the class gap vary by slot beyond what time explains?
+        print(f"\nInteraction test (does the class gap vary by slot beyond what time explains?): chi2={stat:.2f}, df={dof}, p={p:.3g}")'''
+        het_slope = fit_mixed(
+            f"y ~ {TIME_TERM} * C(group) + C(split) * C(group) + C(split):C(group):time", df)
+        print(lrt(het_slope, full))
+
     if path:
-        print("\nSaved plot:", plot_results(df, full_reml, curve, groups, profile, path=path))
+        if use_baseline:
+            baseline_time=None
+        else:
+            
+        print("\nSaved plot:", plot_results(df, full_reml, curve, groups, profile, path=path, model_split=model_split, 
+                                            baseline_time=baseline_time)
 
     # Step 5 (slow; uncomment for robustness checks)
     if run_permutation_test:
-        obs, p_perm = permutation_lrt(df, TIME_TERM,n_perm=n_perm); print(f"Permutation p = {p_perm:.3g}")
+        obs, p_perm = permutation_lrt(df, TIME_TERM,n_perm=n_perm, adj=ADJ); print(f"Permutation p = {p_perm:.3g}")
     if run_bootstrap:
-        ci_boot, _ = cluster_bootstrap_tau(df, TIME_TERM,n_boot=n_boot); print(f"Bootstrap tau CI: {ci_boot}")
+        ci_boot, _ = cluster_bootstrap_tau(df, TIME_TERM+ADJ,n_boot=n_boot); print(f"Bootstrap tau CI: {ci_boot}")

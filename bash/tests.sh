@@ -5,8 +5,8 @@
 #SBATCH --mem=16G                     # Request enough RAM for 16 parallel processes
 #SBATCH --time=00:10:00               # Estimated time for 500 images
 #SBATCH --partition=shortq
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/tests.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/tests.err
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/src/tests/tests.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/src/tests/tests.err
 
 # 1. Load necessary modules (this varies by cluster)
 # module load python/3.10
@@ -30,4 +30,4 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 cd $PROJECT_ROOT
 
 # 2. Run using the -m flag (No .py extension, use dots for path)
-$ENV_PYTHON -u -m src.scripts.tests
+$ENV_PYTHON -u -m src.tests.tests

@@ -30,6 +30,7 @@ def get_input_file_path(name):
         #input_file = os.path.join(HOME_PATH, "resnet18_model_results/checkpoints/v_36/per_step_predictions.csv")
         input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv")
     return input_file
+
 params = {
     #input info
     "input_file":get_input_file_path("trained_deep"),
@@ -53,7 +54,8 @@ params = {
     'filter_modality' : 'digit_original', #'X_original' 'digit_original' 'text_original'
 
     #statistical analysis parameters
-    'time_model': 'quadratic', #spline or quadratic
+    'time_model': 'spline', #spline or quadratic
+    'dof_spline': 4, #degrees of freedom for the spline model
 }
 
 params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths('PD', 
@@ -148,11 +150,12 @@ def main():
             df = df[df['case_dt'] <= 0]
         import src.utils.longitudinal_analysis as la
         plot_save_path = os.path.dirname(params['input_file'])
-        dof_spline = 4
-        log_path = os.path.join(plot_save_path, f"force_results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}.txt") #copy prints also to a log file in the checkpoint folder
+        dof_spline = params['dof_spline']
+        title=f"slot_results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}"
+        log_path = os.path.join(plot_save_path, f"{title}.txt") #copy prints also to a log file in the checkpoint folder
         with tee_stdout(log_path):
-            plot_save_path = os.path.join(plot_save_path, f"force_LMM_results_{params['time_model']}_{dof_spline}_{params['censor_time']}.png")
-            la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label"}, 
+            plot_save_path = os.path.join(plot_save_path, f"{title}.png")
+            la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label", "split": "slot"}, 
                                 logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline, 
                                 time_model=params['time_model'], run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200)
 
@@ -170,7 +173,7 @@ def force_case_dt(df, time_df,params):
         var_name='slot',
         value_name='case_dt',
     )
-    long['slot'] = long['slot'].str.removeprefix('case_dt_dateq').astype(int)
+    long['slot'] = long['slot'].str.removeprefix('case_dt_dateq').astype(int)-1
 
     # Replace case_dt in df with the matching value
     df = df.drop(columns='case_dt').merge(long, on=['unique_id', 'slot'], how='left')

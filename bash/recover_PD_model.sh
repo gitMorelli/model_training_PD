@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=train_PD
+#SBATCH --job-name=recover_PD
 #SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train_PD_recover.out
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD_recover.err
 #SBATCH --nodes=1                      # Run on a single node
@@ -10,7 +10,7 @@
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
-#SBATCH --gres=gpu:t4:1
+#SBATCH --gres=gpu:1
 #--gres=gpu:h100:1
 #--exclude=gpu01,gpu02,gpu04
 
