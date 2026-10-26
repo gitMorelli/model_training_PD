@@ -15,7 +15,8 @@ import sys, os, contextlib
 from src.utils.data_loading import prepare_exclusion_sets_PD, load_grid_dict, prepare_loaders_PD, return_file_paths, return_dt_path
 from src.utils.image_processing import  get_mu_std
 from src.utils.training_utils import PDClassificationModule, load_legacy_state_dict
-from src.scripts.train_PD_model import model_initialization, preprocess_PD_csv
+from src.scripts.train_PD_model import model_initialization
+from src.utils.tabular_data_utils import preprocess_PD_csv
 from src.utils.evaluation import analyze_results, plot_probability_trajectories
 
 
@@ -32,7 +33,6 @@ SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
 model_name = 'resnet18_32'#'resnet18_32' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
 version='14'
-override_parameters=False
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #get the most recent ckpt file with best in the name 
@@ -40,12 +40,6 @@ checkpoint_to_load = get_last_best_checkpoint(CHECKPOINT_PATH,version)
 #open and save as exp_params dict
 with open(params_path, 'rb') as f:
     exp_params = pd.read_pickle(f) 
-
-prefix=''
-if override_parameters:
-    print(f"Overriding parameters from {params_path}", flush=True)
-    exp_params['censor_time'] = 'pre_diagnosis' #you can test models trained on all also on partial sequences
-    prefix='pre_diagnosis'
 
 #exp_params['filter_missing']='all'
 #exp_params['censor_time']='all'
@@ -93,6 +87,11 @@ def main(exp_params):
 
     exp_params['norm_mu'],exp_params['norm_std'] = get_mu_std(exp_params, verbose=VERBOSE)
 
+    censor_time_during_training = exp_params['censor_time']
+    print(f"[INFO] Censor time during training was: {censor_time_during_training}", flush=True)
+    exp_params['censor_time'] = 'all_matched' #for evaluation i want to use all the data, not only the data up to the censor_time
+    print(f"[INFO] Censor time for evaluation is set to for evaluation: {exp_params['censor_time']}", flush=True)
+
     #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
     exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=CLASS_COL)
 
@@ -112,10 +111,7 @@ def main(exp_params):
     # Setting ckpt_path="best" tells Lightning to automatically find your top model
     ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
     lit_model = litmodel_initialization_from_checkpoint(model, ckpt_path, exp_params)
-    if prefix!='':
-        save_path = os.path.join(os.path.dirname(ckpt_path), prefix)
-    else:
-        save_path = os.path.dirname(ckpt_path)
+    save_path = os.path.dirname(ckpt_path)
 
     tb_logger=False
     # 4. Initialize Trainer and Fit
@@ -160,17 +156,29 @@ def main(exp_params):
 
     # model's own per-step outputs: causal only if the mixer is causal
     results_df_per_step = None
+    results_df_pre_diagnosis = None
     if per_step:
-        print("#" * 50)
         print("[INFO] Model has per_step predictions; evaluating per-step predictions")
         results_df_per_step = get_per_step_results_per_group(outputs, time_df, class_names=None)
         # prefix predictions: each step sees only steps <= itself, for any mixer
     elif need_causal_pass:
-        print("#" * 50)
         print("[INFO] Model has not per_step predictions but supports causal predictions; evaluating per-step predictions")
         results_df_per_step = get_per_step_results_per_group(outputs, time_df,class_names=None)
     else:
-        print("[INFO] Model has no per_step predictions and no method for causal predictions; skipping per-step evaluation")
+        print("[INFO] Model has no per_step predictions and no method for causal predictions; skipping per-step evaluation \n" \
+        "Re-running the model for computing pre_diagnosis predictions...")
+        exp_params_temp=exp_params.copy()
+        exp_params_temp['censor_time'] = 'pre_diagnosis'
+        #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
+        
+        exclusion_set_temp, val_exclusion_set_temp, counts = prepare_exclusion_sets_PD(exp_params_temp,verbose=VERBOSE,class_col=CLASS_COL)
+        _,val_loader_temp,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set_temp,val_exclusion_set_temp, grid_dict, transform, 
+                                                        SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df,
+                                                        running_eval=True)
+        outputs_temp = trainer.predict(lit_model, dataloaders=val_loader_temp)
+        results_df_pre_diagnosis = get_result_dfs_per_group(outputs_temp, class_names=None)
+
+        
 
     results_training = None
     if exp_params['predict_on_train']:
@@ -181,38 +189,66 @@ def main(exp_params):
 
     for k in results.keys():
         print(f"Processing results for group: {k}", flush=True)
-        process_results_per_group(save_path, k, results, results_df_per_step, results_training,
+        process_results_per_group(save_path, k, results, results_df_pre_diagnosis, results_df_per_step, results_training,
                                  exp_params, csv_data)
 
-def process_results_per_group(save_path,group_name,results, results_df_per_step, results_training
+def process_results_per_group(save_path,group_name,results, results_df_pre_diagnosis, results_df_per_step, results_training
                               , exp_params, csv_data):
-    if group_name == "all":
-        log_path = os.path.join(save_path, f"stats.txt") #copy prints also to a log file in the checkpoint folder
-    else:
-        save_path = os.path.join(save_path, group_name)
-        os.makedirs(save_path, exist_ok=True)
-        log_path = os.path.join(save_path, f"stats.txt") #copy prints also to a log file in the checkpoint folder
+    strategy = "youden"
+    target_recall = 0.90
+    pos_label = 1
+    threshold = None
+
+    save_path = os.path.join(save_path, group_name)
+    os.makedirs(save_path, exist_ok=True)
+    log_path = os.path.join(save_path, f"stats.txt") #copy prints also to a log file in the checkpoint folder
+    
     with tee_stdout(log_path):
         return_model_info(exp_params)
 
+        #analysis on all timesteps (all_matched)
         results_df, all_probs, all_preds, all_labels = results[group_name]
         analyze_results(all_probs, all_labels, results_df, split="validation",
-                        pos_label=1, threshold=None, strategy="youden",
-                        target_recall=0.90, plot=True, out_dir_path=save_path)
-        
+                        pos_label=pos_label, threshold=threshold, strategy=strategy,
+                        target_recall=target_recall, plot=True, out_dir_path=save_path)
         if exp_params['matched_validation']:
             results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = get_results_matched(results_df, exp_params)
             analyze_results(all_probs_matched, all_labels_matched, results_df_matched, split="matched_validation",
-                            pos_label=1, threshold=None, strategy="youden",
-                            target_recall=0.90, plot=True, out_dir_path=save_path)
-        
+                            pos_label=pos_label, threshold=threshold, strategy=strategy,
+                            target_recall=target_recall, plot=True, out_dir_path=save_path)
+
+        #analysis on all pre_diagnosis
+        if results_df_pre_diagnosis is not None:
+            #i have computed them in a separate forward pass, simply take the result
+            results_df_pre, all_probs_pre, all_preds_pre, all_labels_pre = results_df_pre_diagnosis[group_name]
+        elif results_df_per_step is not None:
+            #i have to compute them from the results_df_per_step
+            results_df_pre, all_probs_pre, all_preds_pre, all_labels_pre = get_pre_diagnosis_only_results(results_df_per_step[group_name], exp_params)
+        else:
+            print("[INFO] No pre-diagnosis results available for analysis, both results_df_pre_diagnosis and results_df_per_step are None", flush=True)
+        superimpose_on = {
+            'pr': os.path.join(save_path, f"pr_curve_validation.npz"),
+            'roc': os.path.join(save_path, f"roc_curve_validation.npz")
+        }
+        analyze_results(all_probs_pre, all_labels_pre, results_df_pre, split="pre_diagnosis_validation",
+                                    pos_label=pos_label, threshold=threshold, strategy=strategy,
+                                    target_recall=target_recall, plot=True, out_dir_path=save_path, superimpose_on=superimpose_on)
+        if exp_params['matched_validation']:
+            results_df_matched_pre, all_probs_matched_pre, all_preds_matched_pre, all_labels_matched_pre = get_results_matched(results_df_pre, exp_params)
+            analyze_results(all_probs_matched_pre, all_labels_matched_pre, results_df_matched_pre, split="matched_pre_diagnosis_validation",
+                            pos_label=pos_label, threshold=threshold, strategy=strategy,
+                            target_recall=target_recall, plot=True, out_dir_path=save_path)
+
+        #longitudinal analysis
         if results_df_per_step is not None: #the trained model returns predictions per step, i can aggregate those
+            options = {"class_names": ("negative", "positive"), "min_count": 1}
             results_to_process = results_df_per_step[group_name]
-            plot_probability_trajectories(results_to_process, n_steps=20, ax=None,
-                                  class_names=("negative", "positive"),
-                                  min_count=1, save_path=save_path)
+            plot_probability_trajectories(results_to_process, n_steps=20,save_path=save_path,save_name=f"probability_trajectories", **options)
+            #keep only pre_diagnosis predictions for the longitudinal analysis
+            results_to_process_pre = results_to_process[results_to_process['case_dt'] < 0]
+            plot_probability_trajectories(results_to_process_pre, n_steps=10, save_path=save_path,save_name=f"probability_trajectories_pre_diagnosis", **options)
             #save the per_step results in a csv file
-            results_df_per_step.to_csv(os.path.join(save_path, f"per_step_predictions.csv"), index=False)
+            results_to_process.to_csv(os.path.join(save_path, f"per_step_predictions.csv"), index=False)
 
         if results_training is not None:
             results_df_train, all_probs, all_preds, all_labels = results_training[group_name]
@@ -222,7 +258,7 @@ def process_results_per_group(save_path,group_name,results, results_df_per_step,
             results_complete = pd.concat([results_df, results_df_train], ignore_index=True)
             results_df = results_complete.copy()
     
-    store_results(csv_data, results_df, save_path,exp_params, group_name=group_name)
+    store_results(csv_data, results_df, results_df_pre, save_path,exp_params, group_name=group_name)
 
 def get_per_step_results_per_group(outputs, train_df, class_names=None):
     """{subset_name: per-step DataFrame}; handles old and per-subset outputs."""
@@ -331,7 +367,19 @@ def get_results_matched(result_df, exp_params):
     all_preds = result_df['predicted_label'].values
     all_labels = result_df['true_label'].values
     return result_df, all_probs, all_preds, all_labels
-
+def get_pre_diagnosis_only_results(result_df, exp_params):
+    #eliminate rows that have nan case_dt
+    result_df = result_df[~result_df['case_dt'].isna()]
+    #select only rows with case_dt < 0
+    result_df = result_df[result_df['case_dt'] < 0]
+    #filter the result_df to only include one row for each unique_id, the row with the highest case_dt (closest to diagnosis)
+    result_df = result_df.loc[result_df.groupby('unique_id')['case_dt'].idxmax()]
+    #get the all_probs, all_preds, all_labels from the columns of result_df
+    prob_cols = [col for col in result_df.columns if col.startswith('probability_')]
+    all_probs = result_df[prob_cols].values
+    all_preds = result_df['predicted_label'].values
+    all_labels = result_df['true_label'].values
+    return result_df, all_probs, all_preds, all_labels
 
 def override_val_exclusion(train_df, val_exclusion_set, exp_params):
     if exp_params['pre_training']:
@@ -415,8 +463,10 @@ def tee_stdout(path, mode="w"):
             sys.stdout = old
 
 
-def store_results(csv_data, results_df, ckpt_path,params, group_name=None):
+
+def store_results(csv_data, results_df, results_df_pre, ckpt_path,params, group_name=None):
     merged_df = pd.merge(csv_data, results_df, on='unique_id', how='left')
+    merged_df_pre = pd.merge(csv_data, results_df_pre, on='unique_id', how='left')
     #check for duplicate rows
     if merged_df.duplicated(subset=['unique_id']).any():
         print("Warning: There are duplicate rows in the merged dataframe based on 'unique_id'.")
@@ -424,6 +474,7 @@ def store_results(csv_data, results_df, ckpt_path,params, group_name=None):
         print("No duplicate rows found in the merged dataframe based on 'unique_id'.")
     #save the merged dataframe in a csv file
     merged_df.to_csv(os.path.join(ckpt_path, f"predictions.csv"), index=False)
+    merged_df_pre.to_csv(os.path.join(ckpt_path, f"predictions_pre.csv"), index=False)
     #save params dict as predictions_metadata.pkl
     #save the exp_params dictionary to a pickle file in the checkpoint folder
     with open(os.path.join(ckpt_path, f"predictions_metadata.pkl"), 'wb') as f:

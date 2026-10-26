@@ -60,7 +60,7 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90, pos_labe
 
 def analyze_results(all_scores, all_labels, results_df, split="validation",
                     class_names=None, pos_label=1, threshold=None, strategy="f1",
-                    target_recall=0.90, plot=False, out_dir_path='.'):
+                    target_recall=0.90, plot=False, superimpose_on=None, out_dir_path='.'):
     """
     all_scores : per-sample class probabilities.
                  - binary: 1D P(pos) or 2D (N, 2)
@@ -94,7 +94,7 @@ def analyze_results(all_scores, all_labels, results_df, split="validation",
     if n_classes == 2:
         result = _analyze_binary(y_true, y_prob, results_df, split, class_names,
                                  pos_label, threshold, strategy, target_recall,
-                                 plot, out_dir_path)
+                                 plot, out_dir_path, superimpose_on=superimpose_on)
     else:
         result = _analyze_multiclass(y_true, y_prob, results_df, split,
                                      class_names, plot, out_dir_path)
@@ -146,7 +146,7 @@ def _baseline_table_binary(y_true, pos_label=1, seed=0):
 
 
 def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
-                    threshold, strategy, target_recall, plot, out_dir_path):
+                    threshold, strategy, target_recall, plot, out_dir_path, superimpose_on=None):
     y_scores = y_prob[:, pos_label]
  
     # 1. threshold-free view
@@ -180,18 +180,17 @@ def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
     with pd.option_context("display.float_format", "{:.3f}".format):
         print(_baseline_table_binary(y_true, pos_label).to_string(index=False))
  
-    dirname = os.path.basename(os.path.normpath(out_dir_path))
-    parent_path = os.path.dirname(os.path.normpath(out_dir_path))
+    
     if plot:
         _plot_pr_curve_binary(y_true, y_scores, pos_label, threshold,
                               path=os.path.join(out_dir_path, f"pr_curve_{split}.png"), data_path=os.path.join(out_dir_path, f"pr_curve_{split}.npz"))
         _plot_roc_curve_binary(y_true, y_scores, pos_label, threshold,
                                path=os.path.join(out_dir_path, f"roc_curve_{split}.png"), data_path=os.path.join(out_dir_path, f"roc_curve_{split}.npz"))
-        if dirname == "pre_diagnosis":
-            _plot_pr_curve_with_previous(y_true, y_scores, prev_data_paths=[os.path.join(parent_path, f"pr_curve_{split}.npz")], pos_label=pos_label,
+        if superimpose_on is not None:
+            _plot_pr_curve_with_previous(y_true, y_scores, prev_data_paths=superimpose_on['pr'], pos_label=pos_label,
                                          threshold=threshold, path=os.path.join(out_dir_path, f"pr_curve_{split}.png"), compare_path=os.path.join(out_dir_path, f"pr_curve_{split}_comparison.png"),
                                          name=f"{split} (this run)", data_path=os.path.join(out_dir_path, f"pr_curve_{split}.npz"))
-            _plot_roc_curve_with_previous(y_true, y_scores, prev_data_paths=[os.path.join(parent_path, f"roc_curve_{split}.npz")], pos_label=pos_label,
+            _plot_roc_curve_with_previous(y_true, y_scores, prev_data_paths=superimpose_on['roc'], pos_label=pos_label,
                                          threshold=threshold, path=os.path.join(out_dir_path, f"roc_curve_{split}.png"), compare_path=os.path.join(out_dir_path, f"roc_curve_{split}_comparison.png"),
                                          name=f"{split} (this run)", data_path=os.path.join(out_dir_path, f"roc_curve_{split}.npz"))
     #get the balanced accuracy score from the classification report
