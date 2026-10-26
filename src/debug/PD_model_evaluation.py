@@ -7,6 +7,7 @@ import lightning as L
 import random
 import sys
 import pickle
+from itertools import combinations
 
 import sys, os, contextlib
 
@@ -107,9 +108,6 @@ def main(exp_params):
                                                     SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df,
                                                     running_eval=True)
     
-    if exp_params['matched_validation']:
-        matched_val_loader = prepare_balanced_validation(worker,prefetch_factor,exp_params, grid_dict, transform)
-    
     # 1. Gather predictions using the best checkpoint saved during training
     # Setting ckpt_path="best" tells Lightning to automatically find your top model
     ckpt_path=os.path.join(CHECKPOINT_PATH,checkpoint_to_load) 
@@ -131,47 +129,62 @@ def main(exp_params):
     print(res[0]['val/pr_auc'], flush=True)
     return'''
 
-    has_subsets = callable(getattr(lit_model.model, 'get_modalities_names', None))
-    if has_subsets:
-        from itertools import combinations
-        modalities_names = lit_model.model.get_modalities_names()
-        print(f"Model supports subsets. Modalities names: {modalities_names}", flush=True)
-        #compute the combinations of modalities to predict on
-        modalities_combinations = [None]+ [list(c) for r in range(1, len(modalities_names) + 1) for c in combinations(modalities_names, r)]
-        lit_model.predict_subsets = modalities_combinations
+    # ---- modality subsets ----
+    lit_model.predict_subsets = None
+    if lit_model._supports_subsets():          # needs forward_subsets AND view_groups
+        names = lit_model.model.get_modalities_names()
+        print(f"[INFO] Model supports subsets. Modalities names: {names}", flush=True)
+        lit_model.predict_subsets = [None] + [list(c) for r in range(1, len(names) + 1)
+                                            for c in combinations(names, r)]
         print(f"Predicting on subsets: {lit_model.predict_subsets}", flush=True)
+
+    # ---- what kind of per-step predictions can we get? ----
+    per_step = getattr(lit_model, 'per_step', False)
+    has_causal = callable(getattr(lit_model.model, 'forward_prefixes_subsets', False))
+    # a per-step model with a causal mixer already gives causal per-step outputs
+    need_causal_pass = has_causal and not per_step 
+    if has_causal:
+        print("[INFO] Model supports causal predictions", flush=True)
+
+    time_df = None
+    if per_step or need_causal_pass:
+        time_df = pd.read_parquet(return_dt_path(exp_params['list_of_ids_paths']))
     
-    outputs = trainer.predict(lit_model, dataloaders=val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
+    lit_model.predict_causal = need_causal_pass
+    lit_model.causal_max_cost = exp_params.get('causal_max_cost', 200_000)
+
+    #run model forward
+    outputs = trainer.predict(lit_model, dataloaders=val_loader)
+    lit_model.predict_causal = False #for the predict on train
     results = get_result_dfs_per_group(outputs, class_names=None)
 
-    results_matched=None
-    if exp_params['matched_validation']:
+    # model's own per-step outputs: causal only if the mixer is causal
+    results_df_per_step = None
+    if per_step:
         print("#" * 50)
-        print(f"Evaluating model on matched validation set using checkpoint: {ckpt_path}")
-        outputs_matched = trainer.predict(lit_model, dataloaders=matched_val_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
-        results_matched = get_result_dfs_per_group(outputs_matched, class_names=None)
-    
-    results_training=None
-    if exp_params['predict_on_train']:
-        outputs_training = trainer.predict(lit_model, dataloaders=train_loader)# ckpt_path=os.path.join(CHECKPOINT_PATH,"best.ckpt"))
-        results_training = get_result_dfs_per_group(outputs_training, class_names=None)
-    
-    results_df_per_step=None
-    if hasattr(lit_model, 'per_step') and lit_model.per_step: #the trained model returns predictions per step, i can aggregate those
-        print("#" * 50)
-        print(f"Evaluating model on per_step predictions")
-        time_df_path = return_dt_path(exp_params['list_of_ids_paths'])
-        time_df = pd.read_parquet(time_df_path)
+        print("[INFO] Model has per_step predictions; evaluating per-step predictions")
         results_df_per_step = get_per_step_results_per_group(outputs, time_df, class_names=None)
-    
+        # prefix predictions: each step sees only steps <= itself, for any mixer
+    elif need_causal_pass:
+        print("#" * 50)
+        print("[INFO] Model has not per_step predictions but supports causal predictions; evaluating per-step predictions")
+        results_df_per_step = get_per_step_results_per_group(outputs, time_df,class_names=None)
+    else:
+        print("[INFO] Model has no per_step predictions and no method for causal predictions; skipping per-step evaluation")
+
+    results_training = None
+    if exp_params['predict_on_train']:
+        outputs_training = trainer.predict(lit_model, dataloaders=train_loader)
+        results_training = get_result_dfs_per_group(outputs_training, class_names=None)
+
     print(f"Evaluating model on validation set using checkpoint: {ckpt_path}")
 
     for k in results.keys():
         print(f"Processing results for group: {k}", flush=True)
-        process_results_per_group(save_path, k, results, results_df_per_step, results_matched, results_training,
+        process_results_per_group(save_path, k, results, results_df_per_step, results_training,
                                  exp_params, csv_data)
 
-def process_results_per_group(save_path,group_name,results, results_df_per_step, results_matched, results_training
+def process_results_per_group(save_path,group_name,results, results_df_per_step, results_training
                               , exp_params, csv_data):
     if group_name == "all":
         log_path = os.path.join(save_path, f"stats.txt") #copy prints also to a log file in the checkpoint folder
@@ -187,8 +200,8 @@ def process_results_per_group(save_path,group_name,results, results_df_per_step,
                         pos_label=1, threshold=None, strategy="youden",
                         target_recall=0.90, plot=True, out_dir_path=save_path)
         
-        if results_matched is not None:
-            results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = results_matched[group_name]
+        if exp_params['matched_validation']:
+            results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = get_results_matched(results_df, exp_params)
             analyze_results(all_probs_matched, all_labels_matched, results_df_matched, split="matched_validation",
                             pos_label=1, threshold=None, strategy="youden",
                             target_recall=0.90, plot=True, out_dir_path=save_path)
@@ -303,6 +316,21 @@ def get_result_df(outputs, class_names=None):
         results_df[f"probability_{name}"] = probs_np[:, i]
 
     return results_df, all_probs, all_preds, all_labels
+
+def get_results_matched(result_df, exp_params):
+    exp_params_temp=exp_params.copy()
+    exp_params_temp['balance_validation'] = True
+    exp_params_temp['balancing_factor'] = 1.0
+    train_df = pd.read_parquet(exp_params_temp['list_of_ids_paths'])
+    exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params_temp,verbose=VERBOSE,class_col=CLASS_COL, exclude_cases=True)
+    #remove rows from result_df that are in val_exclusion_set
+    result_df = result_df[~result_df['unique_id'].isin(val_exclusion_set)]
+    #get the all_probs, all_preds, all_labels from the columns of result_df
+    prob_cols = [col for col in result_df.columns if col.startswith('probability_')]
+    all_probs = result_df[prob_cols].values
+    all_preds = result_df['predicted_label'].values
+    all_labels = result_df['true_label'].values
+    return result_df, all_probs, all_preds, all_labels
 
 
 def override_val_exclusion(train_df, val_exclusion_set, exp_params):

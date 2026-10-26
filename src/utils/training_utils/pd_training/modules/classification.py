@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional, Sequence
 
 import torch.nn as nn
+import torch
 
 from ..batch import PDBatch
 from ..config import DataShape, EvalConfig, LossConfig, OptimConfig, SchedulerConfig
@@ -52,6 +53,8 @@ class PDClassificationModule(PDModuleBase):
                          sched_cfg=sched_cfg, eval_cfg=eval_cfg,
                          example_input_array=example_input_array)
         self.predict_subsets = None #on which subsets to compute predictions
+        self.predict_causal = False # predict_causal          # bool, default False
+        self.causal_max_cost = 200_000 #causal_max_cost        # e.g. 200_000; lower it if you hit OOM
         self.save_hyperparameters(ignore=["model", "example_input_array"])
 
         self.class_counts = counts.tolist()
@@ -137,31 +140,57 @@ class PDClassificationModule(PDModuleBase):
         return (callable(getattr(self.model, 'forward_subsets', None))
                 and getattr(self.model.classifier, 'modality_aware', False))
 
-    def _pack(self, outputs, b, present=None, tok_present=None):
-        token_logits, subject_logits = outputs if self.per_step else (None, outputs)
+    def _pack(self, outputs, b, present=None, tok_present=None, causal=False):
+        token_logits, subject_logits = outputs if (self.per_step or causal) else (None, outputs)
         probs, preds = probs_and_preds(subject_logits, self.num_classes)
         out = {"probs": probs.detach().cpu(),
                "preds": preds.detach().cpu(),
                "labels": b.labels.detach().cpu().flatten(),
                "subject_ids": b.subject_ids}
         if present is not None:
-            out["present"] = present.detach().cpu()     # (B,) subject has real crops in subset
-        if self.per_step:
+            out["present"] = present.detach().cpu()
+        if token_logits is not None:
             tok_probs, tok_preds = probs_and_preds(token_logits, self.num_classes)
             out.update(tok_probs=tok_probs.detach().cpu(),
-                    tok_preds=tok_preds.detach().cpu(),
-                    tok_seq_ids=b.seq_ids.detach().cpu(),
-                    tok_slot_ids=b.slot_ids.detach().cpu())
+                       tok_preds=tok_preds.detach().cpu(),
+                       tok_seq_ids=b.seq_ids.detach().cpu(),
+                       tok_slot_ids=b.slot_ids.detach().cpu())
             if tok_present is not None:
                 out["tok_present"] = tok_present.detach().cpu()
         return out
 
+    @staticmethod
+    def _last_token(seq_ids, slot_ids, B):
+        """Index of each subject's last token (max slot; ties -> later index, matching the
+        stable sort in forward_prefixes). Its prefix is the whole sequence."""
+        N = seq_ids.numel()
+        score = slot_ids.long() * N + torch.arange(N, device=seq_ids.device)
+        best = torch.full((B,), -1, dtype=torch.long, device=seq_ids.device)
+        best = best.scatter_reduce(0, seq_ids.long(), score, 'amax', include_self=True)
+        return best % N
+
+    def _predict_causal(self, b):
+        if not callable(getattr(self.model, 'forward_prefixes_subsets', None)):
+            raise ValueError('predict_causal needs a model with forward_prefixes_subsets')
+        args = b.model_args()                     # (frames, seq_ids, slot_ids, lengths)
+        seq_ids, slot_ids, lengths = args[1], args[2], args[3]
+        subsets = self.predict_subsets or [None]
+        outs, present, prefix_present = self.model.forward_prefixes_subsets(
+            *args, subsets=subsets, max_cost=self.causal_max_cost, **b.covariates())
+        last = self._last_token(seq_ids, slot_ids, lengths.size(0))
+        packed = {name: self._pack((tok, tok[last]), b, present[name],
+                                   prefix_present[name], causal=True)
+                  for name, tok in outs.items()}
+        return packed if self.predict_subsets else packed['all']
+
     def predict_step(self, batch, batch_idx):
         b = PDBatch.from_collate(batch)
-        if not self.predict_subsets:
-            return self._pack(self(*b.model_args(), **b.covariates()), b)
         if self.predict_subsets and not self._supports_subsets():
             raise ValueError('predict_subsets needs a model with forward_subsets and view_groups')
+        if self.predict_causal:
+            return self._predict_causal(b)
+        if not self.predict_subsets:
+            return self._pack(self(*b.model_args(), **b.covariates()), b)
         outs, present, tok_present = self.model.forward_subsets(
             *b.model_args(), subsets=self.predict_subsets,
             return_token_present=True, **b.covariates())
