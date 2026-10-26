@@ -28,10 +28,9 @@ from sklearn.metrics import check_scoring
 from src.utils.models import get_sklearn_model
 from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
 from src.utils.data_loading import questionnaires_to_keep
-from src.debug.PD_model_evaluation import  analyze_results
+from src.utils.evaluation import  analyze_results, plot_probability_trajectories
 from sklearn.inspection import permutation_importance
 from src.debug.PD_model_evaluation import tee_stdout
-from src.debug.PD_model_evaluation import plot_probability_trajectories
 
 params = {
 

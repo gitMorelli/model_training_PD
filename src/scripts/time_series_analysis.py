@@ -14,9 +14,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import norm
 
 from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
-from src.debug.PD_model_evaluation import  analyze_results
+from src.utils.evaluation import  analyze_results, plot_probability_trajectories, roc_auc_over_time
 from sklearn.inspection import permutation_importance
-from src.debug.PD_model_evaluation import tee_stdout, plot_probability_trajectories, roc_auc_over_time
+from src.debug.PD_model_evaluation import tee_stdout
 from src.scripts.t_on_representations import balance_data, reshape_features, mask_features, add_info_to_df
 
 
@@ -56,6 +56,10 @@ params = {
     #statistical analysis parameters
     'time_model': 'spline', #spline or quadratic
     'dof_spline': 4, #degrees of freedom for the spline model
+    'use_split': True, #if True it will use the split column in the statistical analysis, if False it will not use it
+    'min_time': -15, #minimum time to include in the analysis
+    'max_time': 5, #maximum time to include in the analysis
+    'type_of_analysis': 'compare_models', #'compare_steps', 'single_model', 'compare_models'
 }
 
 params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths('PD', 
@@ -116,8 +120,34 @@ def main():
         #print([col for col in df.columns]) #-> ['unique_id', 'slot', 'true_label', 'predicted_label', 'probability_0', 'probability_1', 'case_dt']
         params['signal_column']='probability_1'
         properties = None
+        '''cols = df.columns
+        for c in cols:
+            print(c, df[c].dtype)'''
+        #get the unique values of the 'q' column
+        unique_q = df['q'].unique()
+        print("Unique values of q:", unique_q)
+        #rename the q column to slot
+        df = df.rename(columns={'q': 'slot'})
+        df['slot']-=1
         df = force_case_dt(df, time_df, params) #adding the case_dt to the df
-    
+
+    df['set'] = df['unique_id'].str.split('_').str[1]
+    #convert the set column to int
+    df['set'] = df['set'].astype(int)
+
+    min_str='smallest'
+    max_str='largest'
+    min_time=params.get('min_time', None)
+    max_time=params.get('max_time', None)
+    if min_time is not None:
+        min_str = f"{int(min_time)}"
+        df = df[df['case_dt'] > min_time]
+        print(f"Filtering df to only include rows with case_dt > {min_time}. New length: {len(df)}")
+    if max_time is not None:
+        max_str = f"{int(max_time)}"
+        df = df[df['case_dt'] < max_time]
+        print(f"Filtering df to only include rows with case_dt < {max_time}. New length: {len(df)}")
+
     print(EXPERIMENT)
     if EXPERIMENT == "time_series_comparison":
         compare_signals(df, signal_columns=properties, n_steps=10, step_is_years=False,
@@ -145,19 +175,34 @@ def main():
         print(f"Min value of {params['signal_column']}: {min_value}")
         print(f"Max value of {params['signal_column']}: {max_value}")
         return'''
-        if params['censor_time'] == 'pre_diagnosis':
-            print("Censoring time to pre-diagnosis, excluding case_dt>0")
-            df = df[df['case_dt'] <= 0]
         import src.utils.longitudinal_analysis as la
         plot_save_path = os.path.dirname(params['input_file'])
         dof_spline = params['dof_spline']
-        title=f"slot_results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}"
+        #title=f"slot_results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}"
+        title=f"{params['type_of_analysis']}_{min_str}_{max_str}_{params['time_model']}_{dof_spline}"
+        #title=f"model_comparison"
         log_path = os.path.join(plot_save_path, f"{title}.txt") #copy prints also to a log file in the checkpoint folder
         with tee_stdout(log_path):
             plot_save_path = os.path.join(plot_save_path, f"{title}.png")
-            la.GLMM.run_analysis(df, columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label", "split": "slot"}, 
+            columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label",
+                     "set": "set"}
+            if params['use_split']:
+                columns["split"] = "slot"
+            if params['type_of_analysis'] == 'single_model':
+                la.GLMM.run_analysis(df, columns=columns, 
                                 logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline, 
-                                time_model=params['time_model'], run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200)
+                                time_model=params['time_model'], run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200,
+                                model_split=params['use_split'], use_baseline=True)
+            elif params['type_of_analysis'] == 'compare_models':
+                la.GLMM.compare_models(df, columns=columns,
+                                    logit=True, eps=1e-4, path=plot_save_path, baseline_quantile=0.1, nested_comparison=False)
+            elif params['type_of_analysis'] == 'compare_steps':
+                summary, scores, curves = la.GLMM.compare_range(
+                    df, columns=columns, logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline,
+                    train_intervals=[(None, 0), (None, None), (-12, 0),(-10,10)],   # pre-diagnosis, full axis, last 12 years
+                    eval_interval=(-12, 0),
+                    time_model="spline", model_split=True, matched_sets=False,
+                )
 
 
 # ----------------------------------------------------------------------------

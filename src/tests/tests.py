@@ -17,7 +17,7 @@ import time
 
 
 from src.utils.data_loading import pre_load_grid_data,prepare_pre_training
-from src.debug.PD_model_evaluation import plot_probability_trajectories
+from src.utils.evaluation import plot_probability_trajectories, roc_auc_over_time
 
 def test_read_json(tar_path="/mnt/beegfs01/scratch/a_morelli/extraction/final/data/id_A0C5I2D5.tar"):
 
@@ -749,7 +749,6 @@ def inspect_fold_per_step():
         print(f"Rows where 'case_dt' is NaN after merging with metadata:\n{nan_case_dt_rows}")
 
 def analyze_per_step_results():
-    from src.debug.PD_model_evaluation import plot_probability_trajectories_2, plot_probability_trajectories
     load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/per_step_predictions.csv"
     #load_path = "/home/a_morelli/models/model_training_logs/PD/resnet18_model_results/checkpoints/v_36/pre_diagnosis/per_step_predictions.csv"
     predictions = pd.read_csv(load_path)
@@ -846,7 +845,7 @@ def inspect_statistics_PD():
 
 def open_exp_parameters():
     path = "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2/exp_params.pkl"
-    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_6/exp_params.pkl"
+    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_22/exp_params.pkl"
     #load the exp_params.pkl file and print the keys and values
     with open(path, "rb") as f:
         exp_params = pickle.load(f)
@@ -856,7 +855,6 @@ def open_exp_parameters():
     assert 1==0
 
 def plot_roc_auc_over_time():
-    from src.debug.PD_model_evaluation import roc_auc_over_time
     load_path = "/home/a_morelli/models/model_training_logs/PD/feature_extraction/17092026/trained_models/xgb/v_13/results_per_step.csv"
     results_per_step = pd.read_csv(load_path)
     save_path = "/home/a_morelli/vscode_projects/model_training/results/tests/roc"
@@ -1365,4 +1363,4 @@ def prepare_case_dt_datasets():
     return
 
 if __name__ == "__main__":
-    class_distrib_per_questionnaire(force=True)
+    open_exp_parameters()

@@ -6,14 +6,14 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=24             # Number of CPU cores per task
-#SBATCH --mem=86G                      # Job memory request
+#SBATCH --cpus-per-task=16             # Number of CPU cores per task
+#SBATCH --mem=48G                      # Job memory request
 #SBATCH --time=24:00:00                # Time limit hrs:min:sec
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
-#--gres=gpu:1
-#SBATCH --gres=gpu:h100:1
+#SBATCH--gres=gpu:1
+#--gres=gpu:a100:1
 #SBATCH --exclude=gpu01,gpu02,gpu04
 
 # --- Environment Setup ---
@@ -42,7 +42,7 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.train_PD_model \
-    --num_workers 24
+    --num_workers 16
 echo "PYTORCH_CUDA_ALLOC_CONF=$PYTORCH_CUDA_ALLOC_CONF"
 nvidia-smi --query-gpu=name,memory.total --format=csv
 

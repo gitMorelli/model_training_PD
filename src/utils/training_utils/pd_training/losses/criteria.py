@@ -96,6 +96,7 @@ class SilentPositiveLoss(nn.Module):
     def __init__(self, pi: float, learnable_pi: bool = False,
                  pos_weight: Optional[torch.Tensor] = None, eps: float = 1e-6):
         super().__init__()
+        self.binary = True
         if not 0.0 < pi < 1.0:
             raise ValueError(f"pi must be in (0, 1), got {pi}")
         logit_pi = torch.tensor(math.log(pi / (1.0 - pi)))

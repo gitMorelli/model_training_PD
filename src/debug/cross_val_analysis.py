@@ -49,7 +49,8 @@ from src.utils.image_processing import ResizeLongestSide, get_augmentation_trans
 from src.utils.training_utils import BestMetricTracker, ModelPDGrouped, ModelPDClassification, ClearCache
 from src.utils.model_utils import SequenceQuestionnaireModel, SetQuestionnaireModel
 from src.scripts.train_PD_model import model_initialization
-from src.debug.PD_model_evaluation import analyze_results, tee_stdout,return_model_info
+from src.debug.PD_model_evaluation import tee_stdout,return_model_info
+from src.utils.evaluation import analyze_results
 
 SOURCE_PATH = "/home/a_morelli/models/model_training_logs/PD/cross_val"
 CHECKPOINT_PATH = os.path.join(SOURCE_PATH, "resnet18_model_results/checkpoints")

@@ -1,107 +1,105 @@
 src.utils.training_utils.pd_training.callbacks.diagnostics
-
-================================================================================
->>> [LR SCALING] Scaling learning rates with effective batch size 64 (base 256): lr_backbone=2.5e-05, lr_classifier_head=0.00025
-================================================================================
-
 Checkpoint to load: best-13-002072-0.3640.ckpt
-Force case_dt: True
-Inconsistent case_dt values found for the following group-slot combinations:
-Comparing the time distribution within each wave (slot):
-             count      mean        std  ...       50%       75%        max
-true_label                               ...                               
-0           7467.0 -8.645668   9.773472  ... -8.856947 -1.753593  21.481177
-1            942.0 -7.918835  10.031152  ... -8.024641 -0.923340  20.043806
-
-[2 rows x 8 columns]
-true_label          0          1
-slot                            
-0          -18.591048 -18.316222
-1          -17.186226 -16.632751
-2          -15.638576 -14.896099
-3          -13.854883 -13.383256
-4          -12.010140 -11.790620
-5           -9.087317  -8.378190
-6           -7.503899  -6.812229
-7           -5.044909  -4.209164
-8           -2.185502  -1.214982
-9            0.564904   1.567803
-10           2.546807   3.699343
-11           5.342859   6.473952
-12           8.189824   8.543190
-Slot column properties:
-count    1030.000000
-mean        8.164078
-std         3.160629
-min         1.000000
-25%         6.000000
-50%         9.000000
-75%        11.000000
-max        13.000000
-Name: slot, dtype: float64
-Cross-tabulation of slot and true_label:
-true_label         0         1
-slot                          
-0           0.093344  0.101911
-1           0.102585  0.094480
-2           0.092139  0.090234
-3           0.069640  0.067941
-4           0.085844  0.089172
-5           0.104326  0.102972
-6           0.098031  0.095541
-7           0.081023  0.077495
-8           0.079416  0.083864
-9           0.077273  0.079618
-10          0.056917  0.057325
-11          0.042186  0.038217
-12          0.017276  0.021231
-      count       mean       std  ...        50%        75%        max
-slot                              ...                                 
-0     793.0 -18.557778  6.968091  ... -18.874743 -13.960301  -0.788501
-1     855.0 -17.128613  6.762839  ... -17.210130 -12.458590   0.290212
-2     773.0 -15.556932  6.634744  ... -15.622177 -10.959617   1.875428
-3     584.0 -13.803198  6.773713  ... -13.459274  -9.022587   3.540041
-4     725.0 -11.984706  6.543104  ... -12.202601  -7.676934   4.038330
-5     876.0  -9.008795  6.365667  ...  -9.039014  -4.520192   6.480493
-6     822.0  -7.428169  6.433236  ...  -7.574264  -2.958248   8.449008
-7     678.0  -4.954924  5.795492  ...  -4.878850  -0.938398   8.621492
-8     672.0  -2.071408  6.106548  ...  -1.982204   1.998631  14.015058
-9     652.0   0.680268  6.059162  ...  -0.651608   4.974675  18.477755
-10    479.0   2.676738  5.557271  ...   0.325804   6.869268  17.968515
-11    351.0   5.458869  5.484757  ...   2.891170  10.182067  21.481177
-12    149.0   8.237256  4.279658  ...   6.573580  12.104038  17.117043
-
-[13 rows x 8 columns]
-Unique values of slot column: [ 0  1  2  5  6  7  8  9 10 11  4  3 12]
-true_label  n_class_0  n_class_1  total  pct_class_1
-slot                                                
-0                 697         96    793     0.121059
-1                 766         89    855     0.104094
-2                 688         85    773     0.109961
-3                 520         64    584     0.109589
-4                 641         84    725     0.115862
-5                 779         97    876     0.110731
-6                 732         90    822     0.109489
-7                 605         73    678     0.107670
-8                 593         79    672     0.117560
-9                 577         75    652     0.115031
-10                425         54    479     0.112735
-11                315         36    351     0.102564
-12                129         20    149     0.134228
+Experiment Parameters:
+problem: PD
+debug: False
+debugging_callbacks: True
+fast_dev_run: False
+pass_example_input_array: False
+grouped: False
+pre_training: False
+bce_aux_weight: 0.3
+synthetic: None
+synthetic_proportions: [0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333]
+selected_properties: []
+global_fusion: late
+merge_shards: False
+data_modality: ['X_window', 'X_window', 'X_window', 'digit_window', 'digit_window', 'text_window']
+num_tiles: 6
+use_grid: True
+label_smoothing: 0.0
+use_balanced_weights: True
+loss_name: standard
+loss_kwargs: {'pi': 0.03, 'learnable_pi': False}
+balancing_factor: 10
+balanced_data: False
+balance_validation: False
+majority_class_id: 0
+threshold_num: 1
+num_classes: 1
+filter_missing: all
+censor_time: all_matched
+filter_modality: digit
+model: convnext_tiny
+custom_pre_trained_weights: None
+load_full_model: False
+pretrained: True
+norm_mu: [0.459]
+norm_std: [0.226]
+model_structure: ModularModel
+val_check_interval: None
+align_train_metrics_to_val: False
+min_window_steps: 50
+model_parameters: {'use_view_groups': True, 'modalities': None, 'view_agg': 'attention', 'view_kwargs': {'intra': 'attention', 'inter': 'attention', 'modality_dropout': 0.1, 'view_dropout': 0.1, 'dropout_level': 'subject', 'view_pos': True, 'modality_emb': True, 'modality_norm': True}, 'd_model': 128, 'n_heads': 4, 'n_layers': 1, 'ff_mult': 2, 'dropout': 0.4, 'count_norm': 2, 'use_spread': False, 'use_count_feature': False, 'use_attention_pool': False, 'seq_model': 'causal_gru', 'bidirectional': True}
+custom_transform: None
+input_size: 224
+apply_augmentation: None
+invert_color: True
+to_grayscale: True
+image_pixel_space_augmentations: None
+lora_tuning: False
+use_opt_groups: True
+lr_decay: 0.5
+lr_backbone: 0.0001
+lr_classifier_head: 0.001
+lr_scheduling: two_stage
+stage1_fraction: 0.05
+stage1_lr_names: ['lr_head']
+batch_size: 16
+scale_lr_with_batch_size: False
+num_epochs: 60
+max_steps: -1
+patience: 10
+stopping_metric: val/pr_auc
+eta_min_cosine: 1e-06
+weight_decay: 0.01
+warmup_fraction: 0.05
+layers_to_unfreeze: ['classifier', 'layer4']
+seed: 42
+accumulate_grad_batches: 4
+precision: bf16-mixed
+gradient_clip_val: 1.0
+prefetch_factor: 4
+list_of_ids_paths: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_22/PD_training_set_20_07_26.parquet
+data_folder: /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26
+grid_dict_path: /home/a_morelli/datasets/id_lists/h5/PD_data_h5
+class_col: diag_park_final1_quest
+num_channels: 1
+huggingface_transform: False
+CHECKPOINT_PATH: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints
+OUTPUT_PATH: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results
+SOURCE_PATH: /home/a_morelli/models/model_training_logs/PD/
+timestamp: 2026-10-23 18:59:57
+best_epoch: 30
+best_val_loss: 1.253444790840149
+best_val_acc: 0.8854368925094604
+best_train_acc: 0.7096354365348816
+current_version: 22
+optimization_groups: [{'names': ['vision_model.features.0'], 'lr': 6.25e-06, 'lr_name': 'lr_stem'}, {'names': ['vision_model.features.1'], 'lr': 1.25e-05, 'lr_name': 'lr_1'}, {'names': ['vision_model.features.2', 'vision_model.features.3'], 'lr': 2.5e-05, 'lr_name': 'lr_2'}, {'names': ['vision_model.features.4', 'vision_model.features.5'], 'lr': 5e-05, 'lr_name': 'lr_3'}, {'names': ['vision_model.features.6', 'vision_model.features.7', 'vision_model.final_norm'], 'lr': 0.0001, 'lr_name': 'lr_4'}, {'names': ['classifier'], 'lr': 0.001, 'lr_name': 'lr_head'}]
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 6166244
+Job ID: 6193523
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n17
+Nodelist: n18
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-10-20 16:34:11
-Job ended at:   2026-10-20 16:35:25
-Job Wall-clock time: 00:01:14
-CPU Utilized: 00:00:18
-CPU Efficiency: 6.08% of 00:04:56 core-walltime
-Memory Utilized: 564.99 MB
-Memory Efficiency: 3.45% of 16.00 GB
+Job started at: 2026-10-24 11:56:52
+Job ended at:   2026-10-24 11:57:13
+Job Wall-clock time: 00:00:21
+CPU Utilized: 00:00:12
+CPU Efficiency: 14.29% of 00:01:24 core-walltime
+Memory Utilized: 662.60 MB
+Memory Efficiency: 4.04% of 16.00 GB
