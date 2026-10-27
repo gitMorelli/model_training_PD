@@ -9,7 +9,7 @@ from .helpers import _adj_col, simulate_data, _slot_weights, _group_slot_weights
 from .helpers import _in_interval, _estimable_slots, _heldout_loglik, adjustment_spec
 from .fit import fit_mixed, fit_full_and_null, _fit
 from .changepoint import changepoint_profile, cluster_bootstrap_tau
-from .tests import lrt, permutation_lrt
+from .tests import lrt, lrt_re, permutation_lrt
 from .plot import plot_results, _plot_comparison, _plot_range
 from .difference import difference_curve, curves_by_value
 
@@ -164,7 +164,7 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
 
 def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="model_comparison.png",
                     baseline_quantile=0.05, max_time=None, n_sim=10000, matched_sets=(False, True), nested_comparison=False,
-                    models=None, n_form="log"):
+                    models=None, n_form="log", re_center="mean"):
     """Fit several models on the SAME data and compare them.
 
     logit              model logit(probability) instead of the raw probability
@@ -173,8 +173,15 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
     max_time           keep only observations with time < max_time (0 = pre-diagnosis only);
                        None keeps the full time axis
 
-    matched_sets       which random-effect structures to run: False = subject only,
-                       True = subject nested in matched set (needs a "set" column in `columns`)
+    matched_sets       which random-effect structures to run: False = subject only (correlated
+                       intercept and slope), True = subject nested in matched set (needs a "set"
+                       column in `columns`) PLUS its fair baseline: the same subject part without
+                       the set ("_uncorr" models; statsmodels cannot keep the intercept-slope
+                       correlation in the matched model, so the baseline drops it too)
+    re_center          time origin of the random slope: "mean" (default), a number, or None
+                       (= diagnosis). With the mean, dropping the correlation costs little fit and
+                       AIC is comparable across random-effect structures; from diagnosis the
+                       uncorrelated models fit much worse for that reason alone.
     models             names from the spec list below to run (default: all whose columns exist)
     n_form             form of the n_quest term in the n_quest models: "log", "linear", "cat"
     nested_comparison  LRTs between nested pairs (e.g. n_quest x class vs additive n_quest)
@@ -186,20 +193,31 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
     SPLINE_4 = f"cr(time, df=4, constraints='center')"
     SPLINE_8 = f"cr(time, df=8, constraints='center')"
     QUADRATIC = "(center(time) + I(center(time)**2))"
-    specs = {                                   # name -> (time term, adjustment, matched sets)
-        "spline_4":                 (SPLINE_4, None, False),
-        "spline_4_w_slot":          (SPLINE_4, "slot", False),
-        "spline_4_w_nq_add":        (SPLINE_4, "n_quest_add", False),
-        "spline_4_w_nq_int":        (SPLINE_4, "n_quest_int", False),
-        "spline_4_w_match":         (SPLINE_4, None, True),
-        "spline_4_w_slot_match":    (SPLINE_4, "slot", True),
-        "spline_4_w_nq_add_match":  (SPLINE_4, "n_quest_add", True),
-        "spline_4_w_nq_int_match":  (SPLINE_4, "n_quest_int", True),
-        "spline_8":                 (SPLINE_8, None, False),
-        "spline_8_w_match":         (SPLINE_8, None, True),
-        "quadratic_w_slot":         (QUADRATIC, "slot", False),
-        "quadratic":                (QUADRATIC, None, False),
+    specs = {                         # name -> (time term, adjustment, random-effect structure)
+        "spline_4":                 (SPLINE_4, None, "subject"),
+        "spline_4_w_slot":          (SPLINE_4, "slot", "subject"),
+        "spline_4_w_nq_add":        (SPLINE_4, "n_quest_add", "subject"),
+        "spline_4_w_nq_int":        (SPLINE_4, "n_quest_int", "subject"),
+        "spline_4_uncorr":          (SPLINE_4, None, "subject_uncorr"),
+        "spline_4_w_slot_uncorr":   (SPLINE_4, "slot", "subject_uncorr"),
+        "spline_4_w_nq_add_uncorr": (SPLINE_4, "n_quest_add", "subject_uncorr"),
+        "spline_4_w_nq_int_uncorr": (SPLINE_4, "n_quest_int", "subject_uncorr"),
+        "spline_4_w_match":         (SPLINE_4, None, "set"),
+        "spline_4_w_slot_match":    (SPLINE_4, "slot", "set"),
+        "spline_4_w_nq_add_match":  (SPLINE_4, "n_quest_add", "set"),
+        "spline_4_w_nq_int_match":  (SPLINE_4, "n_quest_int", "set"),
+        "spline_8":                 (SPLINE_8, None, "subject"),
+        "spline_8_uncorr":          (SPLINE_8, None, "subject_uncorr"),
+        "spline_8_w_match":         (SPLINE_8, None, "set"),
+        "quadratic_w_slot":         (QUADRATIC, "slot", "subject"),
+        "quadratic":                (QUADRATIC, None, "subject"),
     }
+    # same fixed effects, different random effects: (correlated subject, uncorrelated subject, set)
+    re_triples = [("spline_4", "spline_4_uncorr", "spline_4_w_match"),
+                  ("spline_4_w_slot", "spline_4_w_slot_uncorr", "spline_4_w_slot_match"),
+                  ("spline_4_w_nq_add", "spline_4_w_nq_add_uncorr", "spline_4_w_nq_add_match"),
+                  ("spline_4_w_nq_int", "spline_4_w_nq_int_uncorr", "spline_4_w_nq_int_match"),
+                  ("spline_8", "spline_8_uncorr", "spline_8_w_match")]
     nested_pairs = [("spline_4_w_slot", "spline_4"),               # (bigger, smaller) model
                     ("spline_4_w_nq_add", "spline_4"),
                     ("spline_4_w_nq_int", "spline_4_w_nq_add"),
@@ -229,8 +247,10 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
         unknown = set(models) - set(specs)
         assert not unknown, f"unknown models {unknown}; choose from {list(specs)}"
         specs = {k: specs[k] for k in models}
-    skipped = {k: _adj_col(a) for k, (_, a, ms) in specs.items()
-               if (_adj_col(a) and _adj_col(a) not in df.columns) or (ms and ms not in matched_sets)}
+    wanted = {"subject": False in matched_sets, "subject_uncorr": True in matched_sets,
+              "set": True in matched_sets}
+    skipped = {k: _adj_col(a) for k, (_, a, re) in specs.items()
+               if (_adj_col(a) and _adj_col(a) not in df.columns) or not wanted[re]}
     specs = {k: v for k, v in specs.items() if k not in skipped}
     if skipped:
         print("Skipped (column missing or matched-set structure not requested): " + ", ".join(skipped) + "\n")
@@ -241,13 +261,14 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
     # --- fits -----------------------------------------------------------------
     rows, fits, curves, ml_fits = [], {}, {}, {}
     for base in specs:
-        tt, adjust, ms = specs[base]
-        name = base + (" + set" if ms else "")
+        tt, adjust, re = specs[base]
+        name = base + (" + set" if re == "set" else "")
         adj, _, _ = adjustment_spec(adjust, n_form)
         print(f"Fitting {name} ...")
-        full = _fit(f"y ~ {tt} * C(group){adj}", df, matched_sets=ms)          # ML: AIC/BIC/LRT
-        no_trend = _fit(f"y ~ {tt} + C(group){adj}", df, matched_sets=ms)      # gap constant in time
-        full_reml = _fit(f"y ~ {tt} * C(group){adj}", df, reml=True, matched_sets=ms)
+        kw = dict(re_structure=re, re_center=re_center)
+        full = _fit(f"y ~ {tt} * C(group){adj}", df, **kw)                     # ML: AIC/BIC/LRT
+        no_trend = _fit(f"y ~ {tt} + C(group){adj}", df, **kw)                 # gap constant in time
+        full_reml = _fit(f"y ~ {tt} * C(group){adj}", df, reml=True, **kw)
 
         k, aic, bic = _information_criteria(full)
         stat, dof, p = lrt(full, no_trend)
@@ -257,12 +278,27 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
         fits[name] = (full_reml, adjust)
         ml_fits[base] = full
         curves[name] = {"gap": gap, "growth": growth}
-        rows.append(dict(model=name, set_var=float(full.cov_re.iloc[0, 0]) if ms else np.nan,
+        rows.append(dict(model=name, set_var=float(full.cov_re.iloc[0, 0]) if re == "set" else np.nan,
                          n_params=k, loglik=full.llf, AIC=aic, BIC=bic,
                          trend_chi2=stat, trend_df=dof, trend_p=p,
                          onset_gap=_first_onset(gap), onset_growth=_first_onset(growth)))
 
     table = pd.DataFrame(rows).set_index("model")
+    re_center_value = next(iter(ml_fits.values())).re_center if ml_fits else np.nan
+
+    # --- random-effect tests (same fixed effects; reuses the ML fits) -----------------------
+    re_tests = []
+    for corr, unc, mat in re_triples:
+        if mat in ml_fits and unc in ml_fits:
+            stat, dof, p = lrt_re(ml_fits[mat], ml_fits[unc], boundary=True)
+            re_tests.append(dict(comparison=f"{mat} vs {unc}", tests="matched-set variance",
+                                 chi2=stat, df=dof, p=p))
+        if corr in ml_fits and unc in ml_fits:
+            stat, dof, p = lrt_re(ml_fits[corr], ml_fits[unc])
+            re_tests.append(dict(comparison=f"{corr} vs {unc}", tests="intercept-slope correlation",
+                                 chi2=stat, df=dof, p=p))
+    re_tests = pd.DataFrame(re_tests, columns=["comparison", "tests", "chi2", "df", "p"]
+                            ).set_index("comparison")
     table["dAIC"] = table["AIC"] - table["AIC"].min()
     table["dBIC"] = table["BIC"] - table["BIC"].min()
 
@@ -280,9 +316,16 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
     pd.set_option("display.width", 160)
     print("\nInformation criteria (ML fits, lower = better; dAIC < 2 ~ tie)")
     print(table[["n_params", "loglik", "AIC", "dAIC", "BIC", "dBIC"]].round(1).to_string())
+    print(f"(random slope measured from t = {re_center_value:.2f})")
     if True in matched_sets and table["set_var"].notna().any():
         print("\nMatched-set variance (ML; near 0 = the sets add nothing)")
         print(table["set_var"].dropna().round(4).to_string())
+    if len(re_tests):
+        print("\nRandom-effect tests (same fixed effects)")
+        print("  matched-set variance: '+ set' vs '_uncorr' differ ONLY by the set variance;")
+        print("                        p is boundary-corrected (half the chi2(1) p-value)")
+        print("  intercept-slope correlation: what the matched models give up (depends on re_center)")
+        print(re_tests.round(4).to_string())
     print("\nDoes the class gap change over time?  (LRT: full model vs gap constant in time)")
     print(table[["trend_chi2", "trend_df", "trend_p"]].round(4).to_string())
     if nested_comparison:
@@ -299,12 +342,12 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
     if path:
         _plot_comparison(df, fits, curves, groups, table, baseline_time, ref_split, path)
         print("\nSaved plot:", path)
-    return table, curves, nested
+    return table, curves, nested, re_tests
 
 def compare_range(raw, train_intervals, eval_interval, columns=preset_columns, time_model="spline",
                   spline_df=4, model_split=True, matched_sets=False, logit=True, eps=1e-4,
                   n_folds=5, seed=0, baseline_quantile=0.05, n_sim=10000, min_slot_obs=5,
-                  path="range_comparison.png", adjust="auto", n_form="log"):
+                  path="range_comparison.png", adjust="auto", n_form="log", re_center="mean"):
     """Train ONE model on several time intervals and compare them on the same evaluation interval.
 
     train_intervals  list of (lo, hi): train on observations with lo <= time < hi (None = open end)
@@ -313,6 +356,8 @@ def compare_range(raw, train_intervals, eval_interval, columns=preset_columns, t
     adjust           None, "slot", "n_quest_add" or "n_quest_int"; "auto" = "slot" if model_split
     n_form           form of the n_quest term: "log", "linear" or "cat"
     matched_sets     True = subjects nested in matched sets (needs a "set" column)
+    re_center        time origin of the random slope ("mean" of each training set, a number, or
+                     None = diagnosis); the held-out likelihood uses the same origin
 
     Scoring is cross-validated: participants (or whole matched sets) are split into `n_folds`
     folds; each version is fitted on the other folds (restricted to its training interval) and
@@ -379,7 +424,7 @@ def compare_range(raw, train_intervals, eval_interval, columns=preset_columns, t
             n_dropped += int((~test[restrict_levels].isin(common)).sum())
             test = test[test[restrict_levels].isin(common)]
         for lab, (tr, _) in zip(labels, parts):
-            res = _fit(formula, tr, matched_sets=matched_sets)
+            res = _fit(formula, tr, matched_sets=matched_sets, re_center=re_center)
             ll, sse = _heldout_loglik(res, test, matched_sets)
             scores.append(dict(train=lab, fold=k, n_eval=len(test), ll=ll, sse=sse))
         print(f"fold {k + 1}/{n_folds} done")
@@ -401,7 +446,7 @@ def compare_range(raw, train_intervals, eval_interval, columns=preset_columns, t
     fits = {}
     for lab, iv in zip(labels, train_intervals):
         tr, ok = restrict(df, iv)
-        fits[lab] = (_fit(formula, tr, reml=True, matched_sets=matched_sets), ok, len(tr))
+        fits[lab] = (_fit(formula, tr, reml=True, matched_sets=matched_sets, re_center=re_center), ok, len(tr))
     ev = df[_in_interval(df, eval_interval)]
     if restrict_levels:
         ev = ev[ev[restrict_levels].isin(set.intersection(*[ok for _, ok, _ in fits.values()]))]
