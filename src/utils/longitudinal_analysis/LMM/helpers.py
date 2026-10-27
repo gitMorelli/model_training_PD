@@ -184,19 +184,25 @@ def _heldout_loglik(res, test, matched_sets):
  
     X = np.asarray(patsy.build_design_matrices([res.design_info], test)[0])
     mu = X @ res.fe_params.values
-    y, t, s2 = test["y"].values, test["time"].values, res.scale
-    if matched_sets:
+    structure = getattr(res, "re_structure", "set" if matched_sets else "subject")
+    center = getattr(res, "re_center", 0.0)        # time origin of the random slope
+    y, t, s2 = test["y"].values, test["time"].values - center, res.scale
+    if structure == "set":
         vc = dict(zip(res.model.exog_vc.names, res.vcomp))
         v_set, v_int, v_sl = float(np.asarray(res.cov_re)[0, 0]), vc["subj_int"], vc["subj_slope"]
         subj = test["subject"].to_numpy(dtype=object)
         units = test.groupby("set").indices
+    elif structure == "subject_uncorr":
+        vc = dict(zip(res.model.exog_vc.names, res.vcomp))
+        G = np.diag([float(np.asarray(res.cov_re)[0, 0]), vc["subj_slope"]])
+        units = test.groupby("subject").indices
     else:
         G = np.asarray(res.cov_re)
         units = test.groupby("subject").indices
     ll = 0.0
     for idx in units.values():
         ti = t[idx]
-        if matched_sets:
+        if structure == "set":
             same = subj[idx][:, None] == subj[idx][None, :]
             C = v_set + same * (v_int + v_sl * np.outer(ti, ti))
         else:
