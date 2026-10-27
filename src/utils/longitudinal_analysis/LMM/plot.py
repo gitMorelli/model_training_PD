@@ -1,12 +1,15 @@
 import numpy as np
-from .helpers import _population_curve, _slot_weights, significant_intervals,_interval_label
+from .helpers import _population_curve, _slot_weights, significant_intervals, _interval_label, _adj_col
 import pandas as pd
 
 def plot_results(df, full, curve, groups, profile=None, path="results.png",
-                 model_split=False, show_binned=True, n_bins=15):
+                 model_split=False, show_binned=True, n_bins=15, by_value=None):
+    """by_value: optional {value: curve} from curves_by_value (gap at fixed n_quest), drawn in
+    an extra panel."""
     import matplotlib.pyplot as plt
 
-    ncols = 2 + (profile is not None) + model_split
+    col = _adj_col(model_split)
+    ncols = 2 + (profile is not None) + bool(col) + bool(by_value)
     fig, ax = plt.subplots(1, ncols, figsize=(5.5 * ncols, 4.5))
     colors = dict(zip(groups, ["tab:blue", "tab:orange"]))
     tgrid = curve["time"].values
@@ -23,7 +26,7 @@ def plot_results(df, full, curve, groups, profile=None, path="results.png",
             ax[0].plot(b["time"].mean(), b["y"].mean(), "o", color=colors[g],
                        mec="k", ms=5, zorder=5)
 
-    subtitle = "\n(averaged over slots, weighted by P(slot | t))" if model_split else ""
+    subtitle = f"\n(averaged over {col}, weighted by P({col} | t))" if col else ""
     ax[0].set(title="Population trajectories" + subtitle, xlabel="time", ylabel="y")
     ax[0].legend(title="class")
 
@@ -43,27 +46,50 @@ def plot_results(df, full, curve, groups, profile=None, path="results.png",
         ax[2].plot(profile["tau"], profile["llf"], "o-", ms=3)
         ax[2].set(title="Change-point profile likelihood", xlabel="τ", ylabel="log-likelihood")
 
-    if model_split:
-        plot_slot_mix(ax[-1], df, tgrid, by_group=True)   # dashed lines = cases' mix
+    if by_value:
+        plot_curves_by_value(ax[2 + (profile is not None)], by_value, col)
+    if col:
+        plot_adjustment_mix(ax[-1], df, tgrid, col, by_group=True)   # dashed lines = cases' mix
 
     fig.tight_layout()
     fig.savefig(path, dpi=130)
     return path
 
-def plot_slot_mix(ax, df, tgrid, bw=None, by_group=False):
-    """Stacked area of P(slot | t): shows which questionnaires the marginal curve averages over.
-    by_group=True draws the case mix as lines on top of the pooled areas."""
-    slots, W = _slot_weights(df, tgrid, bw=bw)
-    ax.stackplot(tgrid, W.T, labels=[str(k) for k in slots], alpha=0.8)
+def plot_adjustment_mix(ax, df, tgrid, col="split", bw=None, by_group=False):
+    """Stacked area of P(col | t): shows which slots / numbers of questionnaires the marginal
+    curve averages over. by_group=True draws the case mix as lines on top of the pooled areas."""
+    vals, W = _slot_weights(df, tgrid, bw=bw, col=col)
+    ax.stackplot(tgrid, W.T, labels=[str(k) for k in vals], alpha=0.8)
     if by_group:
         groups = sorted(df["group"].unique())
-        _, Wc = _slot_weights(df[df["group"] == groups[1]], tgrid, bw=bw, slots=slots)
+        _, Wc = _slot_weights(df[df["group"] == groups[1]], tgrid, bw=bw, slots=vals, col=col)
         for c in np.cumsum(Wc, axis=1).T[:-1]:
             ax.plot(tgrid, c, color="k", lw=0.8, ls="--")
-    ax.set(xlim=(tgrid.min(), tgrid.max()), ylim=(0, 1), xlabel="time", ylabel="P(slot | t)",
-           title="Slot mix used for averaging" + ("\n(dashed: cases only)" if by_group else ""))
-    ax.legend(title="slot", fontsize=7, ncol=2, frameon=False, loc="center left",
+    ax.set(xlim=(tgrid.min(), tgrid.max()), ylim=(0, 1), xlabel="time", ylabel=f"P({col} | t)",
+           title=f"Mix of {col} used for averaging" + ("\n(dashed: cases only)" if by_group else ""))
+    ax.legend(title=col, fontsize=7, ncol=2, frameon=False, loc="center left",
               bbox_to_anchor=(1.0, 0.5))
+
+
+def plot_slot_mix(ax, df, tgrid, bw=None, by_group=False):
+    return plot_adjustment_mix(ax, df, tgrid, "split", bw, by_group)
+
+
+def plot_curves_by_value(ax, curves, col="n_quest", cmap="viridis"):
+    """Gap at fixed values of the adjustment column. Thin line = estimate, thick = simultaneous
+    band excludes 0, dashed = simultaneous band. Each curve only spans times where that value
+    is observed."""
+    import matplotlib.pyplot as plt
+    colors = plt.get_cmap(cmap)(np.linspace(0.1, 0.85, max(len(curves), 1)))
+    for (v, cv), c in zip(curves.items(), colors):
+        ax.plot(cv["time"], cv["delta"], color=c, lw=1.2, label=f"{col} = {v}")
+        ax.plot(cv["time"], cv["delta"].where(cv["significant"]), color=c, lw=3.5)
+        ax.plot(cv["time"], cv["sim_lo"], color=c, lw=0.7, ls="--")
+        ax.plot(cv["time"], cv["sim_hi"], color=c, lw=0.7, ls="--")
+    ax.axhline(0, color="k", ls=":", lw=1)
+    ax.set(xlabel="time", ylabel="Δ(t)",
+           title=f"Gap at fixed {col}\n(thick: simultaneous band excludes 0)")
+    ax.legend(fontsize=8, frameon=False)
 
 def _plot_comparison(df, fits, curves, groups, table, baseline_time, ref_split, path, n_bins=15):
     """One row per model; columns: trajectories | gap | growth of the gap since baseline."""
@@ -76,13 +102,13 @@ def _plot_comparison(df, fits, curves, groups, table, baseline_time, ref_split, 
                            squeeze=False)
     bins = np.quantile(df["time"], np.linspace(0, 1, n_bins + 1))
  
-    for r, (name, (res, slot)) in enumerate(fits.items()):
+    for r, (name, (res, adjust)) in enumerate(fits.items()):
         row = table.loc[name]
         # column 0: population trajectories + raw binned means
         tgrid = curves[name]["gap"]["time"].values
         for g in groups:
             col = class_colors[g]
-            ax[r, 0].plot(tgrid, _population_curve(res, df, tgrid, g, slot), color=col, lw=2,
+            ax[r, 0].plot(tgrid, _population_curve(res, df, tgrid, g, adjust), color=col, lw=2,
                           label=f"class {g}")
             sub = df[df["group"] == g]
             b = sub.groupby(pd.cut(sub["time"], bins, include_lowest=True), observed=True)
@@ -113,10 +139,10 @@ def _plot_comparison(df, fits, curves, groups, table, baseline_time, ref_split, 
             if kind == "growth":
                 a.axvline(baseline_time, color=muted, lw=1, ls="--")
  
-    ax[0, 0].set_title("Population trajectories\n(dots: raw binned means; slot models "
-                       "averaged over slots by P(slot | t))", fontsize=10)
-    ax[0, 1].set_title(f"Gap {groups[1]} − {groups[0]}\n(slot models: averaged over slots by P(slot | t) "
-                       f"{ref_split})", fontsize=10)
+    ax[0, 0].set_title("Population trajectories\n(dots: raw binned means; adjusted models "
+                       "averaged over slot / n_quest by P(value | t))", fontsize=10)
+    ax[0, 1].set_title(f"Gap {groups[1]} − {groups[0]}\n(adjusted models: averaged over slot / "
+                       f"n_quest by P(value | t))", fontsize=10)
     ax[0, 2].set_title(f"Growth of the gap since baseline t = {baseline_time:.1f}\n"
                        "(dashed line = baseline)", fontsize=10)
     for c in range(3):
@@ -188,7 +214,8 @@ def _plot_range(ev, fits, curves, groups, summary, train_intervals, labels, eval
             a.axvspan(x_lo if lo is None else max(lo, x_lo), x_hi if hi is None else min(hi, x_hi),
                       ymin=0, ymax=0.025, color=train_c, alpha=0.8, lw=0)
  
-    ref_txt = f"\n(at reference slot {ref_split})" if model_split else ""
+    col = _adj_col(model_split)
+    ref_txt = f"\n(averaged over {col} by P({col} | t))" if col else ""
     ax[0, 0].set_title("Population trajectories\n(dots: raw binned means in the evaluation interval)",
                        fontsize=10)
     ax[0, 1].set_title(f"Gap {groups[1]} − {groups[0]}{ref_txt}", fontsize=10)
