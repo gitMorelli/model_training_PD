@@ -63,6 +63,8 @@ params = {
     'time_model': 'spline', #spline or quadratic
     'dof_spline': 4, #degrees of freedom for the spline model
     'use_split': True, #if True it will use the split column in the statistical analysis, if False it will not use it
+    'adjust': 'auto', #'auto' (= 'slot' if use_split else None), None, 'slot', 'n_quest_add', 'n_quest_int'
+    'n_form': 'log', #form of the n_quest term: 'log', 'linear', 'cat'
     'min_time': None, #minimum time to include in the analysis
     'max_time': 5, #maximum time to include in the analysis
     'type_of_analysis': 'compare_models', #'compare_steps', 'single_model', 'compare_models'
@@ -216,16 +218,19 @@ def main(path=None):
                 run_analysis(df, columns=columns, 
                                 logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline, 
                                 time_model=params['time_model'], run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200,
-                                model_split=params['use_split'], use_baseline=True)
+                                model_split=params['use_split'], use_baseline=True,
+                                adjust=params['adjust'], n_form=params['n_form'])
             elif params['type_of_analysis'] == 'compare_models':
                 compare_models(df, columns=columns,
-                                    logit=True, eps=1e-4, path=plot_save_path, baseline_quantile=0.1, nested_comparison=False)
+                                    logit=True, eps=1e-4, path=plot_save_path, baseline_quantile=0.1, nested_comparison=True,
+                                    n_form=params['n_form'])
             elif params['type_of_analysis'] == 'compare_steps':
                 summary, scores, curves = compare_range(
                     df, columns=columns, logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline,
                     train_intervals=[(None, 0), (None, None), (-12, 0),(-10,10)],   # pre-diagnosis, full axis, last 12 years
                     eval_interval=(-12, 0),
-                    time_model="spline", model_split=True, matched_sets=False,
+                    time_model="spline", model_split=params['use_split'], matched_sets=False,
+                    adjust=params['adjust'], n_form=params['n_form'],
                 )
 
 

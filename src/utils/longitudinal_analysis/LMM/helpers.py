@@ -8,14 +8,16 @@ def _design(result, tgrid, g, **cols):
     return np.asarray(patsy.build_design_matrices([result.design_info], newdata)[0])
 
 def _population_curve(full, df, tgrid, g, model_split, slot_weights="pooled", bw=None):
-    """Fixed-effect prediction for class g; with slots, averaged over slots with the SAME
-    weights the difference curve uses, so (curve B) - (curve A) equals Delta(t)."""
+    """Fixed-effect prediction for class g; with an adjustment column (slot or n_quest),
+    averaged over its values with the SAME weights the difference curve uses, so
+    (curve B) - (curve A) equals Delta(t)."""
     beta = full.fe_params.values
-    if not model_split:
+    col = _adj_col(model_split)
+    if not col:
         return _design(full, tgrid, g) @ beta
     groups = sorted(df["group"].unique())
-    slots, Wg = _group_slot_weights(df, tgrid, groups, slot_weights, bw)
-    preds = np.column_stack([_design(full, tgrid, g, split=k) @ beta for k in slots])
+    vals, Wg = _group_slot_weights(df, tgrid, groups, slot_weights, bw, col=col)
+    preds = np.column_stack([_design(full, tgrid, g, **{col: k}) @ beta for k in vals])
     return (preds * Wg[g]).sum(axis=1)
 
 def _information_criteria(res):
@@ -26,9 +28,47 @@ def _information_criteria(res):
     n = int(res.nobs)
     return k, -2 * res.llf + 2 * k, -2 * res.llf + k * np.log(n)
 
+# ----------------------------------------------------------------------------
+# Adjustments: questionnaire slot, or number of questionnaires behind the prediction
+# ----------------------------------------------------------------------------
+ADJUSTMENTS = (None, "slot", "n_quest_add", "n_quest_int")
+
+
+def adjustment_spec(adjust, n_form="log"):
+    """Formula terms appended to `y ~ {time_term} * C(group)`, the data column they use,
+    and whether that column enters as a categorical factor.
+
+    adjust  None          no adjustment
+            "slot"        C(split) * C(group): class-specific level per questionnaire slot
+            "n_quest_add" f(n_quest): the number of questionnaires shifts BOTH classes equally.
+                          The gap is then adjusted for the classes having different numbers of
+                          questionnaires at the same time; the n_quest term cancels in Delta(t).
+            "n_quest_int" f(n_quest) * C(group): the separation itself may grow with the number
+                          of questionnaires. Collinear with time (n_quest rises toward diagnosis),
+                          so the gap at a FIXED n_quest can look flat even when the total isn't.
+    n_form  "log" (each extra questionnaire adds less), "linear", or "cat" (C(n_quest); sparse
+            high counts, and unseen levels cannot be predicted)
+    """
+    if adjust in (None, False, "", "none"):
+        return "", None, False
+    if adjust is True or adjust == "slot":
+        return " + C(split) * C(group)", "split", True
+    if adjust in ("n_quest_add", "n_quest_int"):
+        term = {"log": "np.log(n_quest)", "linear": "n_quest", "cat": "C(n_quest)"}[n_form]
+        if adjust == "n_quest_int":
+            term = f"{term} * C(group)"
+        return f" + {term}", "n_quest", n_form == "cat"
+    raise ValueError(f"adjust must be one of {ADJUSTMENTS}")
+
+
 def _adj_col(model_split):
-    """True -> "split" (old behaviour); otherwise a column name or None."""
-    return "split" if model_split is True else (model_split or None)
+    """Prediction column of an adjustment: True / "slot" -> "split";
+    "n_quest_add" / "n_quest_int" -> "n_quest"; a column name passes through; falsy -> None."""
+    if model_split is True or model_split == "slot":
+        return "split"
+    if model_split in ("n_quest_add", "n_quest_int"):
+        return "n_quest"
+    return model_split or None
 
 # ----------------------------------------------------------------------------
 # 0. Example data (replace with your own DataFrame)
@@ -51,33 +91,48 @@ def simulate_data(n_per_group=40, true_onset=4.0, seed=1):
     return pd.DataFrame(rows)
 
 
-def _slot_weights(df, tgrid, bw=None, slots=None):
-    """P(slot | t) on tgrid via Gaussian kernel smoothing of the observed (time, slot) pairs.
- 
-    slots: fixes the column order (and lets a slot with no rows in `df` get weight 0).
-    bw:    kernel bandwidth in time units; default is Silverman's rule on all times, which can
-           be too wide if each questionnaire sits in a narrow time window - check the slot-mix
-           panel and pass a smaller bw if the weights look smeared.
-    """
+def _kernel_mass(df, tgrid, bw=None, slots=None, col="split"):
+    """Unnormalised kernel mass of each value of `col` at each t: (values, (n_grid, n_values))."""
     if slots is None:
-        slots = np.sort(df["split"].unique())
-    t, s = df["time"].values, df["split"].values
+        slots = np.sort(df[col].unique())
+    t, s = df["time"].values, df[col].values
     if bw is None:
         bw = 1.06 * np.std(t) * len(t) ** (-0.2)
     K = np.exp(-0.5 * ((np.asarray(tgrid)[:, None] - t[None, :]) / bw) ** 2)
-    W = np.column_stack([K[:, s == k].sum(axis=1) for k in slots])
+    return slots, np.column_stack([K[:, s == k].sum(axis=1) for k in slots])
+
+
+def _slot_weights(df, tgrid, bw=None, slots=None, col="split"):
+    """P(value of `col` | t) on tgrid via Gaussian kernel smoothing of the observed (time, value)
+    pairs. `col` is the adjustment column: "split" (slot) or "n_quest".
+
+    slots: fixes the column order (and lets a value with no rows in `df` get weight 0).
+    bw:    kernel bandwidth in time units; default is Silverman's rule on all times, which can
+           be too wide if each questionnaire sits in a narrow time window - check the mix
+           panel and pass a smaller bw if the weights look smeared.
+    """
+    slots, W = _kernel_mass(df, tgrid, bw, slots, col)
     return slots, W / np.maximum(W.sum(axis=1, keepdims=True), 1e-300)
 
-def _group_slot_weights(df, tgrid, groups, slot_weights="pooled", bw=None):
-    """{group: (n_grid, n_slots) weight matrix} for the chosen weighting scheme."""
-    slots = np.sort(df["split"].unique())
+
+def _group_slot_weights(df, tgrid, groups, slot_weights="pooled", bw=None, col="split"):
+    """{group: (n_grid, n_values) weight matrix} for the chosen weighting scheme."""
+    slots = np.sort(df[col].unique())
     if slot_weights == "pooled":
-        _, W = _slot_weights(df, tgrid, bw=bw, slots=slots)
+        _, W = _slot_weights(df, tgrid, bw=bw, slots=slots, col=col)
         return slots, {g: W for g in groups}
     if slot_weights == "group":
-        return slots, {g: _slot_weights(df[df["group"] == g], tgrid, bw=bw, slots=slots)[1]
+        return slots, {g: _slot_weights(df[df["group"] == g], tgrid, bw=bw, slots=slots, col=col)[1]
                        for g in groups}
     raise ValueError("slot_weights must be 'pooled' or 'group'")
+
+
+def _support(df, tgrid, col, value, bw=None):
+    """Share of observations at each t (kernel-smoothed) that have col == value."""
+    vals, K = _kernel_mass(df, tgrid, bw, None, col)
+    if value not in set(vals):
+        return np.zeros(len(tgrid))
+    return K[:, list(vals).index(value)] / np.maximum(K.sum(axis=1), 1e-300)
 
 
 def significant_intervals(curve):
@@ -113,9 +168,10 @@ def _interval_label(iv):
     return f"[{'-inf' if lo is None else f'{lo:g}'}, {'inf' if hi is None else f'{hi:g}'})"
  
  
-def _estimable_slots(d, min_obs=5):
-    """Slots with at least `min_obs` observations in BOTH classes (needed for C(split) * C(group))."""
-    counts = d.groupby(["split", "group"]).size().unstack(fill_value=0)
+def _estimable_slots(d, min_obs=5, col="split"):
+    """Levels of `col` with at least `min_obs` observations in BOTH classes
+    (needed for C(col) * C(group))."""
+    counts = d.groupby([col, "group"]).size().unstack(fill_value=0)
     if counts.shape[1] < 2:
         return set()
     return set(counts.index[(counts >= min_obs).all(axis=1)])
