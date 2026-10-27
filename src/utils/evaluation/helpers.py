@@ -1,5 +1,16 @@
 import numpy as np
 
+def build_modality_names(modalities = None):
+    if modalities is None:
+        modalities = ['X_window','digit_window','text_window']
+    #write all the combinations as modality[i] + modality[j] + modality[k] for i,j,k in combinations of 3 modalities
+    from itertools import combinations
+    modality_combinations = []
+    for r in range(1, len(modalities) + 1):
+        modality_combinations.extend(combinations(modalities, r))
+    modality_names = ["+".join(combo) for combo in modality_combinations]
+    return modality_names
+
 # ======================================================================
 # score helpers
 # ======================================================================

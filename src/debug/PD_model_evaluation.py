@@ -30,9 +30,9 @@ def get_last_best_checkpoint(checkpoint_dir,version):
 
 experiment = "PD" #"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'resnet18_32'#'resnet18_32' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'convnext_tiny'#'resnet18_32' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='14'
+version='27'
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #get the most recent ckpt file with best in the name 
@@ -215,7 +215,7 @@ def process_results_per_group(save_path,group_name,results, results_df_pre_diagn
             results_df_matched, all_probs_matched, all_preds_matched, all_labels_matched = get_results_matched(results_df, exp_params)
             analyze_results(all_probs_matched, all_labels_matched, results_df_matched, split="matched_validation",
                             pos_label=pos_label, threshold=threshold, strategy=strategy,
-                            target_recall=target_recall, plot=True, out_dir_path=save_path)
+                            target_recall=target_recall, plot=False, out_dir_path=save_path)
 
         #analysis on all pre_diagnosis
         if results_df_pre_diagnosis is not None:
@@ -237,7 +237,7 @@ def process_results_per_group(save_path,group_name,results, results_df_pre_diagn
             results_df_matched_pre, all_probs_matched_pre, all_preds_matched_pre, all_labels_matched_pre = get_results_matched(results_df_pre, exp_params)
             analyze_results(all_probs_matched_pre, all_labels_matched_pre, results_df_matched_pre, split="matched_pre_diagnosis_validation",
                             pos_label=pos_label, threshold=threshold, strategy=strategy,
-                            target_recall=target_recall, plot=True, out_dir_path=save_path)
+                            target_recall=target_recall, plot=False, out_dir_path=save_path)
 
         #longitudinal analysis
         if results_df_per_step is not None: #the trained model returns predictions per step, i can aggregate those

@@ -4,9 +4,9 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/evaluation/eval_PD.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=22              # Number of CPU cores per task
-#SBATCH --mem=48G                      # Job memory request
-#SBATCH --time=01:30:00                # Time limit hrs:min:sec
+#SBATCH --cpus-per-task=10              # Number of CPU cores per task
+#SBATCH --mem=32G                      # Job memory request
+#SBATCH --time=00:30:00                # Time limit hrs:min:sec
 #--partition=shortq
 #SBATCH --partition=visuq,gpgpuq
 #SBATCH --gres=gpu:1
@@ -34,4 +34,4 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.debug.PD_model_evaluation \
-    --num_workers 20
+    --num_workers 10

@@ -1,105 +1,19 @@
-src.utils.training_utils.pd_training.callbacks.diagnostics
-Checkpoint to load: best-13-002072-0.3640.ckpt
-Experiment Parameters:
-problem: PD
-debug: False
-debugging_callbacks: True
-fast_dev_run: False
-pass_example_input_array: False
-grouped: False
-pre_training: False
-bce_aux_weight: 0.3
-synthetic: None
-synthetic_proportions: [0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333]
-selected_properties: []
-global_fusion: late
-merge_shards: False
-data_modality: ['X_window', 'X_window', 'X_window', 'digit_window', 'digit_window', 'text_window']
-num_tiles: 6
-use_grid: True
-label_smoothing: 0.0
-use_balanced_weights: True
-loss_name: standard
-loss_kwargs: {'pi': 0.03, 'learnable_pi': False}
-balancing_factor: 10
-balanced_data: False
-balance_validation: False
-majority_class_id: 0
-threshold_num: 1
-num_classes: 1
-filter_missing: all
-censor_time: all_matched
-filter_modality: digit
-model: convnext_tiny
-custom_pre_trained_weights: None
-load_full_model: False
-pretrained: True
-norm_mu: [0.459]
-norm_std: [0.226]
-model_structure: ModularModel
-val_check_interval: None
-align_train_metrics_to_val: False
-min_window_steps: 50
-model_parameters: {'use_view_groups': True, 'modalities': None, 'view_agg': 'attention', 'view_kwargs': {'intra': 'attention', 'inter': 'attention', 'modality_dropout': 0.1, 'view_dropout': 0.1, 'dropout_level': 'subject', 'view_pos': True, 'modality_emb': True, 'modality_norm': True}, 'd_model': 128, 'n_heads': 4, 'n_layers': 1, 'ff_mult': 2, 'dropout': 0.4, 'count_norm': 2, 'use_spread': False, 'use_count_feature': False, 'use_attention_pool': False, 'seq_model': 'causal_gru', 'bidirectional': True}
-custom_transform: None
-input_size: 224
-apply_augmentation: None
-invert_color: True
-to_grayscale: True
-image_pixel_space_augmentations: None
-lora_tuning: False
-use_opt_groups: True
-lr_decay: 0.5
-lr_backbone: 0.0001
-lr_classifier_head: 0.001
-lr_scheduling: two_stage
-stage1_fraction: 0.05
-stage1_lr_names: ['lr_head']
-batch_size: 16
-scale_lr_with_batch_size: False
-num_epochs: 60
-max_steps: -1
-patience: 10
-stopping_metric: val/pr_auc
-eta_min_cosine: 1e-06
-weight_decay: 0.01
-warmup_fraction: 0.05
-layers_to_unfreeze: ['classifier', 'layer4']
-seed: 42
-accumulate_grad_batches: 4
-precision: bf16-mixed
-gradient_clip_val: 1.0
-prefetch_factor: 4
-list_of_ids_paths: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_22/PD_training_set_20_07_26.parquet
-data_folder: /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26
-grid_dict_path: /home/a_morelli/datasets/id_lists/h5/PD_data_h5
-class_col: diag_park_final1_quest
-num_channels: 1
-huggingface_transform: False
-CHECKPOINT_PATH: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints
-OUTPUT_PATH: /home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results
-SOURCE_PATH: /home/a_morelli/models/model_training_logs/PD/
-timestamp: 2026-10-23 18:59:57
-best_epoch: 30
-best_val_loss: 1.253444790840149
-best_val_acc: 0.8854368925094604
-best_train_acc: 0.7096354365348816
-current_version: 22
-optimization_groups: [{'names': ['vision_model.features.0'], 'lr': 6.25e-06, 'lr_name': 'lr_stem'}, {'names': ['vision_model.features.1'], 'lr': 1.25e-05, 'lr_name': 'lr_1'}, {'names': ['vision_model.features.2', 'vision_model.features.3'], 'lr': 2.5e-05, 'lr_name': 'lr_2'}, {'names': ['vision_model.features.4', 'vision_model.features.5'], 'lr': 5e-05, 'lr_name': 'lr_3'}, {'names': ['vision_model.features.6', 'vision_model.features.7', 'vision_model.final_norm'], 'lr': 0.0001, 'lr_name': 'lr_4'}, {'names': ['classifier'], 'lr': 0.001, 'lr_name': 'lr_head'}]
+Modality combinations: [('X_window',), ('digit_window',), ('text_window',), ('X_window', 'digit_window'), ('X_window', 'text_window'), ('digit_window', 'text_window'), ('X_window', 'digit_window', 'text_window')]
+Modality names: ['X_window', 'digit_window', 'text_window', 'X_window+digit_window', 'X_window+text_window', 'digit_window+text_window', 'X_window+digit_window+text_window']
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 6193523
+Job ID: 6208479
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n18
+Nodelist: n17
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-10-24 11:56:52
-Job ended at:   2026-10-24 11:57:13
-Job Wall-clock time: 00:00:21
-CPU Utilized: 00:00:12
-CPU Efficiency: 14.29% of 00:01:24 core-walltime
-Memory Utilized: 662.60 MB
-Memory Efficiency: 4.04% of 16.00 GB
+Job started at: 2026-10-27 10:35:15
+Job ended at:   2026-10-27 10:35:26
+Job Wall-clock time: 00:00:11
+CPU Utilized: 00:00:07
+CPU Efficiency: 15.91% of 00:00:44 core-walltime
+Memory Utilized: 1.44 MB
+Memory Efficiency: 0.01% of 16.00 GB

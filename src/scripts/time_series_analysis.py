@@ -18,7 +18,9 @@ from src.utils.evaluation import  analyze_results, plot_probability_trajectories
 from sklearn.inspection import permutation_importance
 from src.debug.PD_model_evaluation import tee_stdout
 from src.scripts.t_on_representations import balance_data, reshape_features, mask_features, add_info_to_df
-
+from src.utils.evaluation.helpers import build_modality_names
+from src.utils.longitudinal_analysis import run_discrimination
+from src.utils.longitudinal_analysis import run_analysis, compare_models, compare_range
 
 HOME_PATH = "/home/a_morelli/models/model_training_logs/PD/"
 def get_input_file_path(name):
@@ -27,14 +29,18 @@ def get_input_file_path(name):
     elif name=="trained_features":
         input_file = os.path.join(HOME_PATH, "feature_extraction/17092026/trained_models/xgb/v_13/results_per_step.csv")
     elif name=="trained_deep":
+        input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_27/all/per_step_predictions.csv")
+        #input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_27")
         #input_file = os.path.join(HOME_PATH, "resnet18_model_results/checkpoints/v_36/per_step_predictions.csv")
-        input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv")
+        #input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv")
     return input_file
 
 params = {
     #input info
     "input_file":get_input_file_path("trained_deep"),
     "force_case_dt": True, #if True it will force the case_dt to the value in the time_df, if False it will use the case_dt in the input_file
+    "per_modality": ['all','X_window','digit_window','text_window'], #if "all_combinations" combinations are built
+    #this is used if the file path is a directory -> i have per modality results
 
     "signal_column": 'cell_sigma_y_mean', #'cell_contour_jitter_rms_mean', #cell_sigma_x_mean
     
@@ -57,7 +63,7 @@ params = {
     'time_model': 'spline', #spline or quadratic
     'dof_spline': 4, #degrees of freedom for the spline model
     'use_split': True, #if True it will use the split column in the statistical analysis, if False it will not use it
-    'min_time': -15, #minimum time to include in the analysis
+    'min_time': None, #minimum time to include in the analysis
     'max_time': 5, #maximum time to include in the analysis
     'type_of_analysis': 'compare_models', #'compare_steps', 'single_model', 'compare_models'
 }
@@ -79,20 +85,20 @@ params["type_of_input"] = get_type_of_input(params)
 
 VERBOSE = True
 SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/time_series_analysis"
-EXPERIMENT = "statistical_analysis" #"statistical_analysis" #"time_series_comparison" #"plot_property" 
+EXPERIMENT = "statistical_analysis" #"time_resolved_discrimination","statistical_analysis" #"time_series_comparison" #"plot_property" 
 os.makedirs(SAVE_PATH, exist_ok=True)
 
-def main():
+def main(path=None):
     start = time.time()
 
     #splits = ["train", "val", "test"]
     time_df_path = return_dt_path(params['list_of_ids_paths'])
     time_df = pd.read_parquet(time_df_path)
-    
+
     reference_df = pd.read_parquet(params['list_of_ids_paths'])
     reference_df = balance_data(reference_df, params, column="unique_id")
 
-    df = load_file(params) 
+    df = load_file(params,path) 
 
     if params["type_of_input"] == "feature": #i save in the same format as the representation file -> subj_id,q,mo,rep -> i can use the same logic
         df = balance_data(df, params)
@@ -135,6 +141,9 @@ def main():
     #convert the set column to int
     df['set'] = df['set'].astype(int)
 
+    df = df.sort_values(["unique_id", "slot"])
+    df["n_quest"] = df.groupby("unique_id").cumcount() + 1   # 1st, 2nd, 3rd... completed questionnaire
+
     min_str='smallest'
     max_str='largest'
     min_time=params.get('min_time', None)
@@ -143,10 +152,14 @@ def main():
         min_str = f"{int(min_time)}"
         df = df[df['case_dt'] > min_time]
         print(f"Filtering df to only include rows with case_dt > {min_time}. New length: {len(df)}")
+    else:
+        min_time = df['case_dt'].min()
     if max_time is not None:
         max_str = f"{int(max_time)}"
         df = df[df['case_dt'] < max_time]
         print(f"Filtering df to only include rows with case_dt < {max_time}. New length: {len(df)}")
+    else:
+        max_time = df['case_dt'].max()
 
     print(EXPERIMENT)
     if EXPERIMENT == "time_series_comparison":
@@ -154,10 +167,15 @@ def main():
                     class_names=("negative", "positive"), min_count=1, power=2,
                     save_path=SAVE_PATH, save_name="signal_comparison", only_common_rows=False)
     elif EXPERIMENT == "plot_property":
-        for n in [5, 10, 15, 20]:
+        if path is not None:
+            local_save_path = os.path.dirname(path)
+        else:
+            local_save_path = os.path.dirname(params['input_file'])
+        for n in [5, 10]:
             statistics,diff = plot_probability_trajectories(df, n_steps=n, ax=None,
                                                 class_names=("negative", "positive"),
-                                                min_count=1, save_path=SAVE_PATH, save_name=f"force_{params['signal_column']}_probability_trajectories_{n}", 
+                                                min_count=1, save_path=local_save_path, 
+                                                save_name=f"probability_trajectories_{min_str}_{max_str}_{n}_{params['signal_column']}", 
                                                 signal_column=params['signal_column'], plot_difference=True, show_points=False)
             score = weighted_abs_diff_sum(diff)
             print(f"Score for {params['signal_column']}: {score}")
@@ -166,8 +184,15 @@ def main():
             #compute the ROC AUC over time
             res,_ = roc_auc_over_time(
                 df, step=2,window=2, pred_col=params['signal_column'], true_col="true_label",
-                save_path=SAVE_PATH, save_name="roc_auc_over_time.png",percentiles=(5, 99)
+                save_path=local_save_path, save_name="roc_auc_over_time.png",percentiles=(5, 99)
             )
+    elif EXPERIMENT == "time_resolved_discrimination":
+        if path is not None:
+            local_save_path = os.path.dirname(path)
+        else:
+            local_save_path = os.path.dirname(params['input_file'])
+        table, info = run_discrimination(df, time_sign=-1, t_min=0, t_max=-min_time, width=3, step=1,
+                                         path=os.path.join(local_save_path, f"time_resolved_discrimination_{min_str}_{0}_{params['signal_column']}.png"))
     elif EXPERIMENT == "statistical_analysis": 
         '''#get the max and min value of the signal column
         min_value = df[params['signal_column']].min()
@@ -175,7 +200,6 @@ def main():
         print(f"Min value of {params['signal_column']}: {min_value}")
         print(f"Max value of {params['signal_column']}: {max_value}")
         return'''
-        import src.utils.longitudinal_analysis as la
         plot_save_path = os.path.dirname(params['input_file'])
         dof_spline = params['dof_spline']
         #title=f"slot_results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}"
@@ -185,19 +209,19 @@ def main():
         with tee_stdout(log_path):
             plot_save_path = os.path.join(plot_save_path, f"{title}.png")
             columns={"subject": "unique_id", "time": "case_dt", "y": params['signal_column'], "group": "true_label",
-                     "set": "set"}
+                     "set": "set", "n_quest": "n_quest"}
             if params['use_split']:
                 columns["split"] = "slot"
             if params['type_of_analysis'] == 'single_model':
-                la.GLMM.run_analysis(df, columns=columns, 
+                run_analysis(df, columns=columns, 
                                 logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline, 
                                 time_model=params['time_model'], run_permutation_test=False, n_perm=5, run_bootstrap=False, n_boot=200,
                                 model_split=params['use_split'], use_baseline=True)
             elif params['type_of_analysis'] == 'compare_models':
-                la.GLMM.compare_models(df, columns=columns,
+                compare_models(df, columns=columns,
                                     logit=True, eps=1e-4, path=plot_save_path, baseline_quantile=0.1, nested_comparison=False)
             elif params['type_of_analysis'] == 'compare_steps':
-                summary, scores, curves = la.GLMM.compare_range(
+                summary, scores, curves = compare_range(
                     df, columns=columns, logit=True, eps=1e-4, path=plot_save_path, spline_df=dof_spline,
                     train_intervals=[(None, 0), (None, None), (-12, 0),(-10,10)],   # pre-diagnosis, full axis, last 12 years
                     eval_interval=(-12, 0),
@@ -536,9 +560,12 @@ def get_args():
     parser.add_argument("--batches_to_test", type=int, default=50, help="Number of batches to process for benchmark")
     return parser.parse_args()
 
-def load_file(params):
+def load_file(params,path=None):
     if params["type_of_input"] == "DL":
-        df = pd.read_csv(params["input_file"])
+        if path is None:
+            df = pd.read_csv(params["input_file"])
+        else:
+            df = pd.read_csv(path) #i am loading per_modality
     elif params["type_of_input"] == "feature":
         df = pd.read_csv(params["input_file"])
     elif params["type_of_input"] == "ML_on_features":
@@ -553,5 +580,17 @@ def load_file(params):
     return keep'''
 
 if __name__ == "__main__":
-    main()
+    #check if params['input_file'] is a directory or a file
+    is_directory = os.path.isdir(params['input_file'])
+    if is_directory:
+        if params['per_modality'] == 'all_combinations':
+            modalities = build_modality_names(params['filter_modality'])
+        else:
+            modalities = params['per_modality']
+        for m in modalities:
+            print(f"Running analysis for modality: {m}")
+            path = os.path.join(params['input_file'], m, "per_step_predictions.csv")
+            main(path=path)
+    else:
+        main()
     

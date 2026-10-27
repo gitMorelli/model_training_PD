@@ -1221,6 +1221,44 @@ def class_distrib_per_questionnaire(force=True):
     #plot distribution of case_dt in each slot class
     _plot_dt_dist_by_slot(df, normalize=True, filename=os.path.join(save_path, "dt_dist_by_slot" + suffix + ".png"))
 
+#ROC and PR-auc curve
+def plot_roc_pr_curves():
+    from src.utils.evaluation.plotting_helpers import _load_roc_curve, _draw_roc_curves, _load_pr_curve, _draw_pr_curves
+    dir_path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_27"
+    save_path = "/home/a_morelli/vscode_projects/model_training/src/tests/roc_pr_curves"
+    os.makedirs(save_path, exist_ok=True)
+    modalities = ['X_window','digit_window','text_window']
+    #write all the combinations as modality[i] + modality[j] + modality[k] for i,j,k in combinations of 3 modalities
+    from itertools import combinations
+    modality_combinations = []
+    for r in range(1, len(modalities) + 1):
+        modality_combinations.extend(combinations(modalities, r))
+    modality_names = ["+".join(combo) for combo in modality_combinations]
+    print(f"Modality combinations: {modality_combinations}")
+    print(f"Modality names: {modality_names}")
+    prev_data_paths = []
+    previous = []
+    for combo in modality_names:
+        prev_data_paths.append(os.path.join(dir_path, combo, "roc_curve_pre_diagnosis_validation.npz"))
+        curve=_load_roc_curve(prev_data_paths[-1])
+        curve['name'] = combo
+        previous.append(curve)
+    #order by the AUC value
+    previous = sorted(previous, key=lambda x: x['auc'], reverse=True)
+    _draw_roc_curves(previous, path=os.path.join(save_path, "roc_curves_comparison.png"),
+                         title="ROC curves comparison", show_youden=True)
+    prev_data_paths = []
+    previous = []
+    for combo in modality_names:
+            prev_data_paths.append(os.path.join(dir_path, combo, "pr_curve_pre_diagnosis_validation.npz"))
+            curve=_load_pr_curve(prev_data_paths[-1])
+            curve['name'] = combo
+            previous.append(curve)
+    #order by the ap value
+    previous = sorted(previous, key=lambda x: x['ap'], reverse=True)
+    _draw_pr_curves(previous, path=os.path.join(save_path, "pr_curves_comparison.png"),
+                            title="PR curves comparison", prevalence=previous[0]['prevalence'])
+
 # Prepare datasets #
 def prepare_handedness_datasets():
     source_folder = "/home/a_morelli/datasets/id_lists/"
@@ -1363,4 +1401,4 @@ def prepare_case_dt_datasets():
     return
 
 if __name__ == "__main__":
-    open_exp_parameters()
+    plot_roc_pr_curves()

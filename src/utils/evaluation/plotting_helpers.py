@@ -72,7 +72,7 @@ def _draw_roc_curves(curves, path=None, title=None, show_youden=True):
         print("matplotlib not available; skipping ROC plot")
         return
 
-    fig, ax = plt.subplots(figsize=(5, 5))
+    fig, ax = plt.subplots(figsize=(9, 5), layout="constrained")
     ax.plot([0, 1], [0, 1], ls="--", color="gray", label="random (AUC=0.500)")
 
     for c in curves:
@@ -91,12 +91,14 @@ def _draw_roc_curves(curves, path=None, title=None, show_youden=True):
     ax.set_xlabel("false positive rate (1 - specificity)")
     ax.set_ylabel("true positive rate (sensitivity)")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_aspect("equal")          # keep the ROC square even with a wide figure
     if title:
         ax.set_title(title)
-    ax.legend(loc="lower right", fontsize=8)
-    fig.tight_layout()
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1),
+              borderaxespad=0, fontsize=8, frameon=False)
+    # remove fig.tight_layout(): constrained layout handles the outside legend
     if path:
-        fig.savefig(path)
+        fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
     else:
         plt.show()
@@ -111,7 +113,7 @@ def _plot_roc_curve_with_previous(y_true, y_scores, prev_data_paths, pos_label=1
 
     if isinstance(prev_data_paths, (str, bytes)):
         prev_data_paths = [prev_data_paths]
-    previous = [_load_roc_curve(p) for p in prev_data_paths]
+    previous = [_load_roc_curve(p) for p in prev_data_paths] 
 
     _draw_roc_curves(previous + [curve], path=compare_path,
                      title="ROC curves comparison", show_youden=show_youden)
@@ -206,7 +208,7 @@ def _draw_pr_curves(curves, path=None, prevalence=None, title=None):
         print("matplotlib not available; skipping PR plot")
         return
 
-    fig, ax = plt.subplots(figsize=(5, 5))
+    fig, ax = plt.subplots(figsize=(9, 5), layout="constrained")
     for c in curves:
         line, = ax.plot(c["recall"], c["precision"], label=f"{c['name']} (AP={c['ap']:.3f})")
         if not np.isnan(c["threshold"]):
@@ -220,16 +222,16 @@ def _draw_pr_curves(curves, path=None, prevalence=None, title=None):
 
     ax.set_xlabel("recall (PD)"); ax.set_ylabel("precision (PD)")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_aspect("equal")
     if title:
         ax.set_title(title)
-    ax.legend(fontsize=8)
-    fig.tight_layout()
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1),
+              borderaxespad=0, fontsize=8, frameon=False)
     if path:
-        fig.savefig(path)
+        fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
     else:
         plt.show()
-
 
 def _plot_pr_curve_with_previous(y_true, y_scores, prev_data_paths, pos_label=1,
                                  threshold=None, path=None, compare_path=None,
