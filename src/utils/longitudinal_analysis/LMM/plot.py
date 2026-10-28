@@ -2,55 +2,76 @@ import numpy as np
 from .helpers import _population_curve, _slot_weights, significant_intervals, _interval_label, _adj_col
 import pandas as pd
 
-def plot_results(df, full, curve, groups, profile=None, path="results.png",
-                 model_split=False, show_binned=True, n_bins=15, by_value=None):
-    """by_value: optional {value: curve} from curves_by_value (gap at fixed n_quest), drawn in
-    an extra panel."""
-    import matplotlib.pyplot as plt
+def _draw_difference(ax, cv, title, baseline_time=None):
+    """Difference curve with simultaneous and pointwise bands, significant intervals shaded,
+    and the onset (first time the simultaneous band excludes 0) marked - as in _plot_comparison."""
+    ax.fill_between(cv["time"], cv["sim_lo"], cv["sim_hi"], alpha=0.25, color="grey",
+                    label="simultaneous 95%")
+    ax.fill_between(cv["time"], cv["pw_lo"], cv["pw_hi"], alpha=0.35, color="tab:green",
+                    label="pointwise 95%")
+    ax.plot(cv["time"], cv["delta"], color="k", lw=2)
+    ax.axhline(0, color="k", ls=":")
+    intervals = significant_intervals(cv)
+    for a, b in intervals:
+        ax.axvspan(a, b, color="tab:red", alpha=0.08)
+    if intervals:
+        onset = intervals[0][0]
+        ax.plot(onset, np.interp(onset, cv["time"], cv["delta"]), "o", color="tab:red", ms=8,
+                mec="white", mew=2, zorder=6)
+    ax.text(0.98, 0.97, f"onset: {intervals[0][0]:.1f}" if intervals else "no onset",
+            transform=ax.transAxes, va="top", ha="right", fontsize=9)
+    if baseline_time is not None:
+        ax.axvline(baseline_time, color="k", lw=1, ls="--")
+    ax.set(title=title, xlabel="time", ylabel="Δ(t)")
+    ax.legend(loc="upper left")
 
+def plot_results(df, full, curve, groups, profile=None, path="results.png",
+                 model_split=False, show_binned=True, n_bins=15, by_value=None,
+                 growth=None, baseline_time=None):
+    """Panels: trajectories | gap Δ(t) | [growth since baseline] | [change-point profile] |
+    [gap at fixed n_quest] | [adjustment mix].
+    curve:   the gap itself (no baseline)
+    growth:  optional Δ(t) − Δ(baseline_time), drawn next to it with the baseline marked
+    by_value: optional {value: curve} from curves_by_value (gap at fixed n_quest)."""
+    import matplotlib.pyplot as plt
+ 
     col = _adj_col(model_split)
-    ncols = 2 + (profile is not None) + bool(col) + bool(by_value)
-    fig, ax = plt.subplots(1, ncols, figsize=(5.5 * ncols, 4.5))
+    ncols = 2 + (growth is not None) + (profile is not None) + bool(col) + bool(by_value)
+    fig, axes = plt.subplots(1, ncols, figsize=(5.5 * ncols, 4.5))
+    axes = iter(axes)
     colors = dict(zip(groups, ["tab:blue", "tab:orange"]))
     tgrid = curve["time"].values
     bins = np.quantile(df["time"], np.linspace(0, 1, n_bins + 1))
-
+ 
+    ax = next(axes)
     for g in groups:
         sub = df[df["group"] == g]
         for _, s in sub.groupby("subject"):
-            ax[0].plot(s["time"], s["y"], color=colors[g], alpha=0.12, lw=0.8)
-        ax[0].plot(tgrid, _population_curve(full, df, tgrid, g, model_split),
-                   color=colors[g], lw=3, label=g)
+            ax.plot(s["time"], s["y"], color=colors[g], alpha=0.12, lw=0.8)
+        ax.plot(tgrid, _population_curve(full, df, tgrid, g, model_split),
+                color=colors[g], lw=3, label=g)
         if show_binned:                              # raw binned means: a visual fit check
             b = sub.groupby(pd.cut(sub["time"], bins, include_lowest=True), observed=True)
-            ax[0].plot(b["time"].mean(), b["y"].mean(), "o", color=colors[g],
-                       mec="k", ms=5, zorder=5)
-
+            ax.plot(b["time"].mean(), b["y"].mean(), "o", color=colors[g], mec="k", ms=5, zorder=5)
     subtitle = f"\n(averaged over {col}, weighted by P({col} | t))" if col else ""
-    ax[0].set(title="Population trajectories" + subtitle, xlabel="time", ylabel="y")
-    ax[0].legend(title="class")
-
-    t = curve["time"]
-    ax[1].fill_between(t, curve["sim_lo"], curve["sim_hi"], alpha=0.25, color="grey",
-                       label="simultaneous 95%")
-    ax[1].fill_between(t, curve["pw_lo"], curve["pw_hi"], alpha=0.35, color="tab:green",
-                       label="pointwise 95%")
-    ax[1].plot(t, curve["delta"], color="k", lw=2)
-    ax[1].axhline(0, color="k", ls=":")
-    for a, b in significant_intervals(curve):
-        ax[1].axvspan(a, b, color="tab:red", alpha=0.08)
-    ax[1].set(title=f"Difference {groups[1]} − {groups[0]}", xlabel="time", ylabel="Δ(t)")
-    ax[1].legend(loc="upper left")
-
+    ax.set(title="Population trajectories" + subtitle, xlabel="time", ylabel="y")
+    ax.legend(title="class")
+ 
+    _draw_difference(next(axes), curve, f"Gap {groups[1]} − {groups[0]}")
+    if growth is not None:
+        _draw_difference(next(axes), growth,
+                         f"Growth of the gap since baseline t = {baseline_time:.1f}\n(dashed line = baseline)",
+                         baseline_time=baseline_time)
+ 
     if profile is not None:
-        ax[2].plot(profile["tau"], profile["llf"], "o-", ms=3)
-        ax[2].set(title="Change-point profile likelihood", xlabel="τ", ylabel="log-likelihood")
-
+        ax = next(axes)
+        ax.plot(profile["tau"], profile["llf"], "o-", ms=3)
+        ax.set(title="Change-point profile likelihood", xlabel="τ", ylabel="log-likelihood")
     if by_value:
-        plot_curves_by_value(ax[2 + (profile is not None)], by_value, col)
+        plot_curves_by_value(next(axes), by_value, col)
     if col:
-        plot_adjustment_mix(ax[-1], df, tgrid, col, by_group=True)   # dashed lines = cases' mix
-
+        plot_adjustment_mix(next(axes), df, tgrid, col, by_group=True)   # dashed lines = cases' mix
+ 
     fig.tight_layout()
     fig.savefig(path, dpi=130)
     return path
@@ -90,6 +111,67 @@ def plot_curves_by_value(ax, curves, col="n_quest", cmap="viridis"):
     ax.set(xlabel="time", ylabel="Δ(t)",
            title=f"Gap at fixed {col}\n(thick: simultaneous band excludes 0)")
     ax.legend(fontsize=8, frameon=False)
+
+def plot_changepoints(profile, tau_hat, tau_ci, by_class=None, path="changepoints.png", level=0.95):
+    """Change-point results in one figure, separate from the trajectory/difference plots.
+ 
+    Left:  profile log-likelihood of tau, each curve relative to its own maximum, so they share
+           one scale:
+             - both classes (black): when cases leave the shared (control) trajectory
+             - each class on its own (by_class): when that class leaves its own earlier trend
+           Dashed line = approximate 95% cut-off; dotted verticals = each tau estimate;
+           grey band = CI of the two-group tau.
+    Right: size of the bend delta at each tau, per class (only if by_class is given).
+ 
+    Reading it: a peaked case curve and a flat control curve = case-specific bend. Controls peaking
+    near the cases' tau = a time effect shared by everyone, not a disease effect.
+    """
+    import matplotlib.pyplot as plt
+    from scipy import stats
+ 
+    class_colors = ["#2a78d6", "#eb6834"]           # same class colours as the other plots
+    ink, muted = "#0b0b0b", "#52514e"
+    ncols = 2 if by_class else 1
+    fig, axes = plt.subplots(1, ncols, figsize=(6.5 * ncols, 4.6), squeeze=False)
+    ax = axes[0, 0]
+ 
+    rel = profile["llf"] - profile["llf"].max()
+    ax.axvspan(tau_ci[0], tau_ci[1], color=muted, alpha=0.10, lw=0)
+    ax.plot(profile["tau"], rel, "o-", ms=3, lw=2, color=ink,
+            label=f"both classes: τ = {tau_hat:.1f} [{tau_ci[0]:.1f}, {tau_ci[1]:.1f}]")
+    ax.axvline(tau_hat, color=ink, lw=1, ls=":")
+    if by_class:
+        for (g, r), c in zip(by_class.items(), class_colors):
+            pr = r["profile"]
+            ax.plot(pr["tau"], pr["llf"] - pr["llf"].max(), "o-", ms=3, lw=1.5, color=c,
+                    label=f"class {g} alone: τ = {r['tau']:.1f} [{r['ci'][0]:.1f}, {r['ci'][1]:.1f}]")
+            ax.axvline(r["tau"], color=c, lw=1, ls=":")
+    ax.axhline(-stats.chi2.ppf(level, 1) / 2, color=muted, lw=1, ls="--")
+    ax.text(0.02, 0.04, f"dashed: approx. {level:.0%} cut-off", transform=ax.transAxes,
+            fontsize=8, color=muted)
+    ax.set(xlabel="τ (time to diagnosis)", ylabel="log-likelihood − max",
+           title="Change point: profile likelihood")
+    ax.legend(fontsize=8, frameon=False, loc="lower right")
+ 
+    if by_class:
+        ax = axes[0, 1]
+        for (g, r), c in zip(by_class.items(), class_colors):
+            ax.plot(r["profile"]["tau"], r["profile"]["delta"], "o-", ms=3, color=c,
+                    label=f"class {g}")
+        ax.axvline(tau_hat, color=ink, lw=1, ls=":", label="τ, both classes")
+        ax.axhline(0, color=muted, lw=1, ls=":")
+        ax.set(xlabel="τ (time to diagnosis)", ylabel="bend δ at τ",
+               title="Within-class bend (change in slope after τ)")
+        ax.legend(fontsize=8, frameon=False)
+ 
+    for a in axes.flat:
+        a.grid(alpha=0.25, lw=0.6)
+        for side in ("top", "right"):
+            a.spines[side].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+    return path
 
 def _plot_comparison(df, fits, curves, groups, table, baseline_time, ref_split, path, n_bins=15):
     """One row per model; columns: trajectories | gap | growth of the gap since baseline."""

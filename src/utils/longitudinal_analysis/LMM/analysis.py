@@ -8,9 +8,9 @@ from scipy import stats
 from .helpers import _adj_col, simulate_data, _slot_weights, _group_slot_weights, significant_intervals, _information_criteria, _interval_label
 from .helpers import _in_interval, _estimable_slots, _heldout_loglik, adjustment_spec
 from .fit import fit_mixed, fit_full_and_null, _fit
-from .changepoint import changepoint_profile, cluster_bootstrap_tau
+from .changepoint import changepoint_profile, cluster_bootstrap_tau, changepoint_by_class, class_adjustment
 from .tests import lrt, lrt_re, permutation_lrt
-from .plot import plot_results, _plot_comparison, _plot_range
+from .plot import plot_results, _plot_comparison, _plot_range, plot_changepoints
 from .difference import difference_curve, curves_by_value
 
 warnings.filterwarnings("ignore")  # MixedLM is chatty about convergence/boundary warnings
@@ -26,7 +26,7 @@ preset_columns = {             # your column name -> name used internally
         "n_quest": "n_quest"
     }
 
-ADJ_LABEL = {None: "", "slot": "slot", "n_quest_add": "n_quest (additive)",
+ADJ_LABEL = {None: "", "slot": "slot", "slot_add": "slot (additive)", "n_quest_add": "n_quest (additive)",
              "n_quest_int": "n_quest x class"}
 
 
@@ -50,18 +50,33 @@ def _first_onset(curve):
     return iv[0][0] if iv else np.nan
 
 
+def _report_curve(curve, crit, label):
+    """Print where the simultaneous band of a difference curve excludes 0."""
+    print(f"\n{label}")
+    print(f"  simultaneous critical value: {crit:.2f} (vs 1.96 pointwise)")
+    intervals = significant_intervals(curve)
+    if intervals:
+        print("  simultaneous band excludes 0 on: "
+              + ", ".join(f"[{a:.2f}, {b:.2f}]" for a, b in intervals))
+        print(f"  -> difference DETECTABLE from t ≈ {intervals[0][0]:.2f}")
+    else:
+        print("  no time interval where the simultaneous band excludes 0")
+ 
+
 def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, spline_df=4,
                  run_permutation_test=False, n_perm=200, run_bootstrap=False, n_boot=200, time_model="spline", model_split=True,
                  use_baseline=True, adjust="auto", n_form="log", n_values=None):
     '''logit = True            # model logit(probability_1) instead of the raw probability
     eps = 1e-4                # clip probabilities away from 0/1 before the logit
-    adjust                    None, "slot", "n_quest_add" or "n_quest_int" (see helpers.adjustment_spec);
+    use_baseline              True: also report/plot the growth of the gap since the baseline
+                              (5th percentile of time), next to the gap itself
+    adjust                    None, "slot", "slot_add", "n_quest_add" or "n_quest_int" (see helpers.adjustment_spec);
                               "auto" (default) = "slot" if model_split else None
     n_form                    form of the n_quest term: "log", "linear" or "cat"
     n_values                  n_quest values for the gap-at-fixed-n curves (n_quest_int only);
                               default: 10th/35th/65th/90th percentiles
     '''
-    SPLINE_DF = spline_df  # flexibility of the time trend; 3-5 is typical, check sensitivity
+ 
     if time_model == "spline":
         TIME_TERM = f"cr(time, df={spline_df}, constraints='center')"
     elif time_model == "quadratic":
@@ -70,7 +85,7 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
         raise ValueError("time_model must be 'spline' or 'quadratic'")
     adjust = _resolve_adjust(adjust, model_split)
     ADJ, adj_col, _ = adjustment_spec(adjust, n_form)
-
+ 
     def prepare(raw):
         COLUMNS = {v: k for k, v in columns.items()}
         df = raw.rename(columns=COLUMNS)[list(COLUMNS.values())].dropna()
@@ -80,13 +95,13 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
             df["y"] = np.log(p / (1 - p))
         assert df["group"].nunique() == 2, "expected exactly two classes in true_label"
         return df
-
+ 
     df = prepare(raw)
     _check_adjust_column(df, adjust)
     # df = simulate_data()              # <- uncomment to run on simulated data instead
     print(f"{df['subject'].nunique()} subjects, {len(df)} observations")
     print(f"Model: y ~ {TIME_TERM} * C(group){ADJ}\n")
-
+ 
     # Steps 1-2: models and global test
     full, null = fit_full_and_null(df, TIME_TERM, adj=ADJ)
     stat, dof, p = lrt(full, null)
@@ -95,27 +110,33 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
     else:
         what = "class affects level or shape" + (f", adjusted for {ADJ_LABEL[adjust]}" if adjust else "")
     print(f"Global LRT ({what}): chi2={stat:.2f}, df={dof}, p={p:.3g}")
-
-    # Step 3: difference curve (refit with REML for less biased variance components)
+ 
+    # Step 3: difference curves (refit with REML for less biased variance components)
+    #   gap:    Delta(t) itself
+    #   growth: Delta(t) - Delta(baseline_time), how much the gap has grown since the baseline
     full_reml = fit_mixed(f"y ~ {TIME_TERM} * C(group){ADJ}", df, reml=True)
-    baseline_time = df["time"].quantile(0.05) if use_baseline else None
-    curve, crit, groups = difference_curve(full_reml, df, model_split=adjust, baseline_time=baseline_time)
-    print(f"Simultaneous critical value: {crit:.2f} (vs 1.96 pointwise)")
-    intervals = significant_intervals(curve)
-    if intervals:
-        print("Simultaneous band excludes 0 on: "
-              + ", ".join(f"[{a:.2f}, {b:.2f}]" for a, b in intervals))
-        print(f"-> difference DETECTABLE from t ≈ {intervals[0][0]:.2f}")
-    else:
-        print("No time interval where the difference is significant.")
-
+    gap, crit_gap, groups = difference_curve(full_reml, df, model_split=adjust)
+    _report_curve(gap, crit_gap, f"Gap Δ(t) = {groups[1]} − {groups[0]}")
+    growth, baseline_time = None, None
+    if use_baseline:
+        baseline_time = df["time"].quantile(0.05)
+        growth, crit_growth, _ = difference_curve(full_reml, df, model_split=adjust,
+                                                  baseline_time=baseline_time)
+        _report_curve(growth, crit_growth,
+                      f"Growth of the gap since baseline t = {baseline_time:.2f}: Δ(t) − Δ(t0)")
+ 
     # Step 4: change-point estimate of the onset
     tau_hat, tau_ci, profile = changepoint_profile(df, time_term=TIME_TERM+ADJ)
     print(f"\nChange-point onset: tau = {tau_hat:.2f}, "
           f"approx. 95% CI [{tau_ci[0]:.2f}, {tau_ci[1]:.2f}]")
     if adjust:
         print(f"  (conditional on {ADJ_LABEL[adjust]}: the hinge is fitted on top of the adjustment terms)")
-
+ 
+    by_class = changepoint_by_class(df, adj=class_adjustment("slot_add"))   # add adj=class_adjustment(adjust, n_form) to adjust
+    for g, r in by_class.items():
+        print(f"class {g}: tau = {r['tau']:.2f} [{r['ci'][0]:.2f}, {r['ci'][1]:.2f}], "
+            f"delta = {r['delta']:.3f}, loglik gain = {r['d_ll']:.1f}")
+ 
     #step 5: does the class gap depend on the adjustment variable?
     by_value = None
     if adjust == "slot":
@@ -135,6 +156,11 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
         het_slope = fit_mixed(f"y ~ {TIME_TERM} * C(group){ADJ} + " + " + ".join(slope_cols), d)
         stat, dof, p = lrt(het_slope, full)
         print(f"\nDoes the gap's time trend differ by slot? chi2={stat:.2f}, df={dof}, p={p:.3g}")
+    elif adjust == "slot_add":
+        f_int = fit_mixed(f"y ~ {TIME_TERM} * C(group) + C(split) * C(group)", df)
+        stat, dof, p = lrt(f_int, full)
+        print(f"\nDoes the class gap differ by slot? (slot x class vs additive slot) "
+              f"chi2={stat:.2f}, df={dof}, p={p:.3g}")
     elif adjust in ("n_quest_add", "n_quest_int"):
         add_terms, _, _ = adjustment_spec("n_quest_add", n_form)
         int_terms, _, _ = adjustment_spec("n_quest_int", n_form)
@@ -149,18 +175,19 @@ def run_analysis(raw, columns=preset_columns, logit=True, eps=1e-4, path=None, s
             for v, cv in by_value.items():
                 print(f"  n_quest = {v}: t in [{cv['time'].min():.2f}, {cv['time'].max():.2f}], "
                       f"significant from t ≈ {_first_onset(cv):.2f}")
-
+ 
     if path:
-        print("\nSaved plot:", plot_results(df, full_reml, curve, groups, profile, path=path,
-                                            model_split=adjust, by_value=by_value))
-
+        print("\nSaved plot:", plot_results(df, full_reml, gap, groups, path=path,
+                                            model_split=adjust, by_value=by_value,
+                                            growth=growth, baseline_time=baseline_time))
+        cp_path = path.rsplit(".", 1)[0] + "_changepoint.png"
+        print("Saved plot:", plot_changepoints(profile, tau_hat, tau_ci, by_class, path=cp_path))
+ 
     # Step 5 (slow; uncomment for robustness checks)
     if run_permutation_test:
         obs, p_perm = permutation_lrt(df, TIME_TERM,n_perm=n_perm, adj=ADJ); print(f"Permutation p = {p_perm:.3g}")
     if run_bootstrap:
         ci_boot, _ = cluster_bootstrap_tau(df, TIME_TERM+ADJ,n_boot=n_boot); print(f"Bootstrap tau CI: {ci_boot}")
-
-
 
 def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="model_comparison.png",
                     baseline_quantile=0.05, max_time=None, n_sim=10000, matched_sets=(False, True), nested_comparison=False,
@@ -194,37 +221,49 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
     SPLINE_8 = f"cr(time, df=8, constraints='center')"
     QUADRATIC = "(center(time) + I(center(time)**2))"
     specs = {                         # name -> (time term, adjustment, random-effect structure)
-        "spline_4":                 (SPLINE_4, None, "subject"),
-        "spline_4_w_slot":          (SPLINE_4, "slot", "subject"),
-        "spline_4_w_nq_add":        (SPLINE_4, "n_quest_add", "subject"),
-        "spline_4_w_nq_int":        (SPLINE_4, "n_quest_int", "subject"),
-        "spline_4_uncorr":          (SPLINE_4, None, "subject_uncorr"),
-        "spline_4_w_slot_uncorr":   (SPLINE_4, "slot", "subject_uncorr"),
-        "spline_4_w_nq_add_uncorr": (SPLINE_4, "n_quest_add", "subject_uncorr"),
-        "spline_4_w_nq_int_uncorr": (SPLINE_4, "n_quest_int", "subject_uncorr"),
+        "spline_4":                 (SPLINE_4, None, "subject"), #spline with subj level random effects
+        "spline_4_uncorr":          (SPLINE_4, None, "subject_uncorr"), #spline with subj level random effects but no correlation between intercept and slope
         "spline_4_w_match":         (SPLINE_4, None, "set"),
+
+        "spline_4_w_slot":          (SPLINE_4, "slot", "subject"), #subj level random effects and q adjustment
+        "spline_4_w_slot_uncorr":   (SPLINE_4, "slot", "subject_uncorr"),
         "spline_4_w_slot_match":    (SPLINE_4, "slot", "set"),
+
+        "spline_4_w_nq_add":        (SPLINE_4, "n_quest_add", "subject"), #subj level random effects and adjustment for number of questionnaires
+        "spline_4_w_nq_add_uncorr": (SPLINE_4, "n_quest_add", "subject_uncorr"),
         "spline_4_w_nq_add_match":  (SPLINE_4, "n_quest_add", "set"),
+
+        "spline_4_w_nq_int":        (SPLINE_4, "n_quest_int", "subject"), #subj level random effects and interaction between number of questionnaires and class
+        "spline_4_w_nq_int_uncorr": (SPLINE_4, "n_quest_int", "subject_uncorr"),
         "spline_4_w_nq_int_match":  (SPLINE_4, "n_quest_int", "set"),
-        "spline_8":                 (SPLINE_8, None, "subject"),
-        "spline_8_uncorr":          (SPLINE_8, None, "subject_uncorr"),
-        "spline_8_w_match":         (SPLINE_8, None, "set"),
-        "quadratic_w_slot":         (QUADRATIC, "slot", "subject"),
+        
+        "spline_4_w_slot_add":        (SPLINE_4, "slot_add", "subject"),
+        "spline_4_w_slot_add_uncorr": (SPLINE_4, "slot_add", "subject_uncorr"),
+        "spline_4_w_slot_add_match":  (SPLINE_4, "slot_add", "set"),
+        #"spline_8":                 (SPLINE_8, None, "subject"),
+        #"spline_8_uncorr":          (SPLINE_8, None, "subject_uncorr"),
+        #"spline_8_w_match":         (SPLINE_8, None, "set"),
         "quadratic":                (QUADRATIC, None, "subject"),
+        "quadratic_w_slot":         (QUADRATIC, "slot", "subject"),
     }
     # same fixed effects, different random effects: (correlated subject, uncorrelated subject, set)
     re_triples = [("spline_4", "spline_4_uncorr", "spline_4_w_match"),
                   ("spline_4_w_slot", "spline_4_w_slot_uncorr", "spline_4_w_slot_match"),
                   ("spline_4_w_nq_add", "spline_4_w_nq_add_uncorr", "spline_4_w_nq_add_match"),
                   ("spline_4_w_nq_int", "spline_4_w_nq_int_uncorr", "spline_4_w_nq_int_match"),
-                  ("spline_8", "spline_8_uncorr", "spline_8_w_match")]
+                  ("spline_8", "spline_8_uncorr", "spline_8_w_match"), 
+                  ("spline_4_w_slot_add", "spline_4_w_slot_add_uncorr", "spline_4_w_slot_add_match")]
     nested_pairs = [("spline_4_w_slot", "spline_4"),               # (bigger, smaller) model
                     ("spline_4_w_nq_add", "spline_4"),
                     ("spline_4_w_nq_int", "spline_4_w_nq_add"),
                     ("spline_4_w_slot_match", "spline_4_w_match"),
                     ("spline_4_w_nq_add_match", "spline_4_w_match"),
                     ("spline_4_w_nq_int_match", "spline_4_w_nq_add_match"),
-                    ("quadratic_w_slot", "quadratic")]
+                    ("quadratic_w_slot", "quadratic"),
+                    ("spline_4_w_slot_add", "spline_4"),
+                    ("spline_4_w_slot", "spline_4_w_slot_add"),             # does the gap differ by slot?
+                    ("spline_4_w_slot_add_match", "spline_4_w_match"),
+                    ("spline_4_w_slot_match", "spline_4_w_slot_add_match"),]
 
     # --- data -----------------------------------------------------------------
     COLUMNS = {v: k for k, v in columns.items()}
@@ -262,7 +301,7 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
     rows, fits, curves, ml_fits = [], {}, {}, {}
     for base in specs:
         tt, adjust, re = specs[base]
-        name = base + (" + set" if re == "set" else "")
+        name = base 
         adj, _, _ = adjustment_spec(adjust, n_form)
         print(f"Fitting {name} ...")
         kw = dict(re_structure=re, re_center=re_center)
@@ -322,7 +361,7 @@ def compare_models(raw, columns=preset_columns, logit=True, eps=1e-4, path="mode
         print(table["set_var"].dropna().round(4).to_string())
     if len(re_tests):
         print("\nRandom-effect tests (same fixed effects)")
-        print("  matched-set variance: '+ set' vs '_uncorr' differ ONLY by the set variance;")
+        print("  matched-set variance: 'w_match' vs '_uncorr' differ ONLY by the set variance;")
         print("                        p is boundary-corrected (half the chi2(1) p-value)")
         print("  intercept-slope correlation: what the matched models give up (depends on re_center)")
         print(re_tests.round(4).to_string())

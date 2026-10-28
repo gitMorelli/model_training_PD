@@ -37,7 +37,7 @@ def get_input_file_path(name):
 
 params = {
     #input info
-    "input_file":get_input_file_path("trained_deep"),
+    "input_file":get_input_file_path("statistics"), #statistics, trained_features, trained_deep
     "force_case_dt": True, #if True it will force the case_dt to the value in the time_df, if False it will use the case_dt in the input_file
     "per_modality": ['all','X_window','digit_window','text_window'], #if "all_combinations" combinations are built
     #this is used if the file path is a directory -> i have per modality results
@@ -56,18 +56,18 @@ params = {
     "balancing_factor": 3,
 
     'mask_features': True, #if True it will mask the features according to the logic in the function mask_features
-    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit_original', #'X_original' 'digit_original' 'text_original'
+    'min_time': None, #minimum time to include in the analysis
+    'max_time': 0, #maximum time to include in the analysis
 
     #statistical analysis parameters
     'time_model': 'spline', #spline or quadratic
     'dof_spline': 4, #degrees of freedom for the spline model
     'use_split': True, #if True it will use the split column in the statistical analysis, if False it will not use it
-    'adjust': 'auto', #'auto' (= 'slot' if use_split else None), None, 'slot', 'n_quest_add', 'n_quest_int'
+    'adjust': "slot_add", #'auto' (= 'slot' if use_split else None), None, 'slot', 'n_quest_add', 'n_quest_int', "slot_add"
     'n_form': 'log', #form of the n_quest term: 'log', 'linear', 'cat'
-    'min_time': None, #minimum time to include in the analysis
-    'max_time': 5, #maximum time to include in the analysis
-    'type_of_analysis': 'compare_models', #'compare_steps', 'single_model', 'compare_models'
+    'type_of_analysis': 'single_model', #'compare_steps', 'single_model', 'compare_models'
 }
 
 params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths('PD', 
@@ -87,7 +87,7 @@ params["type_of_input"] = get_type_of_input(params)
 
 VERBOSE = True
 SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/time_series_analysis"
-EXPERIMENT = "statistical_analysis" #"time_resolved_discrimination","statistical_analysis" #"time_series_comparison" #"plot_property" 
+EXPERIMENT = "time_series_comparison" #"time_resolved_discrimination","statistical_analysis" #"time_series_comparison" #"plot_property" 
 os.makedirs(SAVE_PATH, exist_ok=True)
 
 def main(path=None):
@@ -143,8 +143,9 @@ def main(path=None):
     #convert the set column to int
     df['set'] = df['set'].astype(int)
 
-    df = df.sort_values(["unique_id", "slot"])
-    df["n_quest"] = df.groupby("unique_id").cumcount() + 1   # 1st, 2nd, 3rd... completed questionnaire
+    if 'slot' in df.columns:
+        df = df.sort_values(["unique_id", "slot"])
+        df["n_quest"] = df.groupby("unique_id").cumcount() + 1   # 1st, 2nd, 3rd... completed questionnaire
 
     min_str='smallest'
     max_str='largest'
@@ -165,9 +166,11 @@ def main(path=None):
 
     print(EXPERIMENT)
     if EXPERIMENT == "time_series_comparison":
-        compare_signals(df, signal_columns=properties, n_steps=10, step_is_years=False,
+        local_save_path = os.path.dirname(params['input_file'])
+        n=5
+        compare_signals(df, signal_columns=properties, n_steps=n, step_is_years=False,
                     class_names=("negative", "positive"), min_count=1, power=2,
-                    save_path=SAVE_PATH, save_name="signal_comparison", only_common_rows=False)
+                    save_path=local_save_path, save_name=f"signal_comparison_{n}", only_common_rows=False)
     elif EXPERIMENT == "plot_property":
         if path is not None:
             local_save_path = os.path.dirname(path)

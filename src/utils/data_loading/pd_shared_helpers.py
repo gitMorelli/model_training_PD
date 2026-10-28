@@ -491,7 +491,12 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             return None
 
         sequence = frames if debug else torch.stack(frames, dim=0)  # (T_i, n_views, C, H, W)
-        return sequence, questionnaires, modalities, resized_list, global_properties, local_properties, torch.stack(masks, dim=0)  # (T_i, n_views)
+        return sequence, questionnaires, modalities, resized_list, global_properties, local_properties, torch.stack(masks, dim=0)  
+        '''
+        sequence -> (T_i, n_views, C, H, W)
+        questionnaires -> list of T_i questionnaire numbers
+        modalities -> list of T_i lists each containing n_views modality names in order
+        '''
 
     return build_subject_sequence
 

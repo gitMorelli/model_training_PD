@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=time_series_analysis
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/time_series_analysis.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/time_series_analysis.err
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/time_series_analysis_2.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/time_series_analysis_2.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=4              # Number of CPU cores per task

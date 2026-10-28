@@ -31,7 +31,7 @@ def _information_criteria(res):
 # ----------------------------------------------------------------------------
 # Adjustments: questionnaire slot, or number of questionnaires behind the prediction
 # ----------------------------------------------------------------------------
-ADJUSTMENTS = (None, "slot", "n_quest_add", "n_quest_int")
+ADJUSTMENTS = (None, "slot", "slot_add", "n_quest_add", "n_quest_int")
 
 
 def adjustment_spec(adjust, n_form="log"):
@@ -53,6 +53,8 @@ def adjustment_spec(adjust, n_form="log"):
         return "", None, False
     if adjust is True or adjust == "slot":
         return " + C(split) * C(group)", "split", True
+    if adjust == "slot_add":                                  # NEW
+        return " + C(split)", "split", True
     if adjust in ("n_quest_add", "n_quest_int"):
         term = {"log": "np.log(n_quest)", "linear": "n_quest", "cat": "C(n_quest)"}[n_form]
         if adjust == "n_quest_int":
@@ -64,7 +66,7 @@ def adjustment_spec(adjust, n_form="log"):
 def _adj_col(model_split):
     """Prediction column of an adjustment: True / "slot" -> "split";
     "n_quest_add" / "n_quest_int" -> "n_quest"; a column name passes through; falsy -> None."""
-    if model_split is True or model_split == "slot":
+    if model_split is True or model_split in ("slot", "slot_add"):
         return "split"
     if model_split in ("n_quest_add", "n_quest_int"):
         return "n_quest"

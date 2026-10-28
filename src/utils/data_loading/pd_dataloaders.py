@@ -55,12 +55,49 @@ def _maybe_aggregate(samples, field_name):
         return agg([s[idx] for s in samples])
     return None
 
-# MARK: - Yield samples
+def _get_unsupervised_batch(sequence, questionnaires, modalities, n,replace=False, generator=None):
+    """
+    sequence:       tensor (T, n_views, C, H, W)
+    questionnaires: list of length T
+    modalities:     list of T lists, each of length n_views
+    n:              number of (C, H, W) images to sample
+
+    Returns:
+        images:  tensor (n, C, H, W)
+        mods:    list of n modality names
+        quests:  list of n questionnaire numbers
+    """
+    T, V = sequence.shape[:2]
+    total = T * V
+
+    if replace:
+        flat_idx = torch.randint(total, (n,), generator=generator)
+    else:
+        if n > total:
+            raise ValueError(f"Cannot sample {n} images without replacement from {total}")
+        flat_idx = torch.randperm(total, generator=generator)[:n]
+
+    t_idx = flat_idx // V   # time step
+    v_idx = flat_idx % V    # view within that step
+
+    images = sequence[t_idx.to(sequence.device), v_idx.to(sequence.device)]  # (n, C, H, W)
+
+    t_list, v_list = t_idx.tolist(), v_idx.tolist()
+    mods = [modalities[t][v] for t, v in zip(t_list, v_list)]
+    quests = [questionnaires[t] for t in t_list]
+
+    return images, mods, quests
+
+# MARK: Dataset for time series stream
 def create_sequence_flattener_PD_multiview(transform_func, augmentation_transform_list, n_views,
                                            modality_string_list, original_modality_names,
                                            exclusion_set, exp_params=None,huggingface_transform=False,
                                            invert_color=False, grid_dict=None, censor_time='pre_diagnosis',
                                            filter_modality='number_random', debug=False, train_df=None, is_val=False):
+    #get values from exp_params if not provided
+    unsupervised_pretrain=exp_params.get('unsupervised_pretrain', False) if exp_params else False
+    unsup_kwarks=exp_params.get('unsupervised_kwargs', {'n_im_per_subj': 10}) if exp_params else {}
+
     #check if you have a column called 'synth_label' in the train_df
     if train_df is not None and 'synth_label' in train_df.columns:
         is_synthetic = True
@@ -112,7 +149,13 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                 continue
 
             sequence, questionnaires, modalities, resized_list, global_properties, local_properties, view_mask  = result
-            yield sequence, label, subject_id, questionnaires, modalities, resized_list, global_properties, local_properties, view_mask 
+
+            if unsupervised_pretrain:
+                n_im_per_subj = unsup_kwarks.get('n_im_per_subj', 10)
+                sequence, questionnaires, modalities = _get_unsupervised_batch(sequence, questionnaires, modalities, n_im_per_subj, generator=None)
+                yield sequence, questionnaires, modalities
+            else:
+                yield sequence, label, subject_id, questionnaires, modalities, resized_list, global_properties, local_properties, view_mask 
 
     return flatten_samples
 
@@ -133,8 +176,22 @@ def collate_variable_sequences_PD(samples, debug=False):
                                    global_properties=global_properties,
                                    local_properties=local_properties, view_mask=view_mask)
 
+def _get_compose(grouped=False, unsupervised_pretrain=False):
+    if grouped:
+        return create_sequence_group_flattener_PD_multiview
+    elif unsupervised_pretrain:
+        return create_sequence_flattener_PD_multiview
+    else:
+        return create_sequence_flattener_PD_multiview
 
-#------ Build dataset --------
+def _get_collate(grouped=False, unsupervised_pretrain=False):
+    if grouped:
+        return collate_groups_PD
+    elif unsupervised_pretrain:
+        return lambda samples, debug=False: samples  # No collation for unsupervised pretraining
+    else:
+        return collate_variable_sequences_PD
+
 def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transform=None, exclusion_set=set(), modality='X',
                        huggingface_transform=False,augmentation_transform=None, invert_color=False,n_views=1, grid_dict = None,
                        censor_time='pre_diagnosis', filter_modality='digit', debug=False, grouped=False, train_df=None, exp_params=None, 
@@ -142,6 +199,8 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     '''
     if n_views is fractional i sample a fraction n_view of the patches for each image; else i use the same n_view for all iamges
     '''
+    #get args from exp_params if not provided
+    unsupervised_pretrain = exp_params.get('unsupervised_pretrain', False) 
     
     if isinstance(modality, list):
         modality_string = [m.split('_')[0] for m in modality]  # Normalize to base modality names (keep original name for debugging)
@@ -177,31 +236,33 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     if shuffle_buffer: 
         dataset = dataset.shuffle(shuffle_buffer) #shuffle the samples
 
-    if grid_dict: 
-        if modality_string != 'all' and not isinstance(modality, list) and n_views >= 1:
-            raise ValueError("Not implemented anymore, see version before 15/10/26")
-        elif isinstance(modality, list):
-            compose_fn = create_sequence_group_flattener_PD_multiview if grouped else create_sequence_flattener_PD_multiview
-            collate_fn = collate_groups_PD if grouped else collate_variable_sequences_PD
+    if not grid_dict: 
+        raise ValueError("grid_dict must be provided for PD dataset preparation.")
+    if modality_string != 'all' and not isinstance(modality, list) and n_views >= 1:
+        raise ValueError("Not implemented anymore, see version before 15/10/26")
+    elif isinstance(modality, list):
+        compose_fn = _get_compose(grouped=grouped, unsupervised_pretrain=unsupervised_pretrain)
+        collate_fn = _get_collate(grouped=grouped, unsupervised_pretrain=unsupervised_pretrain)
 
-            dataset = (dataset
-                #.decode(decode_approach)
-                .compose(compose_fn(transform, augmentation_transform, n_views=n_views, modality_string_list=modality_string,
-                                    exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
-                                    grid_dict=grid_dict, censor_time=censor_time,
-                                    original_modality_names=modality, filter_modality=filter_modality, debug=debug, train_df=train_df,
-                                    exp_params=exp_params, is_val=is_val)) # This replaces .map() and .select()
-                .batched(batch_size,
-                        collation_fn=partial(collate_fn, debug=debug),
-                        partial=partial_batch)
-            )
-        else:
-            raise ValueError("grid_dict must be provided for PD dataset preparation.")
+        dataset = (dataset
+            #.decode(decode_approach)
+            .compose(compose_fn(transform, augmentation_transform, n_views=n_views, modality_string_list=modality_string,
+                                exclusion_set=exclusion_set, huggingface_transform=huggingface_transform, invert_color=invert_color,
+                                grid_dict=grid_dict, censor_time=censor_time,
+                                original_modality_names=modality, filter_modality=filter_modality, debug=debug, train_df=train_df,
+                                exp_params=exp_params, is_val=is_val)) # This replaces .map() and .select()
+            .batched(batch_size,
+                    collation_fn=partial(collate_fn, debug=debug),
+                    partial=partial_batch)
+        )
         
     
     return dataset
 
-#pipelines
+# MARK: Dataset for unsupervised pre-training
+
+
+# MARK: - Prepare loaders
 def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, 
                        SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None, cross_val=False, one_only=False, persistent_workers=True,
                        running_eval=False, partial_batch=False, merge_shards=False):
@@ -281,7 +342,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         val_loader = None
         val_dataset = None
     return train_loader, val_loader, train_dataset, val_dataset
-####################################################################################################################
+
 
 
 
