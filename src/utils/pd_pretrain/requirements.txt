@@ -1,0 +1,7 @@
+torch>=2.4
+lightning>=2.4
+diffusers>=0.30
+jsonargparse[signatures]>=4.27
+tensorboard
+pillow
+numpy

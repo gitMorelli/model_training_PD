@@ -21,6 +21,10 @@ def return_file_paths(problem,grouped,pre_training):
         list_of_ids_paths = "/home/a_morelli/datasets/id_lists/handedness_training_set_2_10_26.parquet"
         data_folder = "/mnt/beegfs02/scratch/a_morelli/model_training/shards/PDpretraining/final_png_whitebg_21_07_26"
         grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26"
+    elif problem == 'unsupervised_pretraining':
+        list_of_ids_paths = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet"
+        data_folder = "/mnt/beegfs02/scratch/a_morelli/model_training/shards/PDpretraining/final_png_whitebg_21_07_26"
+        grid_dict_path = "/home/a_morelli/datasets/id_lists/h5/pre_training_data_h5_21_07_26"
     return list_of_ids_paths, data_folder, grid_dict_path
 
 def return_dt_path(input_path):
