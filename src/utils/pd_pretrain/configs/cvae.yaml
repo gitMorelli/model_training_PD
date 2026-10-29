@@ -1,3 +1,6 @@
+experiment:
+  name: cvae
+
 model:
   class_path: pdhw.ConditionalVAE
   init_args:
@@ -19,11 +22,13 @@ model:
     ema_decay: 0.999
 
 trainer:
+  #added by me
+  val_check_interval: 0.25
+  #given 
   max_epochs: 200
   precision: bf16-mixed     # use 32-true on CPU / older GPUs
   gradient_clip_val: 1.0
   log_every_n_steps: 20
-  default_root_dir: runs/cvae
   callbacks:
     - class_path: pdhw.callbacks.PreviewCallback
       init_args: {every_n_epochs: 5, num_samples: 16}
@@ -32,10 +37,3 @@ trainer:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args: {logging_interval: step}
 
-# Replace with your own LightningDataModule (same batch contract).
-data:
-  class_path: pdhw.synthetic.SyntheticDataModule
-  init_args:
-    image_size: 32
-    mode: single
-    batch_size: 128

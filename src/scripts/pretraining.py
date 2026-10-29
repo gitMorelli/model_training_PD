@@ -1,3 +1,4 @@
+from __future__ import annotations
 import tarfile
 import time
 import io
@@ -6,6 +7,8 @@ from PIL import Image, ImageOps
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 import os
+from pathlib import Path
+import yaml
 import pandas as pd 
 import torch.nn as nn
 import time
@@ -42,7 +45,9 @@ from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augme
 from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
 from src.utils.tabular_data_utils import preprocess_PD_csv
 
-from src.scripts.train_PD_model import get_input_modality
+from src.scripts.train_PD_model import get_input_modality, _resolve_precision, _selected_properties_get_dims, override_val_exclusion 
+from src.utils.pd_pretrain import load_config, instantiate
+from src.utils.training_utils import set_automatic_hyperparameters
 
 
 
@@ -64,8 +69,6 @@ def main():
         #experiment parameters
         'data_modality': get_input_modality('window_3x_2d_1t'),#'window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
         
-        #loss options
-        
         'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
         #if 'last_q' with the first last_q equal to 0
         'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
@@ -75,11 +78,6 @@ def main():
         #model definition
         'model': "convnext_tiny",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
         #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    
-        'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
-        'align_train_metrics_to_val': True,  
-        #val and align are set authomatically: to none if pre_training is not active and PD; to 0.3 and True if problem==handedness
-        'min_window_steps': 50,
 
         #Transforms definitions
         'norm_mu': 'imagenet', 
@@ -94,6 +92,7 @@ def main():
     
         
         #Training params definition
+        'max_val_samples': 2000, #reduce the number of samples in the validation set to 1000 for pre-training
         'batch_size': 16,
         'num_epochs': 60,
         'max_steps': -1, #N or -1
@@ -114,12 +113,77 @@ def main():
         'prefetch_factor': 4,
     }
     RESTORE = False
+    VERBOSE = True
     version_override =  7
+    source_path = "home/a_morelli/models/model_training_logs/pre_trained_models/unsupervised"
+    exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
+    exp_params = set_automatic_hyperparameters(exp_params)
+    SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shard-*.tar")
+    SHARD_PATTERN_val = os.path.join(exp_params['data_folder'],"val/worker*_shard-*.tar")
+    SAVE_DEBUG_PATH = "/home/a_morelli/vscode_projects/model_training/data/debug_training"
 
     exp_params = _set_fixed_exp_parameters(exp_params)
+
+    #read the cfg file
+    cfg = load_config()  # plain nested dict: cfg["model"]["init_args"]["lr"], cfg["trainer"]["max_epochs"], ...
+    exp_cfg = cfg.get("experiment", {})
+    exp_name = exp_cfg.get("name", "default")
+    num_workers = cfg.get("num_workers", 4)
+    prefetch_factor = exp_params['prefetch_factor'] if num_workers > 0 else None
+    exp_params['precision'] = _resolve_precision(exp_params['precision'])
+
+    #set variables
+    root_path = os.path.join(source_path, exp_name)
+    torch.set_float32_matmul_precision("high")
+    L.seed_everything(exp_params['seed'], workers=True)
+    exp_params['norm_mu'],exp_params['norm_std'] = get_mu_std(exp_params, verbose=VERBOSE)
     
 
+    #prepare variables
+    grid_dict = load_grid_dict(exp_params)
+    train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
+    train_df, *_ = preprocess_PD_csv(train_df,exp_params['selected_properties'], split_col='split')
+    n_local,n_global = _selected_properties_get_dims(exp_params, train_df)
+    print(f"n_local: {n_local}, n_global: {n_global}", flush=True)
+    exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=exp_params['class_col'])
+    val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
+
+    transform = get_transforms(exp_params, None)
+    train_loader,val_loader,_,_= prepare_loaders_PD(num_workers,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
+                                                                           grid_dict, transform, 
+                                                                           SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
+                                                                           train_df=train_df, merge_shards=exp_params['merge_shards'])
+    
+    #define model
+    model = instantiate(cfg["model"])
+
+    #define callbacks
+    trainer_cfg = dict(cfg.get("trainer", {}))
+    callbacks = [instantiate(c) for c in trainer_cfg.pop("callbacks", [])]
+
+    #define logger
+    model_name = cfg["model"]["class_path"].rsplit(".", 1)[-1]
+    image_size = cfg["data"]["init_args"].get("image_size")
+    logger = TensorBoardLogger(save_dir=root_path, name=f"{model_name}_{image_size}px")
+
+    #define trainer
+    trainer = L.Trainer(**trainer_cfg, logger=logger, callbacks=callbacks, default_root_dir=root_path)
+
+    # Save the config and experiment parameters to the log directory for reproducibility
+    if trainer.is_global_zero:
+        log_dir = Path(trainer.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with open(log_dir / "config.yaml", "w") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False)
+        with open(log_dir / "exp_params.pkl", "wb") as f:
+            pickle.dump(exp_params, f)
+
+    trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=cfg.get("ckpt_path"))
+
+
     return
+
+
 
 def _set_fixed_exp_parameters(exp_params):
     fixed_params = {
@@ -139,6 +203,9 @@ def _set_fixed_exp_parameters(exp_params):
         'custom_pre_trained_weights': None, #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
         'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
         'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
+
+        'balanced_data': False,
+        'balance_validation': False,    
     }
     exp_params.update(fixed_params)
     return exp_params

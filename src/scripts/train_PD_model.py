@@ -306,7 +306,7 @@ def main(exp_params):
         restore(version_override, exp_params)
         return
     
-    write_log, current_version = logging_initialization() 
+    write_log, current_version = logging_initialization(CHECKPOINT_PATH) 
 
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
     train_df, *_ = preprocess_PD_csv(train_df,exp_params['selected_properties'], split_col='split')
@@ -402,7 +402,7 @@ def _resolve_precision(requested: str = "bf16-mixed") -> str:
 
 def override_val_exclusion(train_df, val_exclusion_set, exp_params):
     if exp_params['pre_training']:
-        N=2000
+        N=exp_params.get('max_val_samples', 2000)  #reduce the number of samples in the validation set to 1000 for pre-training
         #reduce the number of samples in the validation set to 1000 for pre-training
         #identify the remaining ids after filtering for val_exclusion_set
         val_df = train_df[train_df['split']=='val']
@@ -744,11 +744,11 @@ def _selected_properties_get_dims(params, train_df):
 
     return local_dims, global_dims
 
-def logging_initialization():
+def logging_initialization(checkpoint_path):
     #read the current version number (starts from 1)
     current_version=1
     #if it exists open the log file in CHECKPOINT_PATH, else create it 
-    log_path = os.path.join(CHECKPOINT_PATH,"experiments_log.csv")
+    log_path = os.path.join(checkpoint_path,"experiments_log.csv")
     if os.path.exists(log_path):
         df = pd.read_csv(log_path)
         #get the maximum version number in the log file and add 1 to it for the current experiment
