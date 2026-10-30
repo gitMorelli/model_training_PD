@@ -7,11 +7,12 @@ cross-entropy is unbounded, and the encoder learns to make the adversary
 confidently WRONG by inflating mu, which keeps modality fully decodable."""
 from __future__ import annotations
 
+from typing import Sequence
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import NUM_MODALITIES
+from . import MODALITIES
 from .base import PretrainModule
 from torch.func import functional_call
 from .cnn import ConvDecoder, ConvEncoder
@@ -19,14 +20,14 @@ from .losses import ReconLoss
 
 
 class _CVAENet(nn.Module):
-    def __init__(self, image_size, channels, blocks_per_stage, z_dim, cond_dim, dropout):
+    def __init__(self, image_size, channels, blocks_per_stage, z_dim, cond_dim, dropout, num_modalities=MODALITIES):
         super().__init__()
         self.encoder = ConvEncoder(channels, blocks_per_stage, out_channels=32, dropout=dropout)
         self.h = image_size // self.encoder.downsample_factor
         flat = 32 * self.h * self.h
         self.to_stats = nn.Linear(flat, 2 * z_dim)
 
-        self.modality_embed = nn.Embedding(NUM_MODALITIES, cond_dim)
+        self.modality_embed = nn.Embedding(len(num_modalities), cond_dim)
         # z also modulates every decoder block through FiLM, so style is not
         # bottlenecked through the initial spatial map alone
         self.cond_mlp = nn.Sequential(nn.Linear(cond_dim + z_dim, cond_dim), nn.SiLU(),
@@ -34,7 +35,7 @@ class _CVAENet(nn.Module):
         self.from_z = nn.Linear(z_dim, 32 * self.h * self.h)
         self.decoder = ConvDecoder(32, channels, blocks_per_stage, cond_dim=cond_dim, dropout=dropout)
 
-        self.adversary = nn.Sequential(nn.Linear(z_dim, 128), nn.SiLU(), nn.Linear(128, NUM_MODALITIES))
+        self.adversary = nn.Sequential(nn.Linear(z_dim, 128), nn.SiLU(), nn.Linear(128, len(num_modalities)))
 
     def encode(self, x):
         h = self.encoder(x).flatten(1)
@@ -84,11 +85,12 @@ class ConditionalVAE(PretrainModule):
         fg_weight: float = 5.0,
         grad_weight: float = 1.0,
         fft_weight: float = 0.0,
+        modalities: Sequence[str] = MODALITIES,
         **base_kwargs,
     ):
         super().__init__(**base_kwargs)
         self.save_hyperparameters()
-        self.net = _CVAENet(image_size, channels, blocks_per_stage, z_dim, cond_dim, dropout)
+        self.net = _CVAENet(image_size, channels, blocks_per_stage, z_dim, cond_dim, dropout, len(modalities))
         self.recon_loss = ReconLoss(fg_weight=fg_weight, grad_weight=grad_weight, fft_weight=fft_weight)
         self.init_ema()
 
@@ -151,5 +153,5 @@ class ConditionalVAE(PretrainModule):
         net = self.eval_net.eval()
         mu, _ = net.encode(x)
         # same z, decoded as each of the 3 modalities: shows what z carries
-        swaps = {f"as_mod{k}": net.decode(mu, torch.full_like(c, k)) for k in range(NUM_MODALITIES)}
+        swaps = {f"as_mod{k}": net.decode(mu, torch.full_like(c, k)) for k in range(len(MODALITIES))}
         return {"input": x, "recon": net.decode(mu, c), **swaps}

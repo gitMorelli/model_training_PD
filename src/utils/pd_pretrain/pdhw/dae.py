@@ -1,10 +1,11 @@
 """Denoising autoencoder with structured (stroke-preserving) corruption."""
 from __future__ import annotations
 
+from typing import Sequence 
 import torch
 import torch.nn as nn
 
-from . import NUM_MODALITIES
+from . import MODALITIES 
 from .base import PretrainModule
 from .blocks import dilate, ink_mask, masked_spatial_mean
 from .cnn import ConvDecoder, ConvEncoder
@@ -82,10 +83,10 @@ class StructuredCorruption(nn.Module):
 
 
 class _DAENet(nn.Module):
-    def __init__(self, channels, blocks_per_stage, latent_channels, cond_dim, dropout):
+    def __init__(self, channels, blocks_per_stage, latent_channels, cond_dim, dropout, num_modalities):
         super().__init__()
         self.encoder = ConvEncoder(channels, blocks_per_stage, latent_channels, dropout)
-        self.modality_embed = nn.Embedding(NUM_MODALITIES, cond_dim) if cond_dim else None
+        self.modality_embed = nn.Embedding(num_modalities, cond_dim) if cond_dim else None
         self.decoder = ConvDecoder(latent_channels, channels, blocks_per_stage, cond_dim, dropout)
 
     def forward(self, x, c):
@@ -115,11 +116,12 @@ class DenoisingAE(PretrainModule):
         fg_weight: float = 5.0,
         grad_weight: float = 1.0,
         fft_weight: float = 0.0,
+        modalities: Sequence[str] = MODALITIES,
         **base_kwargs,
     ):
         super().__init__(**base_kwargs)
         self.save_hyperparameters()
-        self.net = _DAENet(channels, blocks_per_stage, latent_channels, cond_dim, dropout)
+        self.net = _DAENet(channels, blocks_per_stage, latent_channels, cond_dim, dropout, len(modalities))
         self.corrupt = StructuredCorruption(**(corruption or {}))
         self.recon_loss = ReconLoss(fg_weight=fg_weight, grad_weight=grad_weight, fft_weight=fft_weight)
         self.init_ema()

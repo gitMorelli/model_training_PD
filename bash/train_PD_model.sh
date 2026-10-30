@@ -12,7 +12,7 @@
 #--partition=shortq
 #--partition=gpgpuq
 #SBATCH --partition=gpgpuq,visuq
-#SBATCH--gres=gpu:1
+#SBATCH --gres=gpu:1
 #--gres=gpu:a100:1
 #SBATCH --exclude=gpu01,gpu02,gpu04
 

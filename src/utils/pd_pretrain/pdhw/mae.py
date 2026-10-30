@@ -9,12 +9,13 @@ a key-padding mask instead of fixed-length visible sets.
 from __future__ import annotations
 
 import math
+from typing import Sequence
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import NUM_MODALITIES
+from . import MODALITIES
 from .base import PretrainModule
 
 
@@ -41,7 +42,7 @@ def make_transformer(dim: int, depth: int, heads: int, mlp_ratio: float, dropout
 
 class _MAENet(nn.Module):
     def __init__(self, image_size, patch_size, dim, depth, heads, dec_dim, dec_depth, dec_heads,
-                 mlp_ratio, dropout):
+                 mlp_ratio, dropout, num_modalities=MODALITIES):
         super().__init__()
         assert image_size % patch_size == 0, "image_size must be divisible by patch_size"
         self.p = patch_size
@@ -53,7 +54,7 @@ class _MAENet(nn.Module):
         self.patch_embed = nn.Linear(pdim, dim)
         self.register_buffer("pos", sincos_pos_embed(dim, self.grid)[None], persistent=False)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
-        self.modality_token = nn.Embedding(NUM_MODALITIES, dim)
+        self.modality_token = nn.Embedding(len(num_modalities), dim)
         self.encoder = make_transformer(dim, depth, heads, mlp_ratio, dropout)
         self.enc_norm = nn.LayerNorm(dim)
 
@@ -147,12 +148,13 @@ class MaskedAE(PretrainModule):
         ink_patch_threshold: float = 0.02,
         empty_loss_weight: float = 0.05,
         norm_pix_loss: bool = True,
+        modalities: Sequence[str] = MODALITIES,
         **base_kwargs,
     ):
         super().__init__(**base_kwargs)
         self.save_hyperparameters()
         self.net = _MAENet(image_size, patch_size, dim, depth, heads, dec_dim, dec_depth,
-                           dec_heads, mlp_ratio, dropout)
+                           dec_heads, mlp_ratio, dropout, len(modalities))
         self.init_ema()
 
     # ----------------------------------------------------------------- mask

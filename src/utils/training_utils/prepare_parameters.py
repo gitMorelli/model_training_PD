@@ -148,6 +148,8 @@ def set_automatic_hyperparameters(exp_params):
         '''
     elif problem=='PD':
         exp_params['class_col'] = 'diag_park_final1_quest'
+    elif problem=='unsupervised_pretraining':
+        exp_params['class_col'] = 'diag_park_final1_quest'
     
     if exp_params.get('label_smoothing', 0.0)!=0.0:
         exp_params['num_classes'] = 2
@@ -168,11 +170,11 @@ def set_automatic_hyperparameters(exp_params):
         exp_params['use_opt_groups'] = False
     if exp_params.get('feature_extraction', False):
         exp_params['debug']=True
-    if exp_params['grouped'] or exp_params['pre_training']:
+    if exp_params.get('grouped', False) or exp_params.get('pre_training', False):
         exp_params['balance_validation'] = False
         exp_params['balanced_data'] = False
         exp_params['use_balanced_weights'] = False
-    if exp_params['pre_training']:
+    if exp_params.get('pre_training', False):
         exp_params['filter_missing'] = 'all'
         exp_params['censor_time'] = 'all'
     elif problem not in ['handedness']:
@@ -181,8 +183,12 @@ def set_automatic_hyperparameters(exp_params):
     exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
     if isinstance(exp_params['data_modality'],list):
         exp_params['num_tiles'] = len(exp_params['data_modality'])
-    huggingface_transform=True if exp_params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
+
+    huggingface_transform=False
+    if 'model' in exp_params:
+        huggingface_transform=True if exp_params['model'] in ['clip-vit-large-patch14-un', 'clip-vit-large-patch14-inter'] else False
     exp_params['huggingface_transform'] = huggingface_transform
+
     if exp_params['debug']:
         exp_params['custom_transform'] = 'pad_resize_pil' 
     return exp_params

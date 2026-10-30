@@ -40,6 +40,19 @@ class PretrainModule(L.LightningModule):
         self.ema_decay = ema_decay
         self.ema: AveragedModel | None = None
 
+    @property
+    def modalities(self) -> tuple[str, ...]:
+        """Modality names, in id order. Saved in the checkpoint's hyper_parameters."""
+        return tuple(self.hparams.modalities)
+
+    @property
+    def num_modalities(self) -> int:
+        return len(self.modalities)
+
+    @property
+    def mod_to_id(self) -> dict[str, int]:
+        return {name: i for i, name in enumerate(self.modalities)}
+
     # ------------------------------------------------------------------ EMA
     def init_ema(self) -> None:
         if self.ema_decay > 0:
@@ -61,7 +74,10 @@ class PretrainModule(L.LightningModule):
         """Network used for validation / previews / features (EMA if enabled)."""
         return self.ema.module if self.ema is not None else self.net
 
-    def on_train_batch_end(self, outputs, batch, batch_idx):
+    def optimizer_step(self, *args, **kwargs):
+        # called only when the optimizer actually steps, so with
+        # accumulate_grad_batches > 1 the EMA updates once per step, not per micro-batch
+        super().optimizer_step(*args, **kwargs)
         if self.ema is not None:
             self.ema.update_parameters(self.net)
 

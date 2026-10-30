@@ -17,13 +17,13 @@ import torch
 import torch.nn.functional as F
 from diffusers import DDIMScheduler, DDPMScheduler, UNet2DModel
 
-from . import NUM_MODALITIES
+from . import MODALITIES
 from .base import PretrainModule
 from .blocks import dilate, ink_mask, masked_spatial_mean
 
 
 def build_unet(image_size, block_out_channels, layers_per_block, attn_levels, dropout,
-               norm_num_groups, attention_head_dim) -> UNet2DModel:
+               norm_num_groups, attention_head_dim, num_modalities) -> UNet2DModel:
     n = len(block_out_channels)
     down = tuple("AttnDownBlock2D" if i in attn_levels else "DownBlock2D" for i in range(n))
     up = tuple("AttnUpBlock2D" if (n - 1 - i) in attn_levels else "UpBlock2D" for i in range(n))
@@ -39,7 +39,7 @@ def build_unet(image_size, block_out_channels, layers_per_block, attn_levels, dr
         norm_num_groups=norm_num_groups,
         attention_head_dim=attention_head_dim,
         resnet_time_scale_shift="scale_shift",  # AdaGN conditioning
-        num_class_embeds=NUM_MODALITIES + 1,  # last index = null (unconditional)
+        num_class_embeds=num_modalities + 1,  # last index = null (unconditional)
     )
 
 
@@ -76,13 +76,14 @@ class DiffusionPretrainer(PretrainModule):
         feature_draws: int = 4,
         feature_seed: int = 0,
         feature_use_modality: bool = True,
+        modalities: Sequence[str] = MODALITIES,
         **base_kwargs,
     ):
         base_kwargs.setdefault("ema_decay", 0.9995)
         super().__init__(**base_kwargs)
         self.save_hyperparameters()
         self.net = build_unet(image_size, block_out_channels, layers_per_block, set(attn_levels),
-                              dropout, norm_num_groups, attention_head_dim)
+                              dropout, norm_num_groups, attention_head_dim, len(modalities))
         self.scheduler = DDPMScheduler(
             num_train_timesteps=num_train_timesteps,
             beta_schedule="squaredcos_cap_v2",
@@ -90,7 +91,7 @@ class DiffusionPretrainer(PretrainModule):
             clip_sample=False,
         )
         self.register_buffer("alphas_cumprod", self.scheduler.alphas_cumprod.clone(), persistent=False)
-        self.null_class = NUM_MODALITIES
+        self.null_class = len(MODALITIES)
         self.init_ema()
 
     # ------------------------------------------------------------- training
@@ -227,5 +228,5 @@ class DiffusionPretrainer(PretrainModule):
         n = min(8, x.shape[0])
         x, c = x[:n], c[:n]
         recon, res = self.anomaly_maps(x, c, t0=200, num_inference_steps=25)
-        samples = self.sample(torch.arange(n, device=x.device) % NUM_MODALITIES, num_inference_steps=25, seed=0)
+        samples = self.sample(torch.arange(n, device=x.device) % self.num_modalities, num_inference_steps=25, seed=0)
         return {"input": x, "denoised_t200": recon, "residual_x2": (res * 2 - 1).clamp(-1, 1), "samples": samples}

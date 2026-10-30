@@ -245,7 +245,7 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
             .sort_index()
         )
     else:
-        counts = [0,0]  # Default counts if class_col is not present (eg when i iterate in debug mode on pre_training dataset)
+        counts = [train['unique_id'].nunique(),0]  # Default counts if class_col is not present (total number of subjects)
 
     if verbose:
         print("[Prepare exclusion] [post] After applying the exclusion set, the training set has:")

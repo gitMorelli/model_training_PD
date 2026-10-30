@@ -1,8 +1,42 @@
 experiment:
   name: cvae
+  seed: 42
+  #debugging
+  debugging_callbacks: True
+  fast_dev_run: True #can be False, None or True, False and None have same behavior
+  debug: False
+  #training modality
+  selected_properties: [] #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*'], #None or [] means no conditioning on covariates
+  #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
+  global_fusion: late #early, late
+  #experiment parameters
+  data_modality_name: window_view_minimal #mixed_view, window_view, window_view_minimal
+  filter_missing: 'all' #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
+  #if 'last_q' with the first last_q equal to 0
+  censor_time: all_matched #'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+  #censor time is set authomatically to all for pre_training==true and problem in [handedness]
+  filter_modality: digit
+  #Transforms definitions
+  norm_mu: imagenet
+  norm_std: imagenet
+  custom_transform: 2xcrop_resize_normalize #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
+  input_size: 128, #224,32
+  apply_augmentation: None #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
+  #in the code based on the view name
+  invert_color: True
+  to_grayscale: True #if True converts the images to grayscale (1 channel) before feeding them to the model
+  image_pixel_space_augmentations: None #None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
+  
+  #Training params definition
+  'max_val_samples': 2000, #reduce the number of samples in the validation set to 1000 for pre-training
+  'accumulate_grad_batches': 4,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+  'unsupervised_kwargs': {'n_im_per_subj': 10, 'replace':True, 'val_seed': 42, 'input_range': "ink_pm1"},
+  'subj_per_batch': 4, #number of subjects per batch, if None uses batch_size instead
+
+  'prefetch_factor': 4,
 
 model:
-  class_path: pdhw.ConditionalVAE
+  class_path: src.utils.pd_pretrain.pdhw.ConditionalVAE
   init_args:
     image_size: 32                 # must match data
     channels: [32, 64, 128]
@@ -24,13 +58,14 @@ model:
 trainer:
   #added by me
   val_check_interval: 0.25
+  accumulate_grad_batches: 4
   #given 
   max_epochs: 200
   precision: bf16-mixed     # use 32-true on CPU / older GPUs
   gradient_clip_val: 1.0
   log_every_n_steps: 20
   callbacks:
-    - class_path: pdhw.callbacks.PreviewCallback
+    - class_path: src.utils.pd_pretrain.pdhw.callbacks.PreviewCallback
       init_args: {every_n_epochs: 5, num_samples: 16}
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args: {monitor: val/loss, save_last: true, save_top_k: 2}

@@ -7,8 +7,7 @@ Batch contract (what every model expects from your DataLoader):
     by feature extraction.
 """
 
-MODALITIES = ("digit", "checkmark", "text")
-NUM_MODALITIES = len(MODALITIES)
+MODALITIES = ("digit", "checkmark", "text") #default value
 
 from .dae import DenoisingAE  # noqa: E402
 from .mae import MaskedAE  # noqa: E402
@@ -17,7 +16,6 @@ from .diffusion import DiffusionPretrainer  # noqa: E402
 
 __all__ = [
     "MODALITIES",
-    "NUM_MODALITIES",
     "DenoisingAE",
     "MaskedAE",
     "ConditionalVAE",

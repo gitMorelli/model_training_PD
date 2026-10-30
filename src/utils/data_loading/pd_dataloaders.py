@@ -25,6 +25,8 @@ import cv2
 import gc
 import glob
 from typing import NamedTuple, Optional, List
+import zlib
+import warnings
 
 from src.utils.image_processing import get_augmentation_transform, ink_density, sharpness, is_uniform_image, SyntheticTransform, place_patches, get_grid_sample
 from src.utils.image_processing import debug_image_properties
@@ -48,12 +50,27 @@ modalities_map = {
         'digitOrdered': 'number',
         'sent': 'hand_sentences_full'
     }
+ 
+# How to map the transform's output range to [-1, 1] with ink = +1.
+_RANGE_CONVERSIONS = {
+    "ink_pm1": lambda x: x,                # already [-1, 1], ink = +1: no change
+    "paper_pm1": lambda x: -x,             # [-1, 1] but paper = +1 (white = 1)
+    "paper_unit": lambda x: 1.0 - 2.0 * x,  # [0, 1], white paper = 1, dark ink = 0
+    "ink_unit": lambda x: 2.0 * x - 1.0,   # [0, 1], ink = 1 (inverted images)
+}
+ 
+_checked = False  # range/polarity sanity check runs once per process (per worker)
 
 def _maybe_aggregate(samples, field_name):
     idx, agg = OPTIONAL_FIELD_SPECS[field_name]
     if all(len(s) > idx and s[idx] is not None for s in samples):
         return agg([s[idx] for s in samples])
     return None
+
+def _stable_seed(key: str, base_seed: int = 0) -> int:
+    # Python's hash() is randomised per interpreter, so it can differ between runs
+    # (and between workers with the 'spawn' start method). crc32 is stable everywhere.
+    return (base_seed * 1_000_003 + zlib.crc32(key.encode())) % (2**63)
 
 def _get_unsupervised_batch(sequence, questionnaires, modalities, n,replace=False, generator=None):
     """
@@ -96,7 +113,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                                            filter_modality='number_random', debug=False, train_df=None, is_val=False):
     #get values from exp_params if not provided
     unsupervised_pretrain=exp_params.get('unsupervised_pretrain', False) if exp_params else False
-    unsup_kwarks=exp_params.get('unsupervised_kwargs', {'n_im_per_subj': 10}) if exp_params else {}
+    unsup_kwarks=exp_params.get('unsupervised_kwargs', {'n_im_per_subj': 10, 'replace':True}) if exp_params else {}
 
     #check if you have a column called 'synth_label' in the train_df
     if train_df is not None and 'synth_label' in train_df.columns:
@@ -152,14 +169,18 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
 
             if unsupervised_pretrain:
                 n_im_per_subj = unsup_kwarks.get('n_im_per_subj', 10)
-                sequence, questionnaires, modalities = _get_unsupervised_batch(sequence, questionnaires, modalities, n_im_per_subj, generator=None)
+                replace = unsup_kwarks.get('replace', True)
+                gen = (torch.Generator().manual_seed(_stable_seed(subject_id, unsup_kwarks.get('val_seed', 0)))
+                    if is_val else None)   # training stays random
+                sequence, questionnaires, modalities = _get_unsupervised_batch(sequence, questionnaires, modalities, 
+                                                                               n_im_per_subj, generator=gen,replace=replace)
                 yield sequence, questionnaires, modalities
             else:
                 yield sequence, label, subject_id, questionnaires, modalities, resized_list, global_properties, local_properties, view_mask 
 
     return flatten_samples
 
-def collate_variable_sequences_PD(samples, debug=False):
+def collate_variable_sequences_PD(samples, debug=False, **kwargs):
     sequences       = [s[0] for s in samples]
     labels          = torch.stack([s[1] for s in samples])
     subject_ids     = [s[2] for s in samples]
@@ -176,6 +197,91 @@ def collate_variable_sequences_PD(samples, debug=False):
                                    global_properties=global_properties,
                                    local_properties=local_properties, view_mask=view_mask)
 
+# MARK: Unsupervised training
+def _to_single_channel(images: torch.Tensor) -> torch.Tensor:
+    c = images.shape[1]
+    if c == 1:
+        return images
+    if c == 3:  # e.g. RGB output of a Hugging Face transform: average to grayscale
+        return images.mean(dim=1, keepdim=True)
+    raise ValueError(f"expected 1 or 3 channels, got images of shape {tuple(images.shape)}")
+ 
+ 
+def _sanity_check(x: torch.Tensor) -> None:
+    """Warn (once) if values fall outside [-1, 1] or polarity looks inverted.
+ 
+    Handwriting is mostly paper, so the median pixel should be background, i.e.
+    close to -1. A positive median almost always means ink/paper are swapped.
+    """
+    global _checked
+    if _checked:
+        return
+    _checked = True
+    lo, hi, med = x.min().item(), x.max().item(), x.median().item()
+    if lo < -1.01 or hi > 1.01:
+        warnings.warn(f"collate_unsupervised: image values span [{lo:.2f}, {hi:.2f}], expected [-1, 1]. "
+                      f"Check `input_range` or the transform's normalisation.")
+    if med > 0:
+        warnings.warn(f"collate_unsupervised: median pixel = {med:.2f} > 0, so the background looks like "
+                      f"ink. Polarity is probably inverted (expected paper = -1, ink = +1); "
+                      f"check `input_range` and `invert_color`.")
+ 
+def collate_unsupervised(samples, debug: bool = False, **kwargs) -> dict:
+    mod_to_id = kwargs.get('mod_to_id', None)
+    input_range = kwargs.get('input_range', "ink_pm1")
+    check = kwargs.get('check', True)
+
+    if len(samples) == 0:
+        raise ValueError("collate_unsupervised received an empty batch")
+    if input_range not in _RANGE_CONVERSIONS:
+        raise ValueError(f"input_range must be one of {list(_RANGE_CONVERSIONS)}, got {input_range!r}")
+ 
+    images, quests, mods, subjects = [], [], [], []
+    for i, s in enumerate(samples):
+        imgs, q, m = s[0], s[1], s[2]
+        if imgs.ndim != 4:
+            raise ValueError(f"sample {i}: expected images (n, C, H, W), got {tuple(imgs.shape)}")
+        n = imgs.shape[0]
+        if len(q) != n or len(m) != n:
+            raise ValueError(f"sample {i}: {n} images but {len(q)} questionnaires / {len(m)} modalities")
+        images.append(imgs)
+        quests.extend(q)
+        mods.extend(m)
+        if len(s) > 3:
+            subjects.extend([s[3]] * n)
+ 
+    shapes = {tuple(t.shape[1:]) for t in images}
+    if len(shapes) > 1:
+        raise ValueError(f"cannot concatenate images of different sizes in one batch: {sorted(shapes)}")
+ 
+    x = torch.cat(images).float()
+    x = _to_single_channel(x)
+    x = _RANGE_CONVERSIONS[input_range](x)
+    if check:
+        _sanity_check(x)
+    x = x.clamp(-1.0, 1.0)
+ 
+    unknown = sorted({str(m) for m in mods if m not in mod_to_id})
+    if unknown:
+        raise KeyError(f"modality names not in mod_to_id: {unknown}. Known: {list(mod_to_id)}")
+    modality = torch.tensor([mod_to_id[m] for m in mods], dtype=torch.long)
+ 
+    try:
+        questionnaire = torch.tensor([int(q) for q in quests], dtype=torch.long)
+    except (TypeError, ValueError):
+        questionnaire = list(quests)
+ 
+    batch = {"image": x.contiguous(), "modality": modality, "questionnaire": questionnaire}
+    if subjects:
+        batch["subject_id"] = subjects
+ 
+    if debug:
+        print(f"[collate_unsupervised] {len(samples)} subjects -> image {tuple(x.shape)}, "
+              f"range [{x.min():.2f}, {x.max():.2f}], modality counts {torch.bincount(modality, minlength=3).tolist()}",
+              flush=True)
+    return batch
+
+# MARK: build datasets and dataloaders
 def _get_compose(grouped=False, unsupervised_pretrain=False):
     if grouped:
         return create_sequence_group_flattener_PD_multiview
@@ -188,7 +294,7 @@ def _get_collate(grouped=False, unsupervised_pretrain=False):
     if grouped:
         return collate_groups_PD
     elif unsupervised_pretrain:
-        return lambda samples, debug=False: samples  # No collation for unsupervised pretraining
+        return collate_unsupervised
     else:
         return collate_variable_sequences_PD
 
@@ -233,7 +339,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     
 
     shuffle_buffer = exp_params.get('shuffle_buffer', 100) if exp_params else 100
-    if shuffle_buffer: 
+    if shuffle_buffer and not is_val:  # Only shuffle training data, not validation
         dataset = dataset.shuffle(shuffle_buffer) #shuffle the samples
 
     if not grid_dict: 
@@ -243,6 +349,9 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
     elif isinstance(modality, list):
         compose_fn = _get_compose(grouped=grouped, unsupervised_pretrain=unsupervised_pretrain)
         collate_fn = _get_collate(grouped=grouped, unsupervised_pretrain=unsupervised_pretrain)
+        collate_kwargs = dict(mod_to_id=exp_params.get('mod_to_id', None), 
+                              input_range=exp_params['unsupervised_kwargs'].get('input_range', "ink_pm1"), 
+                              check=True)
 
         dataset = (dataset
             #.decode(decode_approach)
@@ -252,14 +361,12 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
                                 original_modality_names=modality, filter_modality=filter_modality, debug=debug, train_df=train_df,
                                 exp_params=exp_params, is_val=is_val)) # This replaces .map() and .select()
             .batched(batch_size,
-                    collation_fn=partial(collate_fn, debug=debug),
+                    collation_fn=partial(collate_fn, debug=debug, **collate_kwargs),
                     partial=partial_batch)
         )
         
     
     return dataset
-
-# MARK: Dataset for unsupervised pre-training
 
 
 # MARK: - Prepare loaders

@@ -52,91 +52,39 @@ from src.utils.training_utils import set_automatic_hyperparameters
 
 
 def main():
-    exp_params = {
-        'seed': 42,
+    #load the config file
+    cfg = load_config()  # plain nested dict: cfg["model"]["init_args"]["lr"], cfg["trainer"]["max_epochs"], ...
+    exp_params = cfg.get("experiment", {})
+    exp_params = _set_fixed_exp_parameters(exp_params)
 
-        'debug': False,
-    
-        #debugging
-        'debugging_callbacks':True,
-        'fast_dev_run': False, #can be False, None or True, False and None have same behavior
-    
-        #training modality
-        'selected_properties': [],#['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*'], #None or [] means no conditioning on covariates
-        #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
-        'global_fusion':'late', #early, late
-    
-        #experiment parameters
-        'data_modality': get_input_modality('window_3x_2d_1t'),#'window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
-        
-        'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
-        #if 'last_q' with the first last_q equal to 0
-        'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
-        #censor time is set authomatically to all for pre_training==true and problem in [handedness]
-        'filter_modality' : 'digit', 
-    
-        #model definition
-        'model': "convnext_tiny",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
-        #clip-vit-large-patch14, clip-vit-large-patch14-inter
-
-        #Transforms definitions
-        'norm_mu': 'imagenet', 
-        'norm_std': 'imagenet',
-        'custom_transform': None, #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-        'input_size': 224, #224,32
-        'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
-        #in the code based on the view name
-        'invert_color':True,
-        'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
-        'image_pixel_space_augmentations': None,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
-    
-        
-        #Training params definition
-        'max_val_samples': 2000, #reduce the number of samples in the validation set to 1000 for pre-training
-        'batch_size': 16,
-        'num_epochs': 60,
-        'max_steps': -1, #N or -1
-        'patience': 20, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
-        'lr_backbone': 5e-5,
-        'lr_classifier_head': 5e-4,
-        'lr_scheduling': "two_stage", #'cosine' # "two_stage", 'step', None
-        'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
-        'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-        'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
-        'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
-        'warmup_fraction': 0.05,   # ~5% of total steps as warmup
-        'accumulate_grad_batches': 4,#8,   # effective batch = batch_size * accumulate_grad_batches or None
-        'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
-        #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
-        'gradient_clip_val': 1.0, #1.0, None
-    
-        'prefetch_factor': 4,
-    }
     RESTORE = False
     VERBOSE = True
     version_override =  7
-    source_path = "home/a_morelli/models/model_training_logs/pre_trained_models/unsupervised"
+    source_path = "/home/a_morelli/models/model_training_logs/pre_trained_models/unsupervised"
     exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
-    exp_params = set_automatic_hyperparameters(exp_params)
     SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shard-*.tar")
     SHARD_PATTERN_val = os.path.join(exp_params['data_folder'],"val/worker*_shard-*.tar")
     SAVE_DEBUG_PATH = "/home/a_morelli/vscode_projects/model_training/data/debug_training"
 
-    exp_params = _set_fixed_exp_parameters(exp_params)
-
     #read the cfg file
-    cfg = load_config()  # plain nested dict: cfg["model"]["init_args"]["lr"], cfg["trainer"]["max_epochs"], ...
-    exp_cfg = cfg.get("experiment", {})
-    exp_name = exp_cfg.get("name", "default")
+    exp_name = exp_params.get("name", "default")
     num_workers = cfg.get("num_workers", 4)
     prefetch_factor = exp_params['prefetch_factor'] if num_workers > 0 else None
-    exp_params['precision'] = _resolve_precision(exp_params['precision'])
+    model_name = cfg["model"]["class_path"].rsplit(".", 1)[-1]
+    image_size = cfg["model"]["init_args"].get("image_size", exp_params['input_size']) #if image_size is specfied in the yaml it should match the one in exp_params['input_size'] otherwise it will be set to the one in exp_params
+    exp_params['data_modality'] = get_input_modality(exp_params['data_modality_name'])
+
+    exp_params = set_automatic_hyperparameters(exp_params)
 
     #set variables
     root_path = os.path.join(source_path, exp_name)
     torch.set_float32_matmul_precision("high")
     L.seed_everything(exp_params['seed'], workers=True)
     exp_params['norm_mu'],exp_params['norm_std'] = get_mu_std(exp_params, verbose=VERBOSE)
+    MODALITIES = _get_unique_modalities(exp_params['data_modality'])
+    exp_params['mod_to_id'] = {name: i for i, name in enumerate(MODALITIES)}
+    cfg["model"]["init_args"]["modalities"] = list(MODALITIES)
+    cfg["trainer"]["precision"] = _resolve_precision(cfg["trainer"]["precision"])
     
 
     #prepare variables
@@ -144,9 +92,15 @@ def main():
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
     train_df, *_ = preprocess_PD_csv(train_df,exp_params['selected_properties'], split_col='split')
     n_local,n_global = _selected_properties_get_dims(exp_params, train_df)
-    print(f"n_local: {n_local}, n_global: {n_global}", flush=True)
+    print(f"[DEBUG] n_local: {n_local}, n_global: {n_global}", flush=True)
     exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=exp_params['class_col'])
+    cfg["trainer"]['val_check_interval'],cfg["trainer"]['max_steps'] =_get_step_counts(counts, exp_params)
     val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
+    exp_params['batch_size'] = exp_params['subj_per_batch'] #batch size is used in the collate function -> it is the subj_per_batch 
+
+    n_im_per_subj = exp_params['unsupervised_kwargs']['n_im_per_subj']
+    print(f"[DEBUG] Batch size is obtained from subj_per_batch ({exp_params['subj_per_batch']}) * n_im_per_subj ({n_im_per_subj}) -> {exp_params['subj_per_batch']*n_im_per_subj}", flush=True)
+    assert image_size == exp_params['input_size'], f"image_size in config ({image_size}) does not match input_size in exp_params ({exp_params['input_size']})"
 
     transform = get_transforms(exp_params, None)
     train_loader,val_loader,_,_= prepare_loaders_PD(num_workers,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
@@ -162,15 +116,13 @@ def main():
     callbacks = [instantiate(c) for c in trainer_cfg.pop("callbacks", [])]
 
     #define logger
-    model_name = cfg["model"]["class_path"].rsplit(".", 1)[-1]
-    image_size = cfg["data"]["init_args"].get("image_size")
     logger = TensorBoardLogger(save_dir=root_path, name=f"{model_name}_{image_size}px")
 
     #define trainer
-    trainer = L.Trainer(**trainer_cfg, logger=logger, callbacks=callbacks, default_root_dir=root_path)
-
+    trainer = L.Trainer(**trainer_cfg, logger=logger, callbacks=callbacks, default_root_dir=root_path, 
+                        enable_progress_bar=False, fast_dev_run=exp_params['fast_dev_run'])
     # Save the config and experiment parameters to the log directory for reproducibility
-    if trainer.is_global_zero:
+    if trainer.is_global_zero and trainer.log_dir is not None:
         log_dir = Path(trainer.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         with open(log_dir / "config.yaml", "w") as f:
@@ -183,11 +135,26 @@ def main():
 
     return
 
+def _get_step_counts(counts, exp_params):
+    n_subjects = sum(counts)
+    n_batches = math.ceil(n_subjects/(exp_params['subj_per_batch']))
+    n_steps_per_epoch = math.ceil(n_batches/(exp_params['accumulate_grad_batches']))
+    steps_per_check_interval = math.ceil(n_steps_per_epoch * exp_params['val_check_interval']) 
+    total_steps = n_steps_per_epoch * exp_params['epochs']
+    return steps_per_check_interval,total_steps
 
+def _get_unique_modalities(modalities):
+    unique_modalities = []
+    for m in modalities:
+        if m not in unique_modalities:
+            unique_modalities.append(m)
+    return unique_modalities
 
 def _set_fixed_exp_parameters(exp_params):
     fixed_params = {
         'problem': 'unsupervised_pretraining', #handedness, PD, 
+        'unsupervised_pretrain':True,
+        'class_col': 'no_label', #not in the column names -> follow the name not in .columns path
 
         'pass_example_input_array': False,
         'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls

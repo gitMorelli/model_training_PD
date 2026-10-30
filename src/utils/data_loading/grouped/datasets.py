@@ -3,7 +3,7 @@ from src.utils.data_loading.pd_shared_helpers import _make_subject_sequence_buil
 from src.utils.data_loading.pd_shared_helpers import _collate_subject_level
 
 
-def collate_groups_PD(batch_of_groups, debug=False):
+def collate_groups_PD(batch_of_groups, debug=False, **kwargs):
     sequences, labels, subject_ids = [], [], []
     questionnaires, modalities_list, resized_list = [], [], []
     group_ids = []

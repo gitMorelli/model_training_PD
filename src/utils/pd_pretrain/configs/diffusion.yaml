@@ -1,5 +1,5 @@
 model:
-  class_path: pdhw.DiffusionPretrainer
+  class_path: src.utils.pd_pretrain.pdhw.DiffusionPretrainer
   init_args:
     image_size: 32                 # must match data
     block_out_channels: [64, 128, 256]   # 64 px: [64,128,256,256]; 128 px: [64,128,192,256,256]
@@ -16,23 +16,19 @@ model:
     ema_decay: 0.9995
 
 trainer:
+  #added by me
+  val_check_interval: 0.25
+  accumulate_grad_batches: 4
+  #given
   max_epochs: 200
   precision: bf16-mixed     # use 32-true on CPU / older GPUs
   gradient_clip_val: 1.0
   log_every_n_steps: 20
-  default_root_dir: runs/diffusion
   callbacks:
-    - class_path: pdhw.callbacks.PreviewCallback
+    - class_path: src.utils.pd_pretrain.pdhw.callbacks.PreviewCallback
       init_args: {every_n_epochs: 5, num_samples: 16}
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args: {monitor: val/loss, save_last: true, save_top_k: 2}
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args: {logging_interval: step}
 
-# Replace with your own LightningDataModule (same batch contract).
-data:
-  class_path: pdhw.synthetic.SyntheticDataModule
-  init_args:
-    image_size: 32
-    mode: single
-    batch_size: 128

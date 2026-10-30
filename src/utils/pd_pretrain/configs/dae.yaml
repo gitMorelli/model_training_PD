@@ -1,5 +1,44 @@
+experiment:
+  name: dae
+  seed: 42
+  #debugging
+  debugging_callbacks: True
+  fast_dev_run: False #can be False, null or True, False and null have same behavior
+  debug: False
+  #training modality
+  selected_properties: [] #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*'], #null or [] means no conditioning on covariates
+  #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
+  global_fusion: late #early, late
+  #experiment parameters
+  data_modality_name: window_view_minimal #mixed_view, window_view, window_view_minimal
+  filter_missing: all #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
+  #if 'last_q' with the first last_q equal to 0
+  censor_time: all_matched #'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+  #censor time is set authomatically to all for pre_training==true and problem in [handedness]
+  filter_modality: digit
+  #Transforms definitions
+  norm_mu: imagenet
+  norm_std: imagenet
+  custom_transform: 2xcrop_resize_normalize #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #null, #if not null overrides the transform defined for the model with ta custom one
+  input_size: 128 #224,32
+  apply_augmentation: null #null, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
+  #in the code based on the view name
+  invert_color: True
+  to_grayscale: True #if True converts the images to grayscale (1 channel) before feeding them to the model
+  image_pixel_space_augmentations: null #null, #null, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; null and NO_AUG are equivalent but null skips the function call
+  
+  #Training params definition
+  epochs: 100
+  val_check_interval: 0.25 #validate every 25% of the training epoch
+  max_val_samples: 2000 #reduce the number of samples in the validation set to 1000 for pre-training
+  accumulate_grad_batches: 4 #8,   # effective batch = batch_size * accumulate_grad_batches or null
+  unsupervised_kwargs: {'n_im_per_subj': 10, 'replace':True, 'val_seed': 42, 'input_range': "ink_pm1"}
+  subj_per_batch: 4 #number of subjects per batch, if null uses batch_size instead
+
+  prefetch_factor: 4
+
 model:
-  class_path: pdhw.DenoisingAE
+  class_path: src.utils.pd_pretrain.pdhw.DenoisingAE
   init_args:
     channels: [32, 64, 128]        # 32 px -> 8x8 latent; add a stage for 64/128 px
     blocks_per_stage: 2
@@ -21,23 +60,22 @@ model:
     ema_decay: 0.999
 
 trainer:
-  max_epochs: 200
+  #added by me
+  val_check_interval: 1000          # validate every N training batches
+  check_val_every_n_epoch: null     # count those batches across epochs, not within one
+  accumulate_grad_batches: 4
+  #given
+  max_steps: 100000      # optimizer steps; this is also the length of the LR schedule
+  max_epochs: -1
   precision: bf16-mixed     # use 32-true on CPU / older GPUs
   gradient_clip_val: 1.0
   log_every_n_steps: 20
-  default_root_dir: runs/dae
   callbacks:
-    - class_path: pdhw.callbacks.PreviewCallback
-      init_args: {every_n_epochs: 5, num_samples: 16}
+    - class_path: src.utils.pd_pretrain.pdhw.callbacks.PreviewCallback
+      init_args: {every_n_val: 1, num_samples: 16}
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args: {monitor: val/loss, save_last: true, save_top_k: 2}
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args: {logging_interval: step}
 
-# Replace with your own LightningDataModule (same batch contract).
-data:
-  class_path: pdhw.synthetic.SyntheticDataModule
-  init_args:
-    image_size: 32
-    mode: single
-    batch_size: 128
+
