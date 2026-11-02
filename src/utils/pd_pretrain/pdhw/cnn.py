@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Sequence
 
 import torch
-import torch.nn as nn
+import torch.nn as nn 
 
 from .blocks import Downsample, FiLMResBlock, Upsample, group_norm
 

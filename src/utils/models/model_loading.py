@@ -3,9 +3,11 @@ import torchvision.transforms as T
 import time
 from .torch_models import *
 from .timm_models import *
+from .pretrained_models import *
 from .custom_backbones import *
 from .heads import *
 from .transforms.transforms import simple_resize_transform
+
 
 
 #Model loading
@@ -31,6 +33,7 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
     elif name.startswith('efficientnet_v2'):
         model = get_efficientnet_v2(name, mode, pretrained, **kwargs)
         transform = get_efficientnet_v2_transforms(**kwargs)
+    ### TRANSFORMER MODELS ###
     elif name.startswith('vit'):
         if is_lora:
             model = get_vit_lora(name, mode, pretrained, **kwargs)
@@ -51,13 +54,19 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
         model = FiveStageResidualStridedConvNet(**kwargs)
         input_size = kwargs.get('input_size', 224)
         transform = simple_resize_transform(input_size)
+    ### UNSUP PRETRAINED####
+    elif 'ConvEncoder' in name:
+        model = get_ConvEncoder(name=name, pretrained=pretrained, **kwargs)
+        transform = get_ConvEncoder_transforms(name=name,**kwargs)
     else:
         raise ValueError(f"Model {name} is not supported.")
+    
     #pretrained_modality = kwargs.get('custom_pretrained','original')
     if checkpoint_path:
         checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
     return model, transform
+
 def get_sklearn_model(name='logreg', **kwargs): 
     if name=='svm':
         from sklearn.svm import SVC

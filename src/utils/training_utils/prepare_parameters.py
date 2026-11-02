@@ -149,13 +149,14 @@ def set_automatic_hyperparameters(exp_params):
     elif problem=='PD':
         exp_params['class_col'] = 'diag_park_final1_quest'
     elif problem=='unsupervised_pretraining':
-        exp_params['class_col'] = 'diag_park_final1_quest'
+        exp_params['class_col'] = 'no_label'
     
     if exp_params.get('label_smoothing', 0.0)!=0.0:
         exp_params['num_classes'] = 2
         msg = (f"Label smoothing is only compatible with the cross entropy loss ->"
                f"setting num_classes=2")
         print(f"\n{bar}\n>>> [NUM CLASSES] {msg}\n{bar}\n", flush=True)
+    
     scale_lr_with_batch = exp_params.get('scale_lr_with_batch_size', False)
     if scale_lr_with_batch:
         effective_batch_size = exp_params['batch_size']*exp_params.get('accumulate_grad_batches', 1)
@@ -165,21 +166,26 @@ def set_automatic_hyperparameters(exp_params):
         msg = (f"Scaling learning rates with effective batch size {effective_batch_size} (base {ref_size}): "
                 f"lr_backbone={exp_params['lr_backbone']}, lr_classifier_head={exp_params['lr_classifier_head']}")
         print(f"\n{bar}\n>>> [LR SCALING] {msg}\n{bar}\n", flush=True)
+    
     if exp_params.get('lora_tuning', False):
         exp_params['layers_to_unfreeze'] = ['classifier']
         exp_params['use_opt_groups'] = False
+
     if exp_params.get('feature_extraction', False):
         exp_params['debug']=True
-    if exp_params.get('grouped', False) or exp_params.get('pre_training', False):
+    
+    if exp_params.get('grouped', False) or exp_params.get('pre_training', False) or problem=='unsupervised_pretraining':
         exp_params['balance_validation'] = False
         exp_params['balanced_data'] = False
         exp_params['use_balanced_weights'] = False
-    if exp_params.get('pre_training', False):
+    
+    if exp_params.get('pre_training', False) or problem=='unsupervised_pretraining':
         exp_params['filter_missing'] = 'all'
         exp_params['censor_time'] = 'all'
     elif problem not in ['handedness']:
         exp_params['val_check_interval'] = None #force epoch level logging if i am not doing pre_trainign
         exp_params['align_train_metrics_to_val'] = False
+    
     exp_params['num_channels'] = 1 if exp_params['to_grayscale'] else 3
     if isinstance(exp_params['data_modality'],list):
         exp_params['num_tiles'] = len(exp_params['data_modality'])

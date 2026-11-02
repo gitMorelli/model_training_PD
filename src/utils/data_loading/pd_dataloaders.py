@@ -103,7 +103,7 @@ def _get_unsupervised_batch(sequence, questionnaires, modalities, n,replace=Fals
     mods = [modalities[t][v] for t, v in zip(t_list, v_list)]
     quests = [questionnaires[t] for t in t_list]
 
-    return images, mods, quests
+    return images, quests, mods
 
 # MARK: Dataset for time series stream
 def create_sequence_flattener_PD_multiview(transform_func, augmentation_transform_list, n_views,
@@ -114,6 +114,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
     #get values from exp_params if not provided
     unsupervised_pretrain=exp_params.get('unsupervised_pretrain', False) if exp_params else False
     unsup_kwarks=exp_params.get('unsupervised_kwargs', {'n_im_per_subj': 10, 'replace':True}) if exp_params else {}
+    #print(f"[DEBUG] unsupervised_pretrain: {unsupervised_pretrain}, unsup_kwarks: {unsup_kwarks}", flush=True) #REMOVE
 
     #check if you have a column called 'synth_label' in the train_df
     if train_df is not None and 'synth_label' in train_df.columns:
@@ -154,7 +155,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
             case_grid_pattern = json_data.get("case_grid_pattern", None)
             rempli_seulq12 = json_data.get("rempli_seulq12", 1)
 
-            if label.item() == -1:
+            if label.item() == -1 and not unsupervised_pretrain:
                 continue
             if subject_id in exclusion_set:
                 continue
@@ -174,6 +175,7 @@ def create_sequence_flattener_PD_multiview(transform_func, augmentation_transfor
                     if is_val else None)   # training stays random
                 sequence, questionnaires, modalities = _get_unsupervised_batch(sequence, questionnaires, modalities, 
                                                                                n_im_per_subj, generator=gen,replace=replace)
+                #print(sequence.shape, questionnaires, modalities, "unsupervised batch", flush=True) #[REMOVE]
                 yield sequence, questionnaires, modalities
             else:
                 yield sequence, label, subject_id, questionnaires, modalities, resized_list, global_properties, local_properties, view_mask 

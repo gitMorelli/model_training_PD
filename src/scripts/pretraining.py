@@ -85,6 +85,7 @@ def main():
     exp_params['mod_to_id'] = {name: i for i, name in enumerate(MODALITIES)}
     cfg["model"]["init_args"]["modalities"] = list(MODALITIES)
     cfg["trainer"]["precision"] = _resolve_precision(cfg["trainer"]["precision"])
+    cfg["model"]["init_args"]["lr"] = _scale_lr_by_batch_size(cfg["model"]["init_args"]["lr"], exp_params, base_batch_size=128)
     
 
     #prepare variables
@@ -130,10 +131,19 @@ def main():
         with open(log_dir / "exp_params.pkl", "wb") as f:
             pickle.dump(exp_params, f)
 
+    #print(exp_params, flush=True)
+
     trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader, ckpt_path=cfg.get("ckpt_path"))
 
 
     return
+
+def _scale_lr_by_batch_size(lr, exp_params, base_batch_size=128):
+    """Scale the learning rate based on the batch size."""
+    batch_size = exp_params['subj_per_batch'] * exp_params['unsupervised_kwargs']['n_im_per_subj'] * exp_params['accumulate_grad_batches']
+    new_lr = lr * np.sqrt(batch_size / base_batch_size)
+    print(f"[DEBUG] Scaling learning rate: base_lr={lr}, batch_size={batch_size}, base_batch_size={base_batch_size}, new_lr={new_lr}", flush=True)
+    return float(new_lr)
 
 def _get_step_counts(counts, exp_params):
     n_subjects = sum(counts)
@@ -154,7 +164,6 @@ def _set_fixed_exp_parameters(exp_params):
     fixed_params = {
         'problem': 'unsupervised_pretraining', #handedness, PD, 
         'unsupervised_pretrain':True,
-        'class_col': 'no_label', #not in the column names -> follow the name not in .columns path
 
         'pass_example_input_array': False,
         'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
