@@ -211,7 +211,7 @@ exp_params = {
     'invert_color':True,
     'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
     'image_pixel_space_augmentations': None,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
-
+    'random_drop': None, #None or a float between 0 and 1, if None no random drop is applied, if float random drop is applied with the given probability to each questionnaire
     
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
@@ -231,7 +231,7 @@ exp_params = {
     'eta_min_cosine': 1e-7, #the timm-style convention (base/100)
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
-    'layers_to_unfreeze': ['all'],#'last_stage'
+    'layers_to_unfreeze': ['last_stage'],#'last_stage'
     'seed': 42,
     'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None

@@ -29,7 +29,7 @@ def get_input_file_path(name):
     elif name=="trained_features":
         input_file = os.path.join(HOME_PATH, "feature_extraction/17092026/trained_models/xgb/v_13/results_per_step.csv")
     elif name=="trained_deep":
-        input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_27/all/per_step_predictions.csv")
+        input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_24/all/per_step_predictions.csv")
         #input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_27")
         #input_file = os.path.join(HOME_PATH, "resnet18_model_results/checkpoints/v_36/per_step_predictions.csv")
         #input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv")

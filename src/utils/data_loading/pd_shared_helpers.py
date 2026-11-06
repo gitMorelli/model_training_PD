@@ -448,6 +448,8 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             synth_transform = SyntheticTransform(exp_params,subject_id,train_df, persona_seed, n_steps=13, jitter=0.05)
         else:
             synth_transform = None
+        
+        random_drop = exp_params.get('random_drop', None) if exp_params else None
 
         original_id = subject_id.split('_')[0]
 
@@ -468,6 +470,11 @@ def _make_subject_sequence_builder(transform_func, augmentation_transform_list,
             if X not in subject_images:  # questionnaire not in the shard file
                 continue
 
+            if random_drop is not None and not is_val:
+                #randomly drop this questionnaire with probability random_drop
+                if random.random() < random_drop:
+                    continue
+            
             num_filter_modality, _ = grid_lookup(grid_dict, original_id, 'q' + str(X), filter_modality)
             if num_filter_modality <= 0:
                 # filter modality missing -> skip questionnaire
