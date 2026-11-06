@@ -733,6 +733,9 @@ def get_mu_std(exp_params,verbose=False):
         elif exp_params['norm_mu']=='PD_window':
             mu = [0.0610334410445247, 0.0610334410445247, 0.0610334410445247]
             std = [0.23933505962649537, 0.23933505962649537, 0.23933505962649537]
+        elif exp_params['norm_mu']=='minus_one_one':
+            mu = [0.5, 0.5, 0.5]
+            std = [0.5, 0.5, 0.5]
     if verbose:
         print(f"Using normalization mean: {mu} and std: {std}")
     

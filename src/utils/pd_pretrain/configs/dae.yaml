@@ -10,20 +10,20 @@ experiment:
   #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
   global_fusion: late #early, late
   #experiment parameters
-  data_modality_name: window_view_minimal #mixed_view, window_view, window_view_minimal
+  data_modality_name: patch_view_balanced #mixed_view, window_view, window_view_minimal
   filter_modality: digit
   #Transforms definitions
-  norm_mu: imagenet
-  norm_std: imagenet
-  custom_transform: pad_resize_normalize #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #null, #if not null overrides the transform defined for the model with ta custom one
-  input_size: 128 #224,32
+  norm_mu: minus_one_one
+  norm_std: minus_one_one
+  custom_transform: 2xcrop_resize_normalize #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #null, #if not null overrides the transform defined for the model with ta custom one
+  input_size: 32 #224,32
   apply_augmentation: null #null, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
   #in the code based on the view name
   invert_color: True
   to_grayscale: True #if True converts the images to grayscale (1 channel) before feeding them to the model
   image_pixel_space_augmentations: null #null, #null, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; null and NO_AUG are equivalent but null skips the function call
   #Training params definition
-  epochs: 100
+  epochs: 10
   val_check_interval: 0.25 #validate every 25% of the training epoch
   max_val_samples: 2000 #reduce the number of samples in the validation set to 1000 for pre-training
   accumulate_grad_batches: 4 #8,   # effective batch = batch_size * accumulate_grad_batches or null
@@ -34,7 +34,7 @@ experiment:
 model:
   class_path: src.utils.pd_pretrain.pdhw.DenoisingAE
   init_args:
-    channels: [32, 64, 128, 128, 128]      
+    channels: [32, 64, 128] #128->[32, 64, 128, 128, 128]      
     blocks_per_stage: 2
     latent_channels: 8
     cond_dim: 64
@@ -43,9 +43,9 @@ model:
     fft_weight: 0.0
     corruption:
       p_block: 0.5
-      block_frac: [0.05, 0.12] 
-      n_stroke_erasures: 8
-      stroke_erase_frac: 0.05
+      block_frac: [0.1, 0.25] #128 -> [0.05, 0.12] 
+      n_stroke_erasures: 2 #128 -> 8
+      stroke_erase_frac: 0.08 #128 -> 0.05
       bg_noise_std: 0.05
       speck_prob: 0.002
     lr: 3.0e-4

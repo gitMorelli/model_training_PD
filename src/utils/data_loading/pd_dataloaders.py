@@ -352,7 +352,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
         compose_fn = _get_compose(grouped=grouped, unsupervised_pretrain=unsupervised_pretrain)
         collate_fn = _get_collate(grouped=grouped, unsupervised_pretrain=unsupervised_pretrain)
         collate_kwargs = dict(mod_to_id=exp_params.get('mod_to_id', None), 
-                              input_range=exp_params['unsupervised_kwargs'].get('input_range', "ink_pm1"), 
+                              input_range=exp_params.get('unsupervised_kwargs', {}).get('input_range', "ink_pm1"), 
                               check=True)
 
         dataset = (dataset

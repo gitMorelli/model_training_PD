@@ -105,6 +105,11 @@ def get_input_modality(name):
         n_d=10
         n_t=6
         return ['X_patch' for _ in range(n_x)]+ ['digit_patch' for _ in range(n_d)]+['text_patch' for _ in range(n_t)]
+    elif name=='patch_view_balanced':
+        n_x=10
+        n_d=10
+        n_t=10
+        return ['X_patch' for _ in range(n_x)]+ ['digit_patch' for _ in range(n_d)]+['text_patch' for _ in range(n_t)]
 
 RESTORE = False
 version_override =  7
@@ -130,7 +135,7 @@ exp_params = {
 
     #experiment parameters
     'merge_shards': False, #automatically set to true if you use handedness as label
-    'data_modality': get_input_modality('window_3x_2d_1t'),#'window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
+    'data_modality': get_input_modality('patch_view'),#'window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
     #loss options
@@ -150,18 +155,16 @@ exp_params = {
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     #censor time is set authomatically to all for pre_training==true and problem in [handedness]
     'filter_modality' : 'digit', 
 
     #model definition
-    'model': "convnext_tiny",#'vit_b_16',#'swin_v2_t', #'efficientnet_v2_s',#"convnext_tiny" "FiveStageResidualStridedConvNet", #'swin_s' #'resnet18', 'custom_cnn', 'resnet34_layer1','resnet34_layer2','resnet34_layer3', 'resnet34', 'resnet50'
+    'model': "ConvEncoder_dae_32",#"convnext_tiny", 'resnet18'
     #clip-vit-large-patch14, clip-vit-large-patch14-inter
     'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
     'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
     'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
-    'norm_mu': 'imagenet', #imagenet,handedness,mnist,PD_window
-    'norm_std': 'imagenet',
     'model_structure': 'ModularModel',#'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
     'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
     'align_train_metrics_to_val': True,  
@@ -172,7 +175,7 @@ exp_params = {
         'use_view_groups':True, #if True uses the view_groups parameter to group the views by modality, if False uses the view_mask parameter to mask the views
         'modalities': None, #None or a list of modalities to keep, e.g. ['digit_window', 'text_window'] or ['X_crop', 'digit_crop', 'text_crop']
         #with none all modalities are kept
-        'view_agg':'attention',#'hierarchical', #hierarchical' pools within each modality, then across modalities;  
+        'view_agg':'hierarchical',#'hierarchical', #hierarchical' pools within each modality, then across modalities;  
         #'mean', 'max', 'lse', 'attention', 'pma', 'transformer', 'concat'-> pools across all views with a single attention layer; "mean" pools across all views with a simple mean; "max" pools across all views with a simple max
         'view_kwargs': dict(
             intra='attention', 
@@ -198,8 +201,11 @@ exp_params = {
     },
 
     #Transforms definitions
-    'custom_transform': None, #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, #if not None overrides the transform defined for the model with ta custom one
-    'input_size': 224, #224,32
+    'custom_transform': None, #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, 
+    #if not None overrides the transform defined for the model with ta custom one
+    'input_size': 32, 
+    'norm_mu': 'minus_one_one', #imagenet,handedness,mnist,PD_window
+    'norm_std': 'minus_one_one',
     'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
     #in the code based on the view name
     'invert_color':True,
@@ -210,26 +216,24 @@ exp_params = {
     #Training params definition
     'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
     'use_opt_groups': True,
-    'lr_decay': 1.0, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
-    'lr_backbone': 5e-5,
-    'lr_classifier_head': 5e-4,
+    'lr_decay': 0.2, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
+    'lr_backbone': 1e-4,
+    'lr_classifier_head': 1e-3,
     'lr_scheduling': "two_stage", #'cosine' # "two_stage", 'step', None
-    'stage1_fraction': 0.2, #0.2
+    'stage1_fraction': 0.1, #0.2
     'stage1_lr_names': ["lr_head"],
-    'batch_size': 16,
+    'batch_size': 4,
     'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
-    'num_epochs': 60,
+    'num_epochs': 100,
     'max_steps': -1, #N or -1
-    'patience': 20, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
+    'patience': 15, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
     'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-6, #the timm-style convention (base/100)
+    'eta_min_cosine': 1e-7, #the timm-style convention (base/100)
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
-    'layers_to_unfreeze': ['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'],
-    #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
-    #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
+    'layers_to_unfreeze': ['all'],#'last_stage'
     'seed': 42,
-    'accumulate_grad_batches': 4,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
     #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None
@@ -260,7 +264,10 @@ SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shar
 SHARD_PATTERN_val = os.path.join(exp_params['data_folder'],"val/worker*_shard-*.tar")
 SAVE_DEBUG_PATH = "/home/a_morelli/vscode_projects/model_training/data/debug_training"
 
-define_optimization_groups = get_optimization_groups(model_name=exp_params['model'],exp_params=exp_params)
+define_optimization_groups, last_stage = get_optimization_groups(model_name=exp_params['model'],exp_params=exp_params)
+if 'last_stage' in exp_params['layers_to_unfreeze']:
+    exp_params['layers_to_unfreeze'] = last_stage+['classifier']
+print(f"define_optimization_groups: {define_optimization_groups}", flush=True)
 
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")

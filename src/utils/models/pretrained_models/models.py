@@ -10,13 +10,13 @@ from src.utils.pd_pretrain.pdhw.cnn import ConvEncoder
 from src.utils.pd_pretrain.pdhw.blocks import ink_mask, masked_spatial_mean
 from src.utils.image_processing import get_transforms,get_mu_std
 
+
 SOURCE_PATH = "/home/a_morelli/models/model_training_logs/pre_trained_models/unsupervised"
-
-import os
-import pickle
-
-import yaml
-
+mapping_conv_encoder = {
+        ("dae",128): f"DenoisingAE_128px/version_9/checkpoints/epoch=9-step=41925.ckpt",
+        ("dae",32): f"DenoisingAE_32px/version_1/checkpoints/epoch=9-step=41925.ckpt",
+        ("cvae",128): None, #TODO: add path to cvae checkpoint
+    }
 
 def _load_preprocessing_params(path, keys=("norm_mu", "norm_std", "custom_transform"), section="experiment"):
     """Return the values of `keys` (default: norm_mu, norm_std, custom_transform) saved with a run.
@@ -35,7 +35,10 @@ def _load_preprocessing_params(path, keys=("norm_mu", "norm_std", "custom_transf
     if os.path.exists(pkl_path):
         with open(pkl_path, "rb") as f:
             sources.append(("exp_params.pkl", pickle.load(f)))'''
-    sources += [(f"config.yaml['{section}']", cfg.get(section) or {}), ("config.yaml (top level)", cfg)]
+    node = cfg
+    for part in section.split("."):          # "experiment" or nested, e.g. "model.init_args"
+        node = (node or {}).get(part) or {}
+    sources += [(f"config.yaml['{section}']", node), ("config.yaml (top level)", cfg)]
 
     values = []
     for key in keys:
@@ -53,10 +56,6 @@ def _process_name(name):
         raise ValueError(f"Invalid ConvEncoder name: {name}")
     return parts[1], int(parts[2])
 #ConvEncoder
-mapping_conv_encoder = {
-        ("dae",128): f"DenoisingAE_128px/version_7/checkpoints/epoch=14-step=60352.ckpt",
-        ("cvae",128): None, #TODO: add path to cvae checkpoint
-    }
 class ConvEncoderWrapper(nn.Module):
     def __init__(self, encoder: nn.Module, unsup_modality: str = "dae", extraction_module: nn.Module = None,
                  out_dim=None, input_size=None):
@@ -104,28 +103,29 @@ def _load_conv_encoder_from_ckpt(pretraining_mode, ckpt_path, pretrained=True):
 
 def get_ConvEncoder(
     name: str = "ConvEncoder_dae_128",
-    pretrained: bool = False,
+    pretrained: bool = False, **kwargs
 ) -> nn.Module:
     #name should be in the format ConvEncoder_{pretraining_mode}_{input_size}, e.g. ConvEncoder_dae_128
     pretraining_mode, input_size = _process_name(name)
 
     specific_path = mapping_conv_encoder.get((pretraining_mode, input_size), None)
-    ckpt_path = os.path.join(SOURCE_PATH, specific_path) if specific_path else None
+    ckpt_path = os.path.join(SOURCE_PATH, pretraining_mode, specific_path) if specific_path else None
 
     encoder, extraction_module, out_dim, ckpt_size = _load_conv_encoder_from_ckpt(pretraining_mode, ckpt_path, pretrained=pretrained)
 
 
     return ConvEncoderWrapper(encoder, pretraining_mode, extraction_module, out_dim,
                               input_size=ckpt_size or input_size)
-def get_ConvEncoder_transforms(name) -> transforms.Compose:
+def get_ConvEncoder_transforms(name, **kwargs) -> transforms.Compose:
     """It is the custom transform applied during training -> depends only on the resolution"""
     pretraining_mode, input_size = _process_name(name)
     specific_path = mapping_conv_encoder.get((pretraining_mode, input_size), None)
-    config_path = os.path.join(SOURCE_PATH, os.path.dirname(specific_path)) 
+    config_path = os.path.join(SOURCE_PATH, pretraining_mode, os.path.dirname(os.path.dirname(specific_path))) 
     exp_params = {
-        'input_size': input_size
+        'input_size': input_size,
+        'num_channels': 1
     }
     exp_params["norm_mu"], exp_params["norm_std"], exp_params["custom_transform"] = _load_preprocessing_params(config_path)
     exp_params["norm_mu"], exp_params["norm_std"] = get_mu_std(exp_params)
 
-    return get_transforms(exp_params)
+    return get_transforms(exp_params, None)

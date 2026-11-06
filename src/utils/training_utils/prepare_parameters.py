@@ -1,3 +1,6 @@
+import os
+from src.utils.models.pretrained_models.models import _process_name, mapping_conv_encoder, SOURCE_PATH, _load_preprocessing_params
+
 #optimization groups utils
 def _vit_depth(base_name):
     # full (untruncated) depth of a timm ViT/DeiT from its name; covers the get_vit aliases too
@@ -9,8 +12,9 @@ def _vit_depth(base_name):
         raise ValueError(f"Can't infer ViT depth from '{base_name}', set exp_params['vit_depth']")
     return depths[size]
 def get_optimization_groups(model_name,exp_params):
+    last_stage = None
     if exp_params['use_opt_groups'] == False:
-        return None
+        return None, None
     if 'resnet' in model_name:
         decay = exp_params.get('lr_decay', 0.9)
         define_optimization_groups = [
@@ -123,7 +127,39 @@ def get_optimization_groups(model_name,exp_params):
                 {'names': names, 'lr': lrb * decay**(k - 1 - j), 'lr_name': f'lr_{j + 1}'})
         define_optimization_groups.append(
             {'names': head_names, 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'})
-    return define_optimization_groups
+    elif model_name.startswith('ConvEncoder'):          # e.g. ConvEncoder_dae_128, ConvEncoder_cvae_128
+        decay = exp_params.get('lr_decay', 0.8)
+        lrb = exp_params['lr_backbone']
+
+        pretraining_mode, input_size = _process_name(model_name)
+        specific_path = mapping_conv_encoder.get((pretraining_mode, input_size), None)
+        config_path = os.path.join(SOURCE_PATH, pretraining_mode, os.path.dirname(os.path.dirname(specific_path))) 
+        n_channels, bps = _load_preprocessing_params(config_path, ('channels','blocks_per_stage'), 'model.init_args')
+        n_stages = len(n_channels)
+        
+        p = 'vision_model.'                               # attribute holding the ConvEncoderWrapper
+        e = f'{p}encoder.'
+
+        # ConvEncoder.body = per stage: `bps` residual blocks, then a Downsample (none after the last stage)
+        stage_names, idx = [], 0
+        for s in range(n_stages):
+            n = bps + (1 if s < n_stages - 1 else 0)
+            stage_names.append([f'{e}body.{i}.' for i in range(idx, idx + n)])   # trailing '.' matters
+            idx += n
+        stage_names[0] = [f'{e}stem.'] + stage_names[0]
+        stage_names[-1] += [f'{e}out_norm.', f'{e}head.', f'{p}extraction_module.']   # CVAE: to_stats
+
+        define_optimization_groups = [
+            {'names': names, 'lr': lrb * decay ** (n_stages - 1 - j), 'lr_name': 'lr_stem' if j == 0 else f'lr_{j}'}
+            for j, names in enumerate(stage_names)
+        ]
+        define_optimization_groups.append(
+            {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'})
+        last_stage = ['vision_model.encoder.body.12.', 'vision_model.encoder.body.13.', 'vision_model.encoder.out_norm.', 'vision_model.encoder.head.', 'vision_model.extraction_module.']# lr4
+    return define_optimization_groups, last_stage
+#['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
+    #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
+
 
 #Set hyperparameters / metadata
 def set_automatic_hyperparameters(exp_params):
