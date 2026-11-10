@@ -33,111 +33,73 @@ import numpy as np
 import json
 import gc
 
+from src.utils.training_utils import load_config
+from src.utils.image_processing import get_transforms,get_mu_std
+
 from src.utils.data_loading import prepare_loaders_PD, prepare_exclusion_sets_PD
 from src.utils.data_loading import explore_data, return_file_paths, load_grid_dict, prepare_test_exclusion_set
 from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
 from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
 from src.utils.visualization import debug_images_dataset
-from src.utils.image_processing import get_augmentation_transform, get_transforms
 from src.utils.training_utils import LitModel, set_automatic_hyperparameters
 from src.scripts.train_PD_model import get_input_modality, model_initialization, logging_initialization
 
-
-params = {
-    'selected_problem': "PD",#"PD", # "handedness"
-    'pre_training': False, #True if you want to use the pre-trained model on E3N dataset, False if you want to train from scratch
-
-    "data_modality": get_input_modality('window_view_minimal'), 
-    "num_tiles": 3,
-
-    'model': 'clip-vit-large-patch14-inter',#'resnet18',#'clip-vit-large-patch14-inter', 
-    'custom_pre_trained_weights':  None,
-    'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
-    'norm_mu': 'PD_window',
-    "input_size": 224,
-    'mean_and_std': 'handedness',
-    'custom_transform': None,#set to none for using the default transform for the model
-    "apply_augmentation": None,#'random_crop_half', #None, 
-    "invert_color": True, #even if set to true it is ignored when debug == True
-    "use_grid": True,
-    "to_grayscale": True,
-
-    "seed": 42, 
-    "balanced_data": False,
-    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
-    "balancing_factor": 1,
-    "majority_class_id": 0,
-    "threshold_num": 1,
-    'filter_missing': 'last_q', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
-    #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all', 
-    'filter_modality': 'digit', #None, 'X', 'text', 'digit' (if None keep all modalities)
-    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': None, #['original','progressive_thickening','progressive_slant','progressive_size_drift', 
-    #'progressive_baseline_wave', 'progressive_tremor', 'progressive_ink_density'], #or None
-    'synthetic_proportions': [0.5, 0.2, 0.2, 0.1], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
-
-
-    #dataloader params
-    "batch_size": 16,
-    "prefetch_factor": 4,
-    "decode_approach": "pil",
-    "load_in_memory": False,
-    "split_workers": True,
-
-    "debug": False,
-    "feature_extraction": False, #this True forces the debug mode true
-    "add_to_existing": None, #None if you want to create a new feature extraction table, path if you want to append (it will add columns)
-}
-
-params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths(params['selected_problem'], 
-                                                                                                 params['grouped'], params['pre_training'])
-params = set_automatic_hyperparameters(params)
-
-SHARD_PATTERN_train = os.path.join(params['data_folder'],"train/worker*_shard-*.tar")
-SHARD_PATTERN_val = os.path.join(params['data_folder'],"val/worker*_shard-*.tar")
-SHARD_PATTERN_test = os.path.join(params['data_folder'],"test/worker*_shard-*.tar")
 VERBOSE = True
 SAVE_FOLDER_PATH = "/home/a_morelli/models/model_training_logs/PD/representation_extraction"
 QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(q) for q in range(1,14)]
-CLASS_COL='diag_park_final1_quest'
 
 
 def main(params):
-    args = get_args()
+    cfg = load_config()
+    params = cfg.get("experiment", {})
+    num_workers = cfg.get("num_workers", 4)
 
+    params["data_modality"] = get_input_modality('window_3x_2d_1t')
+    params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths(params['problem'], 
+                                                                                                 params['grouped'], params['pre_training'])
+    params = set_automatic_hyperparameters(params)
+    SHARD_PATTERN_train = os.path.join(params['data_folder'],"train/worker*_shard-*.tar")
+    SHARD_PATTERN_val = os.path.join(params['data_folder'],"val/worker*_shard-*.tar")
+    SHARD_PATTERN_test = os.path.join(params['data_folder'],"test/worker*_shard-*.tar")
+
+    params['norm_mu'],params['norm_std'] = get_mu_std(params, verbose=VERBOSE)
     max_batches=None #None for running all
-
-    model,transform = get_model(name=params['model'], pretrained=params['pretrained'], 
-                                   custom_pre_trained_weights=params['custom_pre_trained_weights'],grayscale=params['to_grayscale'])
-    
     grid_dict = load_grid_dict(params)
-    transform = get_transforms(params, transform)
+
     exclusion_set, val_exclusion_set, _ = prepare_exclusion_sets_PD(
-        params, verbose=VERBOSE, class_col=CLASS_COL)
+        params, verbose=VERBOSE, class_col=params['class_col'])
     test_exclusion_set, _ = prepare_test_exclusion_set(
-        params, verbose=VERBOSE, class_col=CLASS_COL)
+        params, verbose=VERBOSE, class_col=params['class_col'])
+
     train_df = pd.read_parquet(params['list_of_ids_paths'])
 
-    common = dict(worker=args.num_workers,
+    model,transform = get_model(name=params['model'], pretrained=params.get('pretrained', True), 
+                                   grayscale=params.get('to_grayscale', False), is_lora=params.get('lora_tuning', False))
+    transform = get_transforms(params, transform)
+
+    common = dict(worker=num_workers,
                   prefetch_factor=params['prefetch_factor'],
                   exp_params=params, grid_dict=grid_dict,
-                  transform=transform, train_df=train_df, persistent_workers=False, one_only=True)
+                  transform=transform, train_df=train_df, persistent_workers=False, 
+                  one_only=True,
+                  merge_shards=params.get('merge_shards', False))
 
     specs = {
         'train': lambda: prepare_loaders_PD(
             exclusion_set=exclusion_set, val_exclusion_set=val_exclusion_set,
             SHARD_PATTERN_train=SHARD_PATTERN_train,
-            SHARD_PATTERN_val=SHARD_PATTERN_val, **common)[0],
+            SHARD_PATTERN_val=SHARD_PATTERN_val,
+            force_val=False, **common)[0], #here at each pass the images will be different because of random sampling
         'val':   lambda: prepare_loaders_PD(
             exclusion_set=val_exclusion_set, val_exclusion_set=val_exclusion_set,
             SHARD_PATTERN_train=SHARD_PATTERN_val,
-            SHARD_PATTERN_val=SHARD_PATTERN_val, **common)[0],
+            SHARD_PATTERN_val=SHARD_PATTERN_val, 
+            force_val=True, **common)[0], #in val the images will be always the same because of force_val=True
         'test':  lambda: prepare_loaders_PD(
             exclusion_set=test_exclusion_set, val_exclusion_set=test_exclusion_set,
             SHARD_PATTERN_train=SHARD_PATTERN_test,
-            SHARD_PATTERN_val=SHARD_PATTERN_test, **common)[0],
+            SHARD_PATTERN_val=SHARD_PATTERN_test,
+            force_val=True, **common)[0],
     }
 
     frames = [_read_and_release(fn, model, create_row, max_batches, split)
@@ -273,7 +235,7 @@ def save_results(params, df):
         os.makedirs(save_folder, exist_ok=True)
 
         #save as parquet file
-        save_name = f"representations_{params['selected_problem']}.parquet"
+        save_name = f"representations_{params['problem']}.parquet"
         save_path = os.path.join(save_folder, save_name)
         df = df.reset_index(drop=True)
         df["rep_idx"] = np.arange(len(df))
@@ -286,7 +248,7 @@ def save_results(params, df):
         np.save(npy_save_path, embs)'''
 
         #save params to a json file
-        params_save_name = f"metadata_{params['selected_problem']}.json"
+        params_save_name = f"metadata_{params['problem']}.json"
         json_save_path = os.path.join(save_folder, params_save_name)
         json.dump(params, open(json_save_path, 'w'), indent=4)
 
@@ -300,14 +262,6 @@ def save_results(params, df):
     return
 
 ########## HANDEDNESS ###########
-def get_args():
-    import argparse
-    parser = argparse.ArgumentParser(description="I/O Benchmark for Multi-Tar Dataset")
-    parser.add_argument("--num_workers", type=int, default=8, help="Number of DataLoader workers")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for DataLoader")
-    parser.add_argument("--batches_to_test", type=int, default=50, help="Number of batches to process for benchmark")
-    return parser.parse_args()
-
 
 def melt_df(df,modality,threshold=1):
     exclusion_set = set()
@@ -373,4 +327,4 @@ def build_row(subject_id, questionnaire, modality_type, label,
     }
 
 if __name__ == "__main__":
-    main(params)
+    main()

@@ -268,7 +268,7 @@ define_optimization_groups, last_stage = get_optimization_groups(model_name=exp_
 if 'last_stage' in exp_params['layers_to_unfreeze']:
     exp_params['layers_to_unfreeze'] = last_stage+['classifier']
 print(f"define_optimization_groups: {define_optimization_groups}", flush=True)
-
+ 
 OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
 CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
 exp_params['CHECKPOINT_PATH'] = CHECKPOINT_PATH
@@ -704,7 +704,6 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, n_local=0
         write_log("Model Architecture and Trainable Parameters right after initialization:")
         write_log(trainable_parameters_info)
     return model, transform
-
 
 def _selected_properties_get_dims(params, train_df):
     '''

@@ -50,7 +50,7 @@ from src.utils.pd_pretrain import load_config, instantiate
 from src.utils.training_utils import set_automatic_hyperparameters
 
 
-
+ 
 def main():
     #load the config file
     cfg = load_config()  # plain nested dict: cfg["model"]["init_args"]["lr"], cfg["trainer"]["max_epochs"], ...

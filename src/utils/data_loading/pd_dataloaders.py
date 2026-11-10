@@ -374,7 +374,7 @@ def prepare_PD_dataset(shard_pattern, split_workers=True, batch_size=4, transfor
 # MARK: - Prepare loaders
 def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, grid_dict,transform, 
                        SHARD_PATTERN_train, SHARD_PATTERN_val, train_df=None, cross_val=False, one_only=False, persistent_workers=True,
-                       running_eval=False, partial_batch=False, merge_shards=False):
+                       running_eval=False, partial_batch=False, merge_shards=False, force_val=False):
     def worker_init_fn(worker_id):
         # Force OpenCV to use a single thread per DataLoader worker process
         cv2.setNumThreads(0)
@@ -416,7 +416,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         val_input   = SHARD_PATTERN_val
 
     train_dataset = prepare_PD_dataset(train_input, exclusion_set=exclusion_set,train_df=train_df, exp_params=exp_params, 
-                                       partial_batch=partial_batch, **common_kwargs) 
+                                       partial_batch=partial_batch, is_val=force_val, **common_kwargs) 
     train_loader = DataLoader(
         train_dataset, 
         num_workers=worker, 
