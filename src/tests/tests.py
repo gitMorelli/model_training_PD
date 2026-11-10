@@ -1401,4 +1401,4 @@ def prepare_case_dt_datasets():
     return
 
 if __name__ == "__main__":
-    plot_roc_pr_curves()
+    inspect_matched_data()

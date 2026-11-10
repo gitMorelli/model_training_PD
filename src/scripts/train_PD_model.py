@@ -135,7 +135,7 @@ exp_params = {
 
     #experiment parameters
     'merge_shards': False, #automatically set to true if you use handedness as label
-    'data_modality': get_input_modality('patch_view'),#'window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
+    'data_modality': get_input_modality('patch_view_balanced'),#'window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
     'num_tiles': 3,
     'use_grid': True,
     #loss options
@@ -155,7 +155,7 @@ exp_params = {
     'num_classes': 1, #1 for BCE loss, 2 for crossentropy
     'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
     #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     #censor time is set authomatically to all for pre_training==true and problem in [handedness]
     'filter_modality' : 'digit', 
 
@@ -222,7 +222,7 @@ exp_params = {
     'lr_scheduling': "two_stage", #'cosine' # "two_stage", 'step', None
     'stage1_fraction': 0.1, #0.2
     'stage1_lr_names': ["lr_head"],
-    'batch_size': 4,
+    'batch_size': 8,
     'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
     'num_epochs': 100,
     'max_steps': -1, #N or -1
@@ -231,9 +231,9 @@ exp_params = {
     'eta_min_cosine': 1e-7, #the timm-style convention (base/100)
     'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
     'warmup_fraction': 0.05,   # ~5% of total steps as warmup
-    'layers_to_unfreeze': ['last_stage'],#'last_stage'
+    'layers_to_unfreeze': ['all'],#'last_stage'
     'seed': 42,
-    'accumulate_grad_batches': 16,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
     'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
     #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
     'gradient_clip_val': 1.0, #1.0, None

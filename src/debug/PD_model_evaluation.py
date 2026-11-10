@@ -18,7 +18,7 @@ from src.utils.training_utils import PDClassificationModule, load_legacy_state_d
 from src.scripts.train_PD_model import model_initialization
 from src.utils.tabular_data_utils import preprocess_PD_csv
 from src.utils.evaluation import analyze_results, plot_probability_trajectories
-
+ 
 
 def get_last_best_checkpoint(checkpoint_dir,version):
     checkpoint_files = glob.glob(os.path.join(checkpoint_dir,f"v_{version}", "*best*.ckpt"))
@@ -30,9 +30,9 @@ def get_last_best_checkpoint(checkpoint_dir,version):
 
 experiment = "PD" #"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'convnext_tiny'#'resnet18_32' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'ConvEncoder_dae_32'#'resnet18_32' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='27'
+version='3'
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #get the most recent ckpt file with best in the name 

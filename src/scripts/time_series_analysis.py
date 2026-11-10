@@ -67,7 +67,7 @@ params = {
     'use_split': True, #if True it will use the split column in the statistical analysis, if False it will not use it
     'adjust': "slot_add", #'auto' (= 'slot' if use_split else None), None, 'slot', 'n_quest_add', 'n_quest_int', "slot_add"
     'n_form': 'log', #form of the n_quest term: 'log', 'linear', 'cat'
-    'type_of_analysis': 'single_model', #'compare_steps', 'single_model', 'compare_models'
+    'type_of_analysis': 'compare_models', #'compare_steps', 'single_model', 'compare_models'
 }
 
 params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths('PD', 
@@ -87,7 +87,7 @@ params["type_of_input"] = get_type_of_input(params)
 
 VERBOSE = True
 SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/time_series_analysis"
-EXPERIMENT = "time_series_comparison" #"time_resolved_discrimination","statistical_analysis" #"time_series_comparison" #"plot_property" 
+EXPERIMENT = "statistical_analysis" #"time_resolved_discrimination","statistical_analysis" #"time_series_comparison" #"plot_property" 
 os.makedirs(SAVE_PATH, exist_ok=True)
 
 def main(path=None):
@@ -107,7 +107,7 @@ def main(path=None):
         df,properties = reshape_features(df, keep_cols=["split"])
         if params["mask_features"]:
             df,keep_dict  = mask_features(df, params) #masking features for the representation
-        df = add_info_to_df(df, params) #adding the class_col to the df
+        df = add_info_to_df(df, params, additional_cols=[]) #adding the class_col to the df
         #print("[DEBUG: Columns]",df.columns)
         #print(df.head())
         #returns a df with the following columns: ['subject_id', 'split', 'q', 'modality', 'rep', 'unique_id','diag_park_final1_quest'],
@@ -119,6 +119,8 @@ def main(path=None):
         #normalize the signal columns to be between 0 and 1, using min-max normalization
         for p in properties:
             df[p] = (df[p] - df[p].min()) / (df[p].max() - df[p].min())
+        #n_chunks = 'n_cells_nonempty'
+        #return
     elif params["type_of_input"] == "DL":
         #print([col for col in df.columns]) #-> ['unique_id', 'slot', 'true_label', 'predicted_label', 'probability_0', 'probability_1', 'case_dt']
         params['signal_column']='probability_1'
@@ -235,6 +237,8 @@ def main(path=None):
                     time_model="spline", model_split=params['use_split'], matched_sets=False,
                     adjust=params['adjust'], n_form=params['n_form'],
                 )
+
+
 
 
 # ----------------------------------------------------------------------------

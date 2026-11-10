@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=time_series_analysis
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/time_series_analysis_2.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/time_series_analysis_2.err
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/time_series_analysis.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/time_series_analysis.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=4              # Number of CPU cores per task
+#SBATCH --cpus-per-task=8              # Number of CPU cores per task
 #SBATCH --mem=8G                      # Job memory request
-#SBATCH --time=01:00:00                # Time limit hrs:min:sec
+#SBATCH --time=02:00:00                # Time limit hrs:min:sec
 #SBATCH --partition=shortq
 #--partition=visuq,gpgpuq
 #--gres=gpu:1

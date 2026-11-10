@@ -4,16 +4,16 @@ Modality names: ['X_window', 'digit_window', 'text_window', 'X_window+digit_wind
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 6208479
+Job ID: 6298198
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n17
+Nodelist: n22
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-10-27 10:35:15
-Job ended at:   2026-10-27 10:35:26
-Job Wall-clock time: 00:00:11
-CPU Utilized: 00:00:07
-CPU Efficiency: 15.91% of 00:00:44 core-walltime
-Memory Utilized: 1.44 MB
-Memory Efficiency: 0.01% of 16.00 GB
+Job started at: 2026-11-06 19:10:17
+Job ended at:   2026-11-06 19:10:31
+Job Wall-clock time: 00:00:14
+CPU Utilized: 00:00:10
+CPU Efficiency: 17.86% of 00:00:56 core-walltime
+Memory Utilized: 78.19 MB
+Memory Efficiency: 0.48% of 16.00 GB

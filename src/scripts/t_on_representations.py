@@ -70,7 +70,7 @@ params = {
     "balancing_factor": 3,
 
     'mask_features': True, #if True it will mask the features according to the logic in the function mask_features
-    'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
+    'censor_time': 'all_matched',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
     'filter_modality' : 'digit_original', #'X_original' 'digit_original' 'text_original'
 }
 
@@ -428,13 +428,13 @@ def balance_data(df, params, verbose=VERBOSE, column = "subject_id"):
     
     return df
 
-def add_info_to_df(df, params):
+def add_info_to_df(df, params, additional_cols=[]):
     original_data = pd.read_parquet(params['list_of_ids_paths'])
     id_column_original = 'unique_id'
     id_column_df = 'subject_id'
 
     #add the params['class_col'] column to df by merging with original_data on the id columns
-    df = df.merge(original_data[[id_column_original, params['class_col']]],
+    df = df.merge(original_data[[id_column_original, params['class_col']]+additional_cols],
                   left_on=id_column_df, right_on=id_column_original, how='left')
     return df
 
