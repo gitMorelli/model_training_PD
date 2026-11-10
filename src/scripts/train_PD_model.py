@@ -33,14 +33,16 @@ import psutil
 import math
 from peft import LoraConfig, get_peft_model
 
-from src.utils.data_loading import prepare_loaders_PD, load_grid_dict, synthetic_data_override
-from src.utils.data_loading import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths
+from src.utils.training_utils import load_config
+from src.utils.data_loading import prepare_loaders_PD, load_grid_dict, synthetic_data_override, prepare_rep_dataloaders
+from src.utils.data_loading import prepare_PD_dataset, prepare_exclusion_sets_PD, return_file_paths, get_representation_file_path, pre_trained_weights
 from src.utils.models import SequenceQuestionnaireModel, SetQuestionnaireModel, load_ln_checkpoint, FlexibleSequenceQuestionnaireModel, ModularModel
 from src.utils.models import get_model, test_output, unfreeze_layers
 from src.utils.visualization import debug_images_PD, debug_print_batch_meta
 from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augmentation_transform, get_transforms,get_mu_std, ALL_SYNTHETIC_TRANSFORMS
 from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
 from src.utils.tabular_data_utils import preprocess_PD_csv
+from src.utils.training_utils import get_input_modality
 
 from src.utils.training_utils import (DataShape, EvalConfig, LossConfig, OptimConfig, SchedulerConfig,
                          PDClassificationModule, attach_write_log,
@@ -50,232 +52,10 @@ from src.utils.training_utils.pd_training.callbacks.diagnostics import (BestMetr
                                                                         TimeLoader, MemMonitor, BatchTimer, ThroughputMonitor, WriteProbe,
                                                                         ParameterSummary)
 
-def pre_trained_weights(name):
-    if name is None:
-        return None
-    #options for custom_pre_trained_weights:
-    if name == 'pre_trained_E3N_resnet18':
-        out_path =os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_2',
-                    'best-epoch=01-val_loss=0.23.ckpt')
-    elif name == 'pre_trained_E3N_resnet18_window':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_4',
-                    'best-02-0.2222.ckpt')
-    elif name == 'pre_trained_E3N_from_scratch_resnet18_window':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_5',
-                    'best-03-008299-0.1090.ckpt')
-    elif name == 'pre_trained_E3N_resnet50':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_1',
-                    'best-epoch=00-val_loss=0.30.ckpt')
-    elif name == 'pre_trained_E3N_resnet50_window':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_3',
-                    'best-03-008086-0.1167.ckpt')
-    elif name == 'pre_trained_E3N_custom_window':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_4',
-                    'best-00-001708-0.3423.ckpt')
-    elif name == 'pre_trained_E3N_convnext_tiny_window_1':
-        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2',
-                    'best-19-021127-0.1540.ckpt')
-    '''os.path.join(
-        '/home/a_morelli/models/model_training_logs/pre_trained_models/mnist',
-        'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
-    ),'''
-    #resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
-    #resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
-    return out_path
-
-def get_input_modality(name):
-    if name=='mixed_view':
-        return ['X_crop', 'digit_full', 'digit_crop', 'digit', 'digit', 'digit', 'text_full', 'text_crop', 'text', 'text', 'text']
-    elif name=='window_view':
-        return ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)]
-    elif name=='window_view_minimal':
-        return ['X_window']+['text_window']+ ['digit_window']
-    elif name=='window_view_2':
-        n=2
-        return ['X_window' for _ in range(n)]+['text_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
-    elif name=='window_no_text':
-        n=3
-        return ['X_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
-    elif name=='window_debug_aug':
-        return ['X_window','_X_window']+ ['digit_window' , '_digit_window']+ ['text_window', '_text_window']
-    elif name=='window_3x_2d_1t':
-        return ['X_window' for _ in range(3)]+['digit_window' for _ in range(2)]+ ['text_window']
-    elif name=='patch_view':
-        n_x=20
-        n_d=10
-        n_t=6
-        return ['X_patch' for _ in range(n_x)]+ ['digit_patch' for _ in range(n_d)]+['text_patch' for _ in range(n_t)]
-    elif name=='patch_view_balanced':
-        n_x=10
-        n_d=10
-        n_t=10
-        return ['X_patch' for _ in range(n_x)]+ ['digit_patch' for _ in range(n_d)]+['text_patch' for _ in range(n_t)]
 
 RESTORE = False
 version_override =  7
-
-exp_params = {
-    'problem': 'PD', #handedness, PD, 
-    'debug': False,
-
-    #debugging
-    'debugging_callbacks':True,
-    'fast_dev_run': False, #can be False, None or True, False and None have same behavior
-    'pass_example_input_array': False,
-
-    #training modality
-    'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-    'pre_training': False, #if true the model is pre-trained on a large dataset of images and the classification head is trained on the PD dataset, if false the model is trained from scratch on the PD dataset
-    'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-    'synthetic': None , # ALL_SYNTHETIC_TRANSFORMS or None
-    'synthetic_proportions': [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
-    'selected_properties': [],#['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*'], #None or [] means no conditioning on covariates
-    #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
-    'global_fusion':'late', #early, late
-
-    #experiment parameters
-    'merge_shards': False, #automatically set to true if you use handedness as label
-    'data_modality': get_input_modality('patch_view_balanced'),#'window_3x_2d_1t'), #mixed_view, window_view, window_view_minimal
-    'num_tiles': 3,
-    'use_grid': True,
-    #loss options
-    'label_smoothing': 0.0, #0.0 = no smoothing // 0.1, 0.2, 0.3, 0.4, 0.5; if set to x!=0 -> num_classes=2 and crossentropy is used
-    'use_balanced_weights': True,
-    'loss_name': 'standard', # 'standard' or 'silent'
-    'loss_kwargs':{
-        'pi': 0.03, #the share of positives among normal-looking cases (P(y=1 | no visible signs)); 1-recall=P(no visible signs | y=1)
-        'learnable_pi': False
-    },
-    #balancing
-    'balancing_factor': 10, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-    'balanced_data': False, #note that this and balace_validation are independent
-    'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
-    'majority_class_id': 0, 
-    'threshold_num': 1,
-    'num_classes': 1, #1 for BCE loss, 2 for crossentropy
-    'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
-    #if 'last_q' with the first last_q equal to 0
-    'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
-    #censor time is set authomatically to all for pre_training==true and problem in [handedness]
-    'filter_modality' : 'digit', 
-
-    #model definition
-    'model': "ConvEncoder_dae_32",#"convnext_tiny", 'resnet18'
-    #clip-vit-large-patch14, clip-vit-large-patch14-inter
-    'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
-    'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
-    'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
-    'model_structure': 'ModularModel',#'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
-    'val_check_interval': None, #None or float between 0 and 1, if None validation is done at the end of each epoch, if float validation is done every val_check_interval fraction of an epoch
-    'align_train_metrics_to_val': True,  
-    #val and align are set authomatically: to none if pre_training is not active and PD; to 0.3 and True if problem==handedness
-    'min_window_steps': 50,
-    'model_parameters': {
-        #Pooling options
-        'use_view_groups':True, #if True uses the view_groups parameter to group the views by modality, if False uses the view_mask parameter to mask the views
-        'modalities': None, #None or a list of modalities to keep, e.g. ['digit_window', 'text_window'] or ['X_crop', 'digit_crop', 'text_crop']
-        #with none all modalities are kept
-        'view_agg':'hierarchical',#'hierarchical', #hierarchical' pools within each modality, then across modalities;  
-        #'mean', 'max', 'lse', 'attention', 'pma', 'transformer', 'concat'-> pools across all views with a single attention layer; "mean" pools across all views with a simple mean; "max" pools across all views with a simple max
-        'view_kwargs': dict(
-            intra='attention', 
-            inter='attention', 
-            modality_dropout=0.1, view_dropout=0.1, dropout_level='subject',
-            view_pos= True, #if True uses a positional embedding (moality+order in modality)
-            modality_emb = True, #if True uses a learned embedding per modality (added to views in flat mode, to the modality tokens in hierarchical mode).
-            modality_norm = True, #if True uses a separate LayerNorm per modality on the crop features.
-            ),
-
-        #sequence model
-        'd_model': 128, 
-        'n_heads': 4, # -> for each head 128/4 = 32 is the hidden dimension during the attention computation 
-        'n_layers':1,
-        'ff_mult':2, # the hidden dimension of the feedforward layer is ff_mult*d_model
-        'dropout': 0.4,
-        'count_norm': 2,
-        'use_spread': False, #add a variance feature of dimension d_model to the average d_model feature
-        'use_count_feature': False,
-        'use_attention_pool': False, #if true overrides use_spread and use_count_feature 
-        'seq_model':'gru', #causal_gru (bidirectional has no impact, predictions are returned per_step)
-        'bidirectional':True,
-    },
-
-    #Transforms definitions
-    'custom_transform': None, #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, 
-    #if not None overrides the transform defined for the model with ta custom one
-    'input_size': 32, 
-    'norm_mu': 'minus_one_one', #imagenet,handedness,mnist,PD_window
-    'norm_std': 'minus_one_one',
-    'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
-    #in the code based on the view name
-    'invert_color':True,
-    'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
-    'image_pixel_space_augmentations': None,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
-    'random_drop': None, #None or a float between 0 and 1, if None no random drop is applied, if float random drop is applied with the given probability to each questionnaire
-    
-    #Training params definition
-    'lora_tuning': False, #if True uses LoRA tuning for the model, if False uses standard fine-tuning
-    'use_opt_groups': True,
-    'lr_decay': 0.2, #(also used for lora_lr_decay) -> decay factor for the learning rate of the backbone layers, if use_opt_groups is True 
-    'lr_backbone': 1e-4,
-    'lr_classifier_head': 1e-3,
-    'lr_scheduling': "two_stage", #'cosine' # "two_stage", 'step', None
-    'stage1_fraction': 0.1, #0.2
-    'stage1_lr_names': ["lr_head"],
-    'batch_size': 8,
-    'scale_lr_with_batch_size': False, #if True scales the learning rate with the batch size, if False uses the learning rate defined in lr_backbone and lr_classifier_head
-    'num_epochs': 100,
-    'max_steps': -1, #N or -1
-    'patience': 15, #always in epochs (even if you take fractional validation steps -> real patience will be 1/val_check_interval * patience)
-    'stopping_metric': 'val/pr_auc',#'val/pr_auc', #'val/loss', #the metric to monitor for early stopping, can be 'val/pr_auc', 'val/loss' or 'val/roc_auc' or 'val/f1' or 'val/mcc' or 'val/accuracy'
-    'eta_min_cosine': 1e-7, #the timm-style convention (base/100)
-    'weight_decay': 0.01, #1e-5 - 1e-8 (swin fine-tuning) #1e-2 (resnet for fine-tuning), 0.05 (resnet for training from scratch)
-    'warmup_fraction': 0.05,   # ~5% of total steps as warmup
-    'layers_to_unfreeze': ['all'],#'last_stage'
-    'seed': 42,
-    'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
-    'precision': "bf16-mixed",#"16-mixed", #None, #"16-mixed","bf16-mixed"        # AMP: autocast + GradScaler handled for you or None
-    #bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx
-    'gradient_clip_val': 1.0, #1.0, None
-
-    'prefetch_factor': 4,
-}
-
-def get_source_path():
-    if exp_params['problem'] == 'PD' and not exp_params['pre_training']:
-        return "/home/a_morelli/models/model_training_logs/PD/"
-        #return "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
-    elif exp_params['problem'] == 'PD' and exp_params['pre_training']:
-        return "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N"
-        #return "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
-    elif exp_params['problem'] == 'handedness':
-        return "/home/a_morelli/models/model_training_logs/handedness/"
-        #return "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
-    else:
-        raise ValueError(f"Unknown problem type: {exp_params['problem']}")
-SOURCE_PATH = get_source_path()
-
-# Authomatic settings
-exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
-exp_params = set_automatic_hyperparameters(exp_params)
-
-
-SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shard-*.tar")
-SHARD_PATTERN_val = os.path.join(exp_params['data_folder'],"val/worker*_shard-*.tar")
 SAVE_DEBUG_PATH = "/home/a_morelli/vscode_projects/model_training/data/debug_training"
-
-define_optimization_groups, last_stage = get_optimization_groups(model_name=exp_params['model'],exp_params=exp_params)
-if 'last_stage' in exp_params['layers_to_unfreeze']:
-    exp_params['layers_to_unfreeze'] = last_stage+['classifier']
-print(f"define_optimization_groups: {define_optimization_groups}", flush=True)
- 
-OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
-CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
-exp_params['CHECKPOINT_PATH'] = CHECKPOINT_PATH
-exp_params['OUTPUT_PATH'] = OUTPUT_PATH
-exp_params['SOURCE_PATH'] = SOURCE_PATH
-
-DEBUG_IMGS = True
 VERBOSE = True
 
 #if you need the following variables load them from the csv_data ->
@@ -283,11 +63,32 @@ VERBOSE = True
 #variables_to_add = ['etudegp', 'profq2', 'lateralite', 'relative_age', 'birth_date', 'follow_up_time']
 #filter these first when rebalancing: warning==1 if the control was selected with at least -> "at_least_warning": at_least_warning,
     
-def main(exp_params):
-    args = get_args()
-    worker = args.num_workers
+def main():
+    cfg = load_config()
+    exp_params = cfg.get("experiment", {})
+    worker = cfg.get("num_workers", 4)
+
+    SOURCE_PATH = get_source_path()
+    # Authomatic settings
+    exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
+    exp_params = set_automatic_hyperparameters(exp_params)
+    SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shard-*.tar")
+    SHARD_PATTERN_val = os.path.join(exp_params['data_folder'],"val/worker*_shard-*.tar")
+
+    define_optimization_groups, last_stage = get_optimization_groups(model_name=exp_params['model'],exp_params=exp_params)
+    if 'last_stage' in exp_params['layers_to_unfreeze']:
+        exp_params['layers_to_unfreeze'] = last_stage+['classifier']
+    print(f"define_optimization_groups: {define_optimization_groups}", flush=True)
+
+    OUTPUT_PATH = os.path.join(SOURCE_PATH,f"{exp_params['model']}_model_results")
+    CHECKPOINT_PATH = os.path.join(OUTPUT_PATH, "checkpoints")
+    exp_params['CHECKPOINT_PATH'] = CHECKPOINT_PATH
+    exp_params['OUTPUT_PATH'] = OUTPUT_PATH
+    exp_params['SOURCE_PATH'] = SOURCE_PATH
+            
     prefetch_factor = exp_params['prefetch_factor'] if worker > 0 else None
     exp_params['precision'] = _resolve_precision(exp_params['precision'])
+    exp_params['debug_imgs'] = True
 
     print(f"baseline: {rss_gb():.2f}") #0.81
 
@@ -310,10 +111,10 @@ def main(exp_params):
     exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=VERBOSE,class_col=exp_params['class_col'])
 
     if RESTORE:
-        restore(version_override, exp_params)
+        restore(version_override, exp_params, CHECKPOINT_PATH, define_optimization_groups)
         return
     
-    write_log, current_version = logging_initialization(CHECKPOINT_PATH) 
+    write_log, current_version = logging_initialization(CHECKPOINT_PATH,OUTPUT_PATH) 
 
     train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
     train_df, *_ = preprocess_PD_csv(train_df,exp_params['selected_properties'], split_col='split')
@@ -332,11 +133,10 @@ def main(exp_params):
     val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
     
     #get_memory_usage(grid_dict, train_df, exclusion_set)
-
-    train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
-                                                                       grid_dict, transform, 
-                                                                       SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
-                                                                       train_df=train_df, merge_shards=exp_params['merge_shards'])
+    train_loader,val_loader,_,_= get_loaders_helper(worker,prefetch_factor,exp_params,
+                       exclusion_set,val_exclusion_set, grid_dict, 
+                       transform,SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
+                       train_df=train_df, merge_shards=exp_params['merge_shards'], view_groups=view_groups)
     
     '''p = psutil.Process(os.getpid())
     for i, batch in enumerate(train_loader):
@@ -345,7 +145,7 @@ def main(exp_params):
             print(f"batch {i}: rss={p.memory_info().rss/1e9:.2f} GB", flush=True)
         if i == 300: break'''
     
-    if DEBUG_IMGS:
+    if exp_params['debug_imgs']:
         debug(train_loader,val_loader,exp_params)
     
     lit_model, shape, eval_cfg = litmodel_initialization(model,counts,write_log,define_optimization_groups,exp_params, exclusion_set, VERBOSE)
@@ -390,6 +190,35 @@ def main(exp_params):
 
 
 #### HELPER FUCNTIONS #### 
+def get_source_path():
+    if exp_params['problem'] == 'PD' and not exp_params['pre_training']:
+        return "/home/a_morelli/models/model_training_logs/PD/"
+        #return "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
+    elif exp_params['problem'] == 'PD' and exp_params['pre_training']:
+        return "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N"
+        #return "/mnt/beegfs02/scratch/a_morelli/model_training/pre_trained_models/E3N"
+    elif exp_params['problem'] == 'handedness':
+        return "/home/a_morelli/models/model_training_logs/handedness/"
+        #return "/mnt/beegfs02/scratch/a_morelli/model_training/handedness/"
+    else:
+        raise ValueError(f"Unknown problem type: {exp_params['problem']}")
+
+def get_loaders_helper(worker,prefetch_factor,exp_params,
+                       exclusion_set,val_exclusion_set, grid_dict, 
+                       transform,SHARD_PATTERN_train, SHARD_PATTERN_val,
+                       train_df, merge_shards):
+    repr_file_path = exp_params.get('representation_file_path',None)
+    view_groups = _build_view_groups(exp_params['data_modality']) if exp_params['model_parameters'].get('use_view_groups', False) else None
+    if repr_file_path is not None:
+        loaders = prepare_rep_dataloaders(repr_file_path, view_groups, batch_size=exp_params.get('batch_size', 16), num_workers=worker)
+        train_loader = loaders['train']
+        val_loader = loaders['val']
+    else:
+        train_loader,val_loader,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclusion_set, 
+                                                                        grid_dict, transform, 
+                                                                        SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
+                                                                        train_df=train_df, merge_shards=exp_params['merge_shards'])
+    return train_loader,val_loader
 
 def _resolve_precision(requested: str = "bf16-mixed") -> str:
     if requested != "bf16-mixed":
@@ -422,7 +251,7 @@ def override_val_exclusion(train_df, val_exclusion_set, exp_params):
     
     return val_exclusion_set
 
-def restore(current_version, exp_params):
+def restore(current_version, exp_params, CHECKPOINT_PATH, define_optimization_groups=None):
     exp_params['timestamp'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     exp_params['best_epoch'] = "N/A (Cancelled)"
     exp_params['best_val_loss'] = "N/A (Cancelled)"
@@ -660,8 +489,12 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, n_local=0
                                    grayscale=exp_params['to_grayscale'], is_lora=lora_tuning)
     print("############# Model backbone loaded! #############")
     transform = get_transforms(exp_params, transform)
-    out=test_output(exp_params['input_size'], backbone, channels=exp_params['num_channels']) #test the output of the backbone to determine the number of features for the classification head
-    in_features = out.shape[1]  
+
+    if hasattr(exp_params, 'representation_dim'):
+        in_features = exp_params['representation_dim']
+    else:
+        out=test_output(exp_params['input_size'], backbone, channels=exp_params['num_channels']) #test the output of the backbone to determine the number of features for the classification head
+        in_features = out.shape[1]  
 
     if lora_tuning:
         target = getattr(backbone, 'lora_target_modules', None)
@@ -750,7 +583,7 @@ def _selected_properties_get_dims(params, train_df):
 
     return local_dims, global_dims
 
-def logging_initialization(checkpoint_path):
+def logging_initialization(checkpoint_path, OUTPUT_PATH):
     #read the current version number (starts from 1)
     current_version=1
     #if it exists open the log file in CHECKPOINT_PATH, else create it 
@@ -852,5 +685,5 @@ def check_incompatible_params(exp_params):
     "Error: Data modality = 'all' and USE_GRID=True are incompatible"
 
 if __name__ == "__main__":
-    main(exp_params)
+    main()
     

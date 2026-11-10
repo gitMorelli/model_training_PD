@@ -45,9 +45,10 @@ from src.utils.image_processing import ResizeLongestSide, PadToSquare, get_augme
 from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY
 from src.utils.tabular_data_utils import preprocess_PD_csv
 
-from src.scripts.train_PD_model import get_input_modality, _resolve_precision, _selected_properties_get_dims, override_val_exclusion 
+from src.scripts.train_PD_model import  _resolve_precision, _selected_properties_get_dims, override_val_exclusion 
 from src.utils.pd_pretrain import load_config, instantiate
 from src.utils.training_utils import set_automatic_hyperparameters
+from src.utils.training_utils import get_input_modality
 
 
  

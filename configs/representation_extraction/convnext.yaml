@@ -1,66 +1,67 @@
 experiment:
-  'problem': 'PD', #handedness, PD, 
-  'debug': False,
+  problem: PD  # handedness, PD
+  debug: false
 
-  #debugging
-  'debugging_callbacks':True,
-  'fast_dev_run': False, #can be False, None or True, False and None have same behavior
-  'pass_example_input_array': False,
+  # debugging
+  debugging_callbacks: true
+  fast_dev_run: false  # can be false, null or true; false and null have same behavior
+  pass_example_input_array: false
 
-  #training modality
-  'grouped': False, #if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
-  'pre_training': False, #if true the model is pre-trained on a large dataset of images and the classification head is trained on the PD dataset, if false the model is trained from scratch on the PD dataset
-  'bce_aux_weight': 0.3, #weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
-  'synthetic': None , # ALL_SYNTHETIC_TRANSFORMS or None
-  'synthetic_proportions': [], #if synthetic is not None, the proportions of each synthetic class in the training set (must sum to 1)
-  'selected_properties': [],#['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*'], #None or [] means no conditioning on covariates
-  #['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
-  'global_fusion':'late', #early, late
+  # training modality
+  grouped: false  # if true i have all elements from the same case-control group in the batch and train to distinguish the case from the controls
+  pre_training: false  # if true the model is pre-trained on a large dataset of images and the classification head is trained on the PD dataset, if false the model is trained from scratch on the PD dataset
+  bce_aux_weight: 0.3  # weight for the BCE loss on the auxiliary output (the one that predicts the case-control group)
+  synthetic: null  # ALL_SYNTHETIC_TRANSFORMS or null
+  synthetic_proportions: []  # if synthetic is not null, the proportions of each synthetic class in the training set (must sum to 1)
+  selected_properties: []  # null or [] means no conditioning on covariates
+  # e.g. ['etudegp', 'profq2', 'lateralite', 'relative_age', 'case_dt_dateq*']
+  global_fusion: late  # early, late
 
-  #experiment parameters
-  'merge_shards': False, #automatically set to true if you use handedness as label
-  'num_tiles': 3,
-  'use_grid': True,
-  #balancing
-  'balancing_factor': 10, #even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept 
-  'balanced_data': False, #note that this and balace_validation are independent
-  'balance_validation': False, #if True the validation set is balanced, if False it is not balanced
-  'majority_class_id': 0, 
-  'threshold_num': 1,
-  'num_classes': 1, #1 for BCE loss, 2 for crossentropy
-  'filter_missing': 'all', #'all', 'last_q' #if all remove only ids with grid_pattern=0000..00 13 times, 
-  #if 'last_q' with the first last_q equal to 0
-  'censor_time': 'pre_diagnosis',#'pre_diagnosis', #'all_matched',#'first_and_last',#'successive','last_successive_and_previous',#'last_and_successive', #'all', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous','last_and_successive'
-  #censor time is set authomatically to all for pre_training==true and problem in [handedness]
-  'filter_modality' : 'digit', 
+  # experiment parameters
+  merge_shards: false  # automatically set to true if you use handedness as label
+  num_tiles: 3
+  use_grid: true
 
-  #model definition
-  'model': "ConvEncoder_dae_32",#"convnext_tiny", 'resnet18'
-  #clip-vit-large-patch14, clip-vit-large-patch14-inter
-  'custom_pre_trained_weights': pre_trained_weights(None), #None, 'pre_trained_E3N_convnext_tiny_window_1','pre_trained_E3N_resnet18' or 'pre_trained_E3N_resnet50' or 'pre_trained_E3N_custom_window'
-  'load_full_model': False, #if true loads backbone+head, if false only the backbone (the head is initialized randomly)
-  'pretrained': True, #True, False, e.g. for resnet if True loads the imagenet weights for the backbone, if False loads the backbone with random weights
-  'model_structure': 'ModularModel',#'FlexibleSequenceQuestionnaireModel', #'SetQuestionnaireModel',#'SequenceQuestionnaireModel',
+  # balancing
+  balancing_factor: 10  # even if float is converted to int with int(balancing_factor), balancing_factor controls for each case-control group are kept
+  balanced_data: false  # note that this and balance_validation are independent
+  balance_validation: false  # if true the validation set is balanced, if false it is not balanced
+  majority_class_id: 0
+  threshold_num: 1
+  num_classes: 1  # 1 for BCE loss, 2 for crossentropy
+  filter_missing: all  # 'all', 'last_q'
+  # if 'all' remove only ids with grid_pattern=0000..00 13 times,
+  # if 'last_q' with the first last_q equal to 0
+  censor_time: all_matched
+  # options: 'all', 'all_matched', 'first_and_last', 'successive', 'last_successive_and_previous',
+  #          'last_and_successive', 'pre_diagnosis', 'pre_diagnosis_1y', 'last_and_previous'
+  # censor time is set automatically to 'all' for pre_training==true and problem in [handedness]
+  filter_modality: digit
 
-  #Transforms definitions
-  'custom_transform': None, #'2xcrop_resize_normalize',#'crop_normalize', ##'pad_resize_normalize', #None, 
-  #if not None overrides the transform defined for the model with ta custom one
-  'input_size': 32, 
-  'norm_mu': 'minus_one_one', #imagenet,handedness,mnist,PD_window
-  'norm_std': 'minus_one_one',
-  'apply_augmentation': None, #None, 'random_crop_half' ; if data_modality is a list the transform for each view mode will be determined
-  #in the code based on the view name
-  'invert_color':True,
-  'to_grayscale': True, #if True converts the images to grayscale (1 channel) before feeding them to the model
-  'image_pixel_space_augmentations': None,#None, #None, ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY ; None and NO_AUG are equivalent but None skips the function call
-  'random_drop': None, #None or a float between 0 and 1, if None no random drop is applied, if float random drop is applied with the given probability to each questionnaire
-  
-  #Training params definition
-  'batch_size': 8,
-  'seed': 42,
-  'accumulate_grad_batches': 8,#8,   # effective batch = batch_size * accumulate_grad_batches or None
+  # model definition
+  model: convnext_tiny  # convnext_tiny
+  custom_pre_trained_weights: null  # was pre_trained_weights(None) -- resolve in code
+  load_full_model: false  # if true loads backbone+head, if false only the backbone (the head is initialized randomly)
+  pretrained: true  # e.g. for resnet if true loads the imagenet weights for the backbone, if false loads the backbone with random weights
 
-  'prefetch_factor': 4,
+  # transforms definitions
+  custom_transform: null  # '2xcrop_resize_normalize', 'crop_normalize', 'pad_resize_normalize', null
+  # if not null overrides the transform defined for the model with a custom one
+  input_size: 224
+  norm_mu: imagenet  # imagenet, handedness, mnist, PD_window
+  norm_std: imagenet
+  apply_augmentation: null  # null, 'random_crop_half'; if data_modality is a list the transform for each view mode will be determined in the code based on the view name
+  invert_color: true
+  to_grayscale: true  # if true converts the images to grayscale (1 channel) before feeding them to the model
+  image_pixel_space_augmentations: null  # null, ALL, NO_AUG, PHOTO_ONLY, GEOM_ONLY; null and NO_AUG are equivalent but null skips the function call
+  random_drop: null  # null or a float between 0 and 1; if null no random drop is applied, if float random drop is applied with the given probability to each questionnaire
 
-  #specific for this script
-  "add_to_existing": None, #None if you want to create a new feature extraction table, path if you want to append (it will add columns)
+  # training params definition
+  batch_size: 8
+  seed: 42
+  accumulate_grad_batches: 8  # effective batch = batch_size * accumulate_grad_batches, or null
+
+  prefetch_factor: 4
+
+  # specific for this script
+  add_to_existing: null  # null if you want to create a new feature extraction table, path if you want to append (it will add columns)

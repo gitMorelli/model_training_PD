@@ -193,8 +193,12 @@ def generate_exclusion_set_hand(csv_source,exp_params,split='train', original_da
     return ids_to_exclude
 
 
-def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed_csv=None, exclude_cases=False):
+def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed_csv=None, exclude_cases=False, test_set=False):
     '''returns the num_0 and num_1 in the training set after considering the exclusion -> the true class numerosity'''
+    main_split='train'
+    if test_set:
+        main_split='test'
+    
     exclusion_set = set()
     val_exclusion_set = set()
     
@@ -210,32 +214,32 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
             print(f"{col}: {csv_data[col].iloc[0]}")
         print('#' * 50)'''
         print("Unique subjects in the dataset:", csv_data['unique_id'].nunique())
-        print("Unique subjects in training set:", csv_data[csv_data['split'] == 'train']['unique_id'].nunique())
+        print("Unique subjects in " + main_split + " set:", csv_data[csv_data['split'] == main_split]['unique_id'].nunique())
         print("Unique subjects in validation set:", csv_data[csv_data['split'] == 'val']['unique_id'].nunique())
         print('#' * 50)
         if class_col in csv_data.columns:
             print("Class distribution in the entire dataset:\n", csv_data[class_col].value_counts())
-            print("Class distribution in the training set:\n", csv_data[csv_data['split'] == 'train'][class_col].value_counts())
+            print("Class distribution in the " + main_split + " set:\n", csv_data[csv_data['split'] == main_split][class_col].value_counts())
             print('#' * 50)
 
     if class_col in ['lateralite']:
         print("[DEBUG] Handedness specific balancing")
-        exclusion_set = generate_exclusion_set_hand(csv_data,exp_params, split='train',original_data=original_data, 
+        exclusion_set = generate_exclusion_set_hand(csv_data,exp_params, split=main_split,original_data=original_data, 
                                                 class_col=class_col, verbose=verbose) 
         val_exclusion_set = generate_exclusion_set_hand(csv_data,exp_params, split='val', original_data=original_data, 
                                                     class_col=class_col, verbose=verbose)
     else:
-        exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='train',original_data=original_data, exclude_cases=exclude_cases, 
+        exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split=main_split,original_data=original_data, exclude_cases=exclude_cases, 
                                                 class_col=class_col, verbose=verbose) 
         val_exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='val', original_data=original_data, exclude_cases=exclude_cases, 
                                                     class_col=class_col, verbose=verbose)
     
     if verbose:
-        print(len(exclusion_set), "samples will be excluded from the training set to achieve balancing.")
+        print(len(exclusion_set), "samples will be excluded from the " + main_split + " set to achieve balancing.")
         print('#' * 50)
     
     filtered_csv_data_train = csv_data[~csv_data['unique_id'].isin(exclusion_set)]
-    train = filtered_csv_data_train[filtered_csv_data_train['split'] == 'train']
+    train = filtered_csv_data_train[filtered_csv_data_train['split'] == main_split]
     #compute the number of samples for each class in the training set
     if class_col in train.columns:
         counts = (
@@ -248,63 +252,10 @@ def prepare_exclusion_sets_PD(exp_params,verbose=True,class_col='', pre_computed
         counts = [train['unique_id'].nunique(),0]  # Default counts if class_col is not present (total number of subjects)
 
     if verbose:
-        print("[Prepare exclusion] [post] After applying the exclusion set, the training set has:")
+        print("[Prepare exclusion] [post] After applying the exclusion set, the " + main_split + " set has:")
         print(f"Class 0: {counts[0]} samples")
         print(f"Class 1: {counts[1]} samples")
         print(f"Ratio of Class 1 to Class 0: {counts[1] / counts[0] if counts[0] > 0 else 'undefined'}")
 
     return exclusion_set, val_exclusion_set, counts
 
-def prepare_test_exclusion_set(exp_params,verbose=True,class_col='', pre_computed_csv=None, exclude_cases=False):
-    '''returns the num_0 and num_1 in the training set after considering the exclusion -> the true class numerosity'''
-    exclusion_set = set()
-    
-    if pre_computed_csv is not None:
-        original_data = pd.read_parquet(exp_params['list_of_ids_paths'])
-        csv_data = pre_computed_csv.copy()
-    else:
-        original_data = pd.read_parquet(exp_params['list_of_ids_paths'])
-        csv_data = original_data.copy()
-    if verbose:
-        print("Initial CSV data loaded. First row example:")
-        '''for col in csv_data.columns:
-            print(f"{col}: {csv_data[col].iloc[0]}")
-        print('#' * 50)'''
-        print("Unique subjects in the dataset:", csv_data['unique_id'].nunique())
-        print("Unique subjects in test set:", csv_data[csv_data['split'] == 'test']['unique_id'].nunique())
-        print('#' * 50)
-        if class_col in csv_data.columns:
-            print("Class distribution in the entire dataset:\n", csv_data[class_col].value_counts())
-            print("Class distribution in the test set:\n", csv_data[csv_data['split'] == 'test'][class_col].value_counts())
-            print('#' * 50)
-
-    
-    exclusion_set = generate_exclusion_set_PD(csv_data,exp_params, split='test',original_data=original_data, exclude_cases=exclude_cases, 
-                                              class_col=class_col) 
-    
-    if verbose:
-        print(len(exclusion_set), "samples will be excluded from the test set to achieve balancing.")
-        print('#' * 50)
-    
-    filtered_csv_data_train = csv_data[~csv_data['unique_id'].isin(exclusion_set)]
-    train = filtered_csv_data_train[filtered_csv_data_train['split'] == 'test']
-    #compute the number of samples for each class in the training set
-    if class_col in train.columns:
-        counts = (
-            train[class_col]
-            .value_counts()
-            .reindex(range(train[class_col].max() + 1), fill_value=0)
-            .sort_index()
-        )
-    else:
-        counts = [0,0]  # Default counts if class_col is not present (eg when i iterate in debug mode on pre_training dataset)
-
-    if verbose:
-        print("After applying the exclusion set, the test set has:")
-        print(f"Class 0: {counts[0]} samples")
-        print(f"Class 1: {counts[1]} samples")
-        print(f"Ratio of Class 1 to Class 0: {counts[1] / counts[0] if counts[0] > 0 else 'undefined'}")
-
-    return exclusion_set, counts
-
- 

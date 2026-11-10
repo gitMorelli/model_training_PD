@@ -1,55 +1,27 @@
-import tarfile
 import time
-import io
 import torch
-from PIL import Image, ImageOps
-from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 import os
 import pandas as pd
-import torch.nn as nn
 import time
-import webdataset as wds
-import glob
-from tqdm import tqdm
-import torch.optim as optim
-from torchvision import models
-import torchvision.utils as vutils
-import lightning as L
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
-from lightning.pytorch.loggers import TensorBoardLogger
-from torchmetrics.classification import MulticlassRecall
-import random
-import shutil
-#from lightning.pytorch.loggers import CSVLogger
-from lightning.pytorch.callbacks import Callback
-import re
-import signal
-import sys
-# 4. Compute and display metrics using scikit-learn
-from sklearn.metrics import classification_report, confusion_matrix
-import pickle
 import numpy as np
 import json
 import gc
 
 from src.utils.training_utils import load_config
 from src.utils.image_processing import get_transforms,get_mu_std
-
+from src.utils.models import get_model
 from src.utils.data_loading import prepare_loaders_PD, prepare_exclusion_sets_PD
-from src.utils.data_loading import explore_data, return_file_paths, load_grid_dict, prepare_test_exclusion_set
-from src.utils.model_utils import SimpleMockModel, CustomBinaryCNN, CustomMLP, TiledJoinedModels
-from src.utils.model_utils import get_model, test_output, get_classification_head, JoinedModels, unfreeze_layers
-from src.utils.visualization import debug_images_dataset
-from src.utils.training_utils import LitModel, set_automatic_hyperparameters
-from src.scripts.train_PD_model import get_input_modality, model_initialization, logging_initialization
+from src.utils.data_loading import return_file_paths, load_grid_dict
+from src.utils.training_utils import set_automatic_hyperparameters
+from src.utils.training_utils import get_input_modality
 
 VERBOSE = True
 SAVE_FOLDER_PATH = "/home/a_morelli/models/model_training_logs/PD/representation_extraction"
 QUESTIONNAIRES_TO_INCLUDE_HANDEDNESS = [str(q) for q in range(1,14)]
 
 
-def main(params):
+def main():
     cfg = load_config()
     params = cfg.get("experiment", {})
     num_workers = cfg.get("num_workers", 4)
@@ -68,8 +40,8 @@ def main(params):
 
     exclusion_set, val_exclusion_set, _ = prepare_exclusion_sets_PD(
         params, verbose=VERBOSE, class_col=params['class_col'])
-    test_exclusion_set, _ = prepare_test_exclusion_set(
-        params, verbose=VERBOSE, class_col=params['class_col'])
+    test_exclusion_set, _, _ = prepare_exclusion_sets_PD(
+        params, verbose=VERBOSE, class_col=params['class_col'], test_set=True)
 
     train_df = pd.read_parquet(params['list_of_ids_paths'])
 

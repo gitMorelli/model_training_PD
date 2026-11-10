@@ -8,12 +8,10 @@
 #SBATCH --mem=64G                      # Job memory request
 #SBATCH --time=01:00:00                # Time limit hrs:min:sec
 #--partition=shortq
-#SBATCH --partition=visuq,gpgpuq
+#SBATCH --partition=gpgpuq,visuq
+#SBATCH --gres=gpu:1
 #--gres=gpu:h100:1
-#--gres=gpu:1
-#SBATCH --gres=gpu:a100:1 
-#--nodelist=gpu04
-#--gres=gpu:t4:1
+#SBATCH --exclude=gpu01
 
 # --- Environment Setup ---
 #source ~/anaconda3/etc/profile.d/conda.sh

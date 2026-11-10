@@ -37,3 +37,47 @@ def return_dt_path(input_path):
     if dt_path is None:
         raise ValueError(f"dt_path not found for input_path: {input_path}")
     return dt_path
+
+def get_representation_file_path(model_name):
+    source_path = "/home/a_morelli/models/model_training_logs/PD/representation_extraction"
+    map_names = {   
+        'convnext': 'convnext_tiny/27082026',
+        'clip-vit-large-patch14-inter': 'clip-vit-large-patch14-inter/27082026'
+    }
+    representation_file_path = map_names.get(model_name, None)
+    if representation_file_path is None:
+        raise ValueError(f"Representation file path not found for model_name: {model_name}")
+    return os.path.join(source_path, representation_file_path)
+
+def pre_trained_weights(name):
+    if name is None:
+        return None
+    #options for custom_pre_trained_weights:
+    if name == 'pre_trained_E3N_resnet18':
+        out_path =os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_2',
+                    'best-epoch=01-val_loss=0.23.ckpt')
+    elif name == 'pre_trained_E3N_resnet18_window':
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_4',
+                    'best-02-0.2222.ckpt')
+    elif name == 'pre_trained_E3N_from_scratch_resnet18_window':
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet18_model_results/checkpoints/v_5',
+                    'best-03-008299-0.1090.ckpt')
+    elif name == 'pre_trained_E3N_resnet50':
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_1',
+                    'best-epoch=00-val_loss=0.30.ckpt')
+    elif name == 'pre_trained_E3N_resnet50_window':
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/resnet50_model_results/checkpoints/v_3',
+                    'best-03-008086-0.1167.ckpt')
+    elif name == 'pre_trained_E3N_custom_window':
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/FiveStageResidualStridedConvNet_model_results/checkpoints/v_4',
+                    'best-00-001708-0.3423.ckpt')
+    elif name == 'pre_trained_E3N_convnext_tiny_window_1':
+        out_path = os.path.join('/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2',
+                    'best-19-021127-0.1540.ckpt')
+    '''os.path.join(
+        '/home/a_morelli/models/model_training_logs/pre_trained_models/mnist',
+        'resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt'
+    ),'''
+    #resnet50/checkpoints/best-resnet18-mnist-epoch=28-val_loss=0.0197.ckpt
+    #resnet18/checkpoints/best-resnet18-mnist-epoch=05-val_loss=0.0181.ckpt
+    return out_path

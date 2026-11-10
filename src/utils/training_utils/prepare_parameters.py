@@ -1,5 +1,7 @@
 import os
 from src.utils.models.pretrained_models.models import _process_name, mapping_conv_encoder, SOURCE_PATH, _load_preprocessing_params
+from src.utils.data_loading import get_representation_file_path
+from src.utils.data_loading import read_rep_dim
 
 #optimization groups utils
 def _vit_depth(base_name):
@@ -161,6 +163,35 @@ def get_optimization_groups(model_name,exp_params):
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
 
 
+def get_input_modality(name):
+    if name=='mixed_view':
+        return ['X_crop', 'digit_full', 'digit_crop', 'digit', 'digit', 'digit', 'text_full', 'text_crop', 'text', 'text', 'text']
+    elif name=='window_view':
+        return ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)]
+    elif name=='window_view_minimal':
+        return ['X_window']+['text_window']+ ['digit_window']
+    elif name=='window_view_2':
+        n=2
+        return ['X_window' for _ in range(n)]+['text_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
+    elif name=='window_no_text':
+        n=3
+        return ['X_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
+    elif name=='window_debug_aug':
+        return ['X_window','_X_window']+ ['digit_window' , '_digit_window']+ ['text_window', '_text_window']
+    elif name=='window_3x_2d_1t':
+        return ['X_window' for _ in range(3)]+['digit_window' for _ in range(2)]+ ['text_window']
+    elif name=='patch_view':
+        n_x=20
+        n_d=10
+        n_t=6
+        return ['X_patch' for _ in range(n_x)]+ ['digit_patch' for _ in range(n_d)]+['text_patch' for _ in range(n_t)]
+    elif name=='patch_view_balanced':
+        n_x=10
+        n_d=10
+        n_t=10
+        return ['X_patch' for _ in range(n_x)]+ ['digit_patch' for _ in range(n_d)]+['text_patch' for _ in range(n_t)]
+
+
 #Set hyperparameters / metadata
 def set_automatic_hyperparameters(exp_params):
     bar = "=" * 80
@@ -186,6 +217,14 @@ def set_automatic_hyperparameters(exp_params):
         exp_params['class_col'] = 'diag_park_final1_quest'
     elif problem=='unsupervised_pretraining':
         exp_params['class_col'] = 'no_label'
+
+    if exp_params.get('from_representation_file', None):
+        exp_params['representation_file_path'] = get_representation_file_path(exp_params['from_representation_file'])
+        exp_params['model'] = 'identity'  # override model to identity since we are loading representations from a file
+        exp_params['debug_imgs'] = False
+        exp_params['representation_dim'] = read_rep_dim(exp_params['representation_file_path'])
+        print(f"Using representation file: {exp_params['representation_file_path']}", flush=True)
+        print("[INFO] Overriding model to 'identity' since we are loading representations from a file", flush=True)
     
     if exp_params.get('label_smoothing', 0.0)!=0.0:
         exp_params['num_classes'] = 2

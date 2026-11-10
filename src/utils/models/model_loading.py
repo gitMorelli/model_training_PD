@@ -1,6 +1,8 @@
 import torch
 import torchvision.transforms as T
 import time
+import torch.nn as nn
+
 from .torch_models import *
 from .timm_models import *
 from .pretrained_models import *
@@ -58,6 +60,10 @@ def get_model(name="resnet50", mode='classification head', pretrained=True,check
     elif 'ConvEncoder' in name:
         model = get_ConvEncoder(name=name, pretrained=pretrained, **kwargs)
         transform = get_ConvEncoder_transforms(name=name,**kwargs)
+    ### Training on representations from a file (no backbone, just a classifier head) ###
+    elif name == 'identity':
+        model = nn.Identity()
+        transform = None
     else:
         raise ValueError(f"Model {name} is not supported.")
     

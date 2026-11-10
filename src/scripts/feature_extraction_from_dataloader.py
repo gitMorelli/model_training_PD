@@ -42,7 +42,7 @@ from src.utils.model_utils import get_model, test_output, get_classification_hea
 from src.utils.visualization import debug_images_dataset
 from src.utils.image_processing import get_augmentation_transform, get_transforms
 from src.utils.training_utils import LitModel, set_automatic_hyperparameters
-from src.scripts.train_PD_model import get_input_modality
+from src.utils.training_utils import get_input_modality
 
 proc = psutil.Process(os.getpid())
 

@@ -39,7 +39,7 @@ from src.utils.visualization import debug_images_dataset, save_img_with_info_vie
 from src.utils.visualization import SubjectViewer, launch_interactive_PD
 from src.utils.training_utils import set_automatic_hyperparameters
 from src.debug.create_statistics_on_images import read_loader
-from src.scripts.train_PD_model import get_input_modality
+from src.utils.training_utils import get_input_modality
 from src.utils.image_processing import ALL,NO_AUG,PHOTO_ONLY,GEOM_ONLY,LOUD
 
 params = {
