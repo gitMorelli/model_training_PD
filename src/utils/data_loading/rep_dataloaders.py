@@ -67,8 +67,7 @@ class RepSequenceDataset(Dataset):
     labels      : optional {subject_id: label}; otherwise read from `label_col` (one value
                   per subject). Subjects with label -1 / missing are dropped.
     """
-
-    def __init__(self, df, view_groups, subject_col='subject', label_col='label', labels=None,
+    def __init__(self, df, view_groups, subject_col='subject_id', label_col='label', labels=None,
                  q_col='q', modality_col='modality', rep_col='rep',
                  exclusion_set=(), random_pick=False, verbose=True):
         self.names = list(view_groups)
@@ -153,7 +152,7 @@ class RepSequenceDataset(Dataset):
 # --------------------------------------------------------------------------- builder
 
 def prepare_rep_dataloaders(table_path, view_groups, batch_size=4, splits=('train', 'val', 'test'),
-                            split_col='split', subject_col='subject', label_col='label',
+                            split_col='split', subject_col='subject_id', label_col='label',
                             labels=None, q_col='q', modality_col='modality', rep_col='rep',
                             exclusion_set=(), num_workers=0, partial_batch=True, debug=False,
                             collate_fn=None, seed=None):

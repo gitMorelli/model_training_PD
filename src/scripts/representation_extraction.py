@@ -26,7 +26,7 @@ def main():
     params = cfg.get("experiment", {})
     num_workers = cfg.get("num_workers", 4)
 
-    params["data_modality"] = get_input_modality('window_3x_2d_1t')
+    params["data_modality"] = get_input_modality(params["data_modality_name"])
     params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths(params['problem'], 
                                                                                                  params['grouped'], params['pre_training'])
     params = set_automatic_hyperparameters(params)
@@ -99,7 +99,7 @@ def _read_and_release(make_loader, model,create_row, max_batches, split):
         del loader
         gc.collect()
 
-def create_row(qs, sid, smodalities, srepresentations):
+def create_row(qs, sid, smodalities, srepresentations, label=None):
     rows = []
     for i, q in enumerate(qs):
         for modality, rep in zip(smodalities[i], srepresentations):
@@ -107,6 +107,7 @@ def create_row(qs, sid, smodalities, srepresentations):
             row["q"] = q
             row["modality"] = modality
             row["rep"] = rep.numpy()  # Convert tensor to 1dim numpy array
+            row["label"] = label.item() #same for each modality and q given the sid
             #print(f"Subject {sid}: representations shape: {rep.shape}")
             rows.append(row)
     return rows
@@ -143,7 +144,7 @@ def extract_loader(model, loader, create_row, slot_to_q=None, max_batches=None,
     start_time = time.time()
     with torch.inference_mode():
         for batch in loader:
-            frames, seq_ids, slot_ids, lengths, labels, resizing_factors, subject_ids, modalities = batch
+            frames, seq_ids, slot_ids, lengths, labels, resizing_factors, subject_ids, modalities, *_ = batch
             seq_ids  = seq_ids.cpu()
             slot_ids = slot_ids.cpu()
             lengths  = lengths.cpu()
@@ -167,6 +168,7 @@ def extract_loader(model, loader, create_row, slot_to_q=None, max_batches=None,
                 sel = (seq_ids == b).nonzero(as_tuple=True)[0]
                 sel = sel[torch.argsort(slot_ids[sel])]
                 slots = slot_ids[sel].tolist()
+                
                 qs = [slot_name(s) for s in slots]
                 for q in qs:
                     q_index = int(q) - 1
@@ -174,9 +176,10 @@ def extract_loader(model, loader, create_row, slot_to_q=None, max_batches=None,
                         raise ValueError(f"Questionnaire index {q_index} out of range for counters list.")
                     counters[q_index] += 1
                 sid = subject_ids[b] if subject_ids is not None else f"subject_{b}"
+                label = labels[b] if labels is not None else None
                 smodalities = [modalities[s] for s in sel.tolist()]
                 srepresentations = representations[sel]
-                row = create_row(qs, sid, smodalities, srepresentations)
+                row = create_row(qs, sid, smodalities, srepresentations, label=label)
                 if isinstance(row, list):
                     list_of_rows.extend(row)
                 else:

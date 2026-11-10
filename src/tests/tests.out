@@ -1,19 +1,38 @@
-Modality combinations: [('X_window',), ('digit_window',), ('text_window',), ('X_window', 'digit_window'), ('X_window', 'text_window'), ('digit_window', 'text_window'), ('X_window', 'digit_window', 'text_window')]
-Modality names: ['X_window', 'digit_window', 'text_window', 'X_window+digit_window', 'X_window+text_window', 'digit_window+text_window', 'X_window+digit_window+text_window']
+Columns in the representation dataframe: ['subject_id', 'q', 'modality', 'rep', 'label', 'split', 'rep_idx']
+Row 0: subject_id: B9I1Z2Y4_0418
+Row 0: shape of parsed representation: (768,)
+Row 0: first 5 elements of parsed representation: [-0.12308069 -0.96835995 -0.2772824  -0.08317605  0.2979265 ]
+----------------------------------------
+Row 1: subject_id: B9I1Z2Y4_0418
+Row 1: shape of parsed representation: (768,)
+Row 1: first 5 elements of parsed representation: [-0.04483135 -0.8801549  -0.3425246  -0.02535608  0.19330116]
+----------------------------------------
+Row 2: subject_id: B9I1Z2Y4_0418
+Row 2: shape of parsed representation: (768,)
+Row 2: first 5 elements of parsed representation: [-0.13956778 -0.8125724  -0.26298347  0.06976046  0.14593858]
+----------------------------------------
+Row 3: subject_id: B9I1Z2Y4_0418
+Row 3: shape of parsed representation: (768,)
+Row 3: first 5 elements of parsed representation: [ 0.23211046  0.3849937  -0.4021185  -0.00313926 -0.02380731]
+----------------------------------------
+Row 4: subject_id: B9I1Z2Y4_0418
+Row 4: shape of parsed representation: (768,)
+Row 4: first 5 elements of parsed representation: [ 0.22554177  0.3344204  -0.35349324  0.39297414 -0.13312034]
+----------------------------------------
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 6298198
+Job ID: 6324712
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n22
+Nodelist: n16
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-11-06 19:10:17
-Job ended at:   2026-11-06 19:10:31
-Job Wall-clock time: 00:00:14
-CPU Utilized: 00:00:10
-CPU Efficiency: 17.86% of 00:00:56 core-walltime
-Memory Utilized: 78.19 MB
-Memory Efficiency: 0.48% of 16.00 GB
+Job started at: 2026-11-10 18:35:37
+Job ended at:   2026-11-10 18:35:56
+Job Wall-clock time: 00:00:19
+CPU Utilized: 00:00:14
+CPU Efficiency: 18.42% of 00:01:16 core-walltime
+Memory Utilized: 1.63 GB
+Memory Efficiency: 10.21% of 16.00 GB

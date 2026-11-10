@@ -67,6 +67,9 @@ def main():
     cfg = load_config()
     exp_params = cfg.get("experiment", {})
     worker = cfg.get("num_workers", 4)
+    exp_params["data_modality"] = get_input_modality(exp_params["data_modality_name"])
+    exp_params['custom_pre_trained_weights'] = pre_trained_weights(exp_params.get('custom_pre_trained_weights_name', None))
+    exp_params['synthetic_proportions'] = [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))]
 
     SOURCE_PATH = get_source_path()
     # Authomatic settings

@@ -309,39 +309,6 @@ def prepare_pre_training_data():
     pre_training_df.to_parquet(save_path, index=False)
     print(f"Pre-training data saved to {save_path}")
 
-def inspect_columns(): 
-    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet" 
-    csv_data = pd.read_parquet(load_path)
-    columns = csv_data.columns
-    for col in columns:
-        print(f"Column: {col}")
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-        print(f"Dataframe head:\n{csv_data.head()}")
-
-def inspect_matched_data(): 
-    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet" 
-    csv_data = pd.read_parquet(load_path)
-    columns = csv_data.columns
-    for col in columns:
-        print(f"Column: {col}")
-    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-        print(f"Dataframe head:\n{csv_data.head()}")
-    #get the number of unique_ids in each split, specifying how many are case_control==1 and ==0
-    for split in csv_data['split'].unique():
-        split_data = csv_data[csv_data['split'] == split]
-        unique_ids = split_data['unique_id'].nunique()
-        case_control_1 = split_data[split_data['case_control'] == 1]['unique_id'].nunique()
-        case_control_0 = split_data[split_data['case_control'] == 0]['unique_id'].nunique()
-        diag_1 = split_data[split_data['diag_park_final1_quest'] == 1]['unique_id'].nunique()
-        diag_0 = split_data[split_data['diag_park_final1_quest'] == 0]['unique_id'].nunique()
-        print(f"Split: {split}")
-        print(f"Total unique IDs: {unique_ids}")
-        print(f"Case IDs: {case_control_1}")
-        print(f"Diagnosis 1 IDs: {diag_1}")
-        print(f"Control IDs: {case_control_0}")
-        print(f"Diagnosis 0 IDs: {diag_0}")
-    
-
 def view_params():
     load_path = "/mnt/beegfs02/scratch/a_morelli/model_training/PD/resnet18_model_results/checkpoints/v_21/exp_params.pkl"
     with open(load_path, "rb") as f:
@@ -828,32 +795,6 @@ def debug_GRID_PATTERN_REMPLI_PATTERN():
             grid_file_avail = selected_row[grid_columns[i]].values[0]
             print(f"Questionnaire {i+1}: avail={avail}, grid_file_avail={grid_file_avail}")
 
-def inspect_statistics_PD():
-    df = pd.read_csv("/home/a_morelli/models/model_training_logs/PD/feature_extraction/17092026/statistics_PD.csv")
-    print(f"Number of unique subject_ids in the train split: {df[df['split']=='train']['subject_id'].nunique()}")
-    print(f"Number of unique subject_ids in the val split: {df[df['split']=='val']['subject_id'].nunique()}")
-    print(f"Number of unique subject_ids in the test split: {df[df['split']=='test']['subject_id'].nunique()}")
-    return
-    columns = list(df.columns)
-    print(f"Number of columns in the dataframe: {len(columns)}")
-    print(f"Columns in the dataframe: {columns}")
-    #only count the columns that start with 'q1_text_original'
-    q1_text_original_columns = [col for col in columns if col.startswith('q1_')]
-    print(f"Number of columns that start with 'q1_text_original': {len(q1_text_original_columns)}")
-    for col in q1_text_original_columns:
-        print(f"Column: {col}")   
-
-def open_exp_parameters():
-    path = "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2/exp_params.pkl"
-    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_22/exp_params.pkl"
-    #load the exp_params.pkl file and print the keys and values
-    with open(path, "rb") as f:
-        exp_params = pickle.load(f)
-    print("Experiment Parameters:")
-    for key, value in exp_params.items():
-        print(f"{key}: {value}")
-    assert 1==0
-
 def plot_roc_auc_over_time():
     load_path = "/home/a_morelli/models/model_training_logs/PD/feature_extraction/17092026/trained_models/xgb/v_13/results_per_step.csv"
     results_per_step = pd.read_csv(load_path)
@@ -999,8 +940,86 @@ def compare_group_feature_importances(version_1="v_19", version_2="v_20",
     print(f"\nSaved:\n  {path_1}\n  {path_2}")
     return table_1, table_2
 
+# MARK: inspect files
+def inspect_statistics_PD():
+    df = pd.read_csv("/home/a_morelli/models/model_training_logs/PD/feature_extraction/17092026/statistics_PD.csv")
+    print(f"Number of unique subject_ids in the train split: {df[df['split']=='train']['subject_id'].nunique()}")
+    print(f"Number of unique subject_ids in the val split: {df[df['split']=='val']['subject_id'].nunique()}")
+    print(f"Number of unique subject_ids in the test split: {df[df['split']=='test']['subject_id'].nunique()}")
+    return
+    columns = list(df.columns)
+    print(f"Number of columns in the dataframe: {len(columns)}")
+    print(f"Columns in the dataframe: {columns}")
+    #only count the columns that start with 'q1_text_original'
+    q1_text_original_columns = [col for col in columns if col.startswith('q1_')]
+    print(f"Number of columns that start with 'q1_text_original': {len(q1_text_original_columns)}")
+    for col in q1_text_original_columns:
+        print(f"Column: {col}")   
 
-# per_stepanalysis
+def open_exp_parameters():
+    path = "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2/exp_params.pkl"
+    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_22/exp_params.pkl"
+    #load the exp_params.pkl file and print the keys and values
+    with open(path, "rb") as f:
+        exp_params = pickle.load(f)
+    print("Experiment Parameters:")
+    for key, value in exp_params.items():
+        print(f"{key}: {value}")
+    assert 1==0
+
+def inspect_columns(): 
+    load_path = "/home/a_morelli/datasets/id_lists/final_table_for_matching_splitted_13_7_26_pre_training.parquet" 
+    csv_data = pd.read_parquet(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(f"Dataframe head:\n{csv_data.head()}")
+
+def inspect_matched_data(): 
+    load_path = "/home/a_morelli/datasets/id_lists/PD_training_set_20_07_26.parquet" 
+    csv_data = pd.read_parquet(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(f"Dataframe head:\n{csv_data.head()}")
+    #get the number of unique_ids in each split, specifying how many are case_control==1 and ==0
+    for split in csv_data['split'].unique():
+        split_data = csv_data[csv_data['split'] == split]
+        unique_ids = split_data['unique_id'].nunique()
+        case_control_1 = split_data[split_data['case_control'] == 1]['unique_id'].nunique()
+        case_control_0 = split_data[split_data['case_control'] == 0]['unique_id'].nunique()
+        diag_1 = split_data[split_data['diag_park_final1_quest'] == 1]['unique_id'].nunique()
+        diag_0 = split_data[split_data['diag_park_final1_quest'] == 0]['unique_id'].nunique()
+        print(f"Split: {split}")
+        print(f"Total unique IDs: {unique_ids}")
+        print(f"Case IDs: {case_control_1}")
+        print(f"Diagnosis 1 IDs: {diag_1}")
+        print(f"Control IDs: {case_control_0}")
+        print(f"Diagnosis 0 IDs: {diag_0}")
+    
+def inspect_representation_files():
+    from src.utils.data_loading.rep_dataloaders import read_table, parse_rep
+    from src.utils.data_loading import get_representation_file_path
+    model_name = "convnext_tiny"
+    representation_file_path = get_representation_file_path(model_name)
+    df = read_table(representation_file_path)
+    print(f"Columns in the representation dataframe: {df.columns.tolist()}")
+
+    rep_col = "rep"
+    n_check = 5
+    cells = df[rep_col].head(n_check)
+    for i, cell in enumerate(cells):
+        arr = parse_rep(cell)
+        id = df.iloc[i]["subject_id"]
+        print(f"Row {i}: subject_id: {id}")
+        print(f"Row {i}: shape of parsed representation: {arr.shape}")
+        print(f"Row {i}: first 5 elements of parsed representation: {arr.flatten()[:5]}")
+        print("" + "-" * 40)
+
+
+# MARK: per_stepanalysis
 def _prepare_dt_df(force=True,preds_path="/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv"):
     from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
     from src.scripts.time_series_analysis import force_case_dt
@@ -1401,4 +1420,4 @@ def prepare_case_dt_datasets():
     return
 
 if __name__ == "__main__":
-    inspect_matched_data()
+    inspect_representation_files()
