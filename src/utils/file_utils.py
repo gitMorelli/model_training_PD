@@ -1,5 +1,7 @@
+import contextlib
 import os
 from pathlib import Path
+import sys
 import numpy as np
 import cv2
 from time import perf_counter
@@ -8,6 +10,27 @@ import tarfile
 import shutil
 import h5py
 
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, data):
+        for s in self.streams:
+            s.write(data)
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+
+@contextlib.contextmanager
+def tee_stdout(path, mode="w"):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, mode, encoding="utf-8") as f:
+        old = sys.stdout
+        sys.stdout = _Tee(old, f)
+        try:
+            yield
+        finally:
+            sys.stdout = old
 
 def recreate_dir(path, retries=5, delay=0.1):
     if os.path.exists(path):

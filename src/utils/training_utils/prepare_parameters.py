@@ -158,6 +158,11 @@ def get_optimization_groups(model_name,exp_params):
         define_optimization_groups.append(
             {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'})
         last_stage = ['vision_model.encoder.body.12.', 'vision_model.encoder.body.13.', 'vision_model.encoder.out_norm.', 'vision_model.encoder.head.', 'vision_model.extraction_module.']# lr4
+    elif model_name == 'identity':
+        define_optimization_groups = {'names': ['classifier'], 'lr': exp_params['lr_classifier_head'], 'lr_name': 'lr_head'}
+        last_stage = None
+    else:
+        raise ValueError(f"Unknown model_name '{model_name}' for optimization groups")
     return define_optimization_groups, last_stage
 #['classifier','vision_model.features.6','vision_model.features.7','vision_model.final_norm'], #['all'],#['classifier','layer4'],#['all','classifier'], #Update it for every model
     #['stages.3', 'stages.4', 'head', 'projector', 'classifier']
@@ -168,6 +173,9 @@ def get_input_modality(name):
         return ['X_crop', 'digit_full', 'digit_crop', 'digit', 'digit', 'digit', 'text_full', 'text_crop', 'text', 'text', 'text']
     elif name=='window_view':
         return ['X_window' for _ in range(3)]+['text_window' for _ in range(3)]+ ['digit_window' for _ in range(3)]
+    elif name=='window_view_5':
+        n=5
+        return ['X_window' for _ in range(n)]+['text_window' for _ in range(n)]+ ['digit_window' for _ in range(n)]
     elif name=='window_view_minimal':
         return ['X_window']+['text_window']+ ['digit_window']
     elif name=='window_view_2':
@@ -225,6 +233,7 @@ def set_automatic_hyperparameters(exp_params):
         exp_params['representation_dim'] = read_rep_dim(exp_params['representation_file_path'])
         print(f"Using representation file: {exp_params['representation_file_path']}", flush=True)
         print("[INFO] Overriding model to 'identity' since we are loading representations from a file", flush=True)
+        print(f"[INFO] Representation dimension: {exp_params['representation_dim']}", flush=True)
     
     if exp_params.get('label_smoothing', 0.0)!=0.0:
         exp_params['num_classes'] = 2

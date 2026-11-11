@@ -18,6 +18,7 @@ from src.utils.training_utils import PDClassificationModule, load_legacy_state_d
 from src.scripts.train_PD_model import model_initialization
 from src.utils.tabular_data_utils import preprocess_PD_csv
 from src.utils.evaluation import analyze_results, plot_probability_trajectories
+from src.utils.file_utils import tee_stdout
  
 
 def get_last_best_checkpoint(checkpoint_dir,version):
@@ -441,26 +442,7 @@ def get_args():
     parser.add_argument("--batches_to_test", type=int, default=50, help="Number of batches to process for benchmark")
     return parser.parse_args()
 
-class _Tee:
-    def __init__(self, *streams):
-        self.streams = streams
-    def write(self, data):
-        for s in self.streams:
-            s.write(data)
-    def flush(self):
-        for s in self.streams:
-            s.flush()
 
-@contextlib.contextmanager
-def tee_stdout(path, mode="w"):
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, mode, encoding="utf-8") as f:
-        old = sys.stdout
-        sys.stdout = _Tee(old, f)
-        try:
-            yield
-        finally:
-            sys.stdout = old
 
 
 

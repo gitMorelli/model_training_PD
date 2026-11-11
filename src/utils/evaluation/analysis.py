@@ -13,20 +13,47 @@ from .plotting_helpers import (_plot_pr_curve_binary, _plot_roc_curve_binary,
 
 
 
-def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90, pos_label=1):
+def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90,
+                   target_sensitivity=0.90, target_specificity=0.90, pos_label=1):
     """Choose a decision threshold for the positive class (binary only).
  
-    strategy="f1"            -> threshold that maximizes F1 on the positive class
-    strategy="youden"        -> threshold that maximizes Youden's J = TPR - FPR
-                                (equivalently sensitivity + specificity - 1);
-                                the point on the ROC curve furthest above the
-                                chance diagonal. Weights both classes equally,
-                                unlike F1, which ignores true negatives.
-    strategy="target_recall" -> best-precision threshold that still hits
-                                recall >= target_recall
+    A sample is called positive when score >= threshold.
+ 
+    strategy="f1"                 -> threshold that maximizes F1 on the positive class
+    strategy="youden"             -> threshold that maximizes Youden's J = TPR - FPR
+                                     (equivalently sensitivity + specificity - 1);
+                                     the point on the ROC curve furthest above the
+                                     chance diagonal. Weights both classes equally,
+                                     unlike F1, which ignores true negatives.
+    strategy="target_recall"      -> best-precision threshold that still hits
+                                     recall >= target_recall
+    strategy="target_sensitivity" -> highest threshold with sensitivity >=
+                                     target_sensitivity, i.e. the best specificity
+                                     achievable at that sensitivity
+    strategy="target_specificity" -> lowest threshold with specificity >=
+                                     target_specificity, i.e. the best sensitivity
+                                     achievable at that specificity. Returns +inf
+                                     (predict everything negative) if no finite
+                                     threshold reaches the target.
     """
-    if strategy == "youden":
-        fpr, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=pos_label)
+    if strategy in ("youden", "target_sensitivity", "target_specificity"):
+        # drop_intermediate=False: keep every distinct score as a candidate threshold
+        fpr, tpr, thresholds = roc_curve(y_true, y_scores, pos_label=pos_label,
+                                         drop_intermediate=False)
+        eps = 1e-12  # guard against float round-off in k/n ratios
+ 
+        if strategy == "target_sensitivity":
+            # thresholds decrease and tpr is non-decreasing, so the first hit is
+            # the highest threshold (lowest fpr) that reaches the target.
+            # tpr ends at 1, so a hit always exists.
+            return float(thresholds[np.argmax(tpr >= target_sensitivity - eps)])
+ 
+        if strategy == "target_specificity":
+            # fpr is non-decreasing, so the last hit is the lowest threshold
+            # (highest tpr) still within the allowed false-positive rate.
+            ok = np.flatnonzero(fpr <= (1 - target_specificity) + eps)
+            return float(thresholds[ok[-1]]) if ok[-1] > 0 else float("inf")
+ 
         # thresholds[0] is +inf (sklearn >= 1.3) or max(score) + 1: the degenerate
         # "predict everything negative" point, where J == 0. Drop it.
         if len(thresholds) > 1:
@@ -56,7 +83,6 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90, pos_labe
         return float(thresholds[best])
  
     raise ValueError(f"unknown strategy: {strategy}")
-
 
 def analyze_results(all_scores, all_labels, results_df, split="validation",
                     class_names=None, pos_label=1, threshold=None, strategy="f1",

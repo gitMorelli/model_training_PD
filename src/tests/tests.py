@@ -958,7 +958,8 @@ def inspect_statistics_PD():
 
 def open_exp_parameters():
     path = "/home/a_morelli/models/model_training_logs/pre_trained_models/E3N/convnext_tiny_model_results/checkpoints/v_2/exp_params.pkl"
-    path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_22/exp_params.pkl"
+    path = "/home/a_morelli/models/model_training_logs/PD/identity_model_results/checkpoints/v_4/exp_params.pkl"
+    #path = "/home/a_morelli/models/model_training_logs/PD/representation_extraction/convnext_tiny/10112026_183319/metadata_PD.json"
     #load the exp_params.pkl file and print the keys and values
     with open(path, "rb") as f:
         exp_params = pickle.load(f)
@@ -1420,4 +1421,4 @@ def prepare_case_dt_datasets():
     return
 
 if __name__ == "__main__":
-    inspect_matched_data()
+    open_exp_parameters()

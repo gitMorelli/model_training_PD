@@ -41,7 +41,7 @@ def return_dt_path(input_path):
 def get_representation_file_path(model_name):
     source_path = "/home/a_morelli/models/model_training_logs/PD/representation_extraction"
     map_names = {   
-        'convnext_tiny': 'convnext_tiny/10112026_183319',
+        'convnext_tiny': 'convnext_tiny/11112026_174449',
         'clip-vit-large-patch14-inter': 'clip-vit-large-patch14-inter/27082026'
     }
     representation_file_path = map_names.get(model_name, None)

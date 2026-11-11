@@ -1,9 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=train_PD
-#--output=/home/a_morelli/vscode_projects/model_training/results/train_PD_pretraining.out
-#--error=/home/a_morelli/vscode_projects/model_training/results/train_PD_pretraining.err
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train_PD.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD.err
+#SBATCH --job-name=sequence_only
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train/sequence_only.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train/sequence_only.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=16             # Number of CPU cores per task
@@ -14,7 +12,7 @@
 #SBATCH --partition=gpgpuq,visuq
 #SBATCH --gres=gpu:1
 #--gres=gpu:a100:1
-#SBATCH --exclude=gpu01,gpu02,gpu04
+#SBATCH --exclude=gpu01
 
 # --- Environment Setup ---
 #source ~/anaconda3/etc/profile.d/conda.sh

@@ -18,13 +18,13 @@ experiment:
 
   # experiment parameters
   merge_shards: false  # automatically set to true if you use handedness as label
-  data_modality_name: window_3x_2d_1t  # mixed_view, window_view, window_view_minimal
+  data_modality_name: window_view_5  #should change so that is authomatically detected from csv
   num_tiles: 3
   use_grid: true
 
   # loss options
   label_smoothing: 0.0  # 0.0 = no smoothing // 0.1, 0.2, 0.3, 0.4, 0.5; if set to x != 0 -> num_classes=2 and crossentropy is used
-  use_balanced_weights: true
+  use_balanced_weights: false
   loss_name: standard  # standard or silent
   loss_kwargs:
     pi: 0.03  # the share of positives among normal-looking cases (P(y=1 | no visible signs)); 1-recall = P(no visible signs | y=1)
@@ -39,12 +39,12 @@ experiment:
   num_classes: 1  # 1 for BCE loss, 2 for crossentropy
   filter_missing: all  # all, last_q; if all remove only ids with grid_pattern=0000..00 13 times,
                        # if last_q with the first last_q equal to 0
-  censor_time: pre_diagnosis  # all_matched, first_and_last, successive, last_successive_and_previous, last_and_successive, all, pre_diagnosis, pre_diagnosis_1y, last_and_previous
+  censor_time: all_matched  # all_matched, first_and_last, successive, last_successive_and_previous, last_and_successive, all, pre_diagnosis, pre_diagnosis_1y, last_and_previous
                               # censor time is set automatically to all for pre_training == true and problem in [handedness]
   filter_modality: digit
 
   # model definition
-  model: ConvEncoder_dae_32  # simply a placeholder since i set to identity
+  model: convnext_tiny # simply a placeholder since i set to identity
   custom_pre_trained_weights_name: null  # null, pre_trained_E3N_convnext_tiny_window_1, pre_trained_E3N_resnet18, pre_trained_E3N_resnet50, pre_trained_E3N_custom_window
   load_full_model: false  # if true loads backbone+head, if false only the backbone (the head is initialized randomly)
   pretrained: true  # e.g. for resnet if true loads the imagenet weights for the backbone, if false loads the backbone with random weights
@@ -103,18 +103,18 @@ experiment:
   lr_scheduling: cosine  # cosine, two_stage, step, null
   stage1_fraction: 0.1  # 0.2
   stage1_lr_names: [lr_head]
-  batch_size: 32 #i can have a larger batch size since the model runs on vectors
+  batch_size: 8 #i can have a larger batch size since the model runs on vectors
   scale_lr_with_batch_size: false  # if true scales the learning rate with the batch size, if false uses lr_backbone and lr_classifier_head as given
   num_epochs: 100
   max_steps: -1  # N or -1
-  patience: 15  # always in epochs (even with fractional validation steps -> real patience will be 1/val_check_interval * patience)
+  patience: 30  # always in epochs (even with fractional validation steps -> real patience will be 1/val_check_interval * patience)
   stopping_metric: val/pr_auc  # val/pr_auc, val/loss, val/roc_auc, val/f1, val/mcc, val/accuracy
-  eta_min_cosine: 1.0e-7  # the timm-style convention (base/100)
+  eta_min_cosine: 1.0e-6  # the timm-style convention (base/100)
   weight_decay: 0.01  # 1e-5 - 1e-8 (swin fine-tuning), 1e-2 (resnet fine-tuning), 0.05 (resnet from scratch)
   warmup_fraction: 0.05  # ~5% of total steps as warmup
   layers_to_unfreeze: [all]  # last_stage
   seed: 42
-  accumulate_grad_batches: 2  # effective batch = batch_size * accumulate_grad_batches, or null
+  accumulate_grad_batches: 8  # effective batch = batch_size * accumulate_grad_batches, or null
   precision: bf16-mixed  # 16-mixed, bf16-mixed, null; AMP: autocast + GradScaler handled for you
                          # bf16 needs Ampere or newer (A100, H100, RTX 30xx/40xx)
   gradient_clip_val: 1.0  # 1.0, null

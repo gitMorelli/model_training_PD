@@ -30,7 +30,7 @@ from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths,
 from src.utils.data_loading import questionnaires_to_keep
 from src.utils.evaluation import  analyze_results, plot_probability_trajectories
 from sklearn.inspection import permutation_importance
-from src.debug.PD_model_evaluation import tee_stdout
+from src.utils.file_utils import tee_stdout
 
 params = {
 

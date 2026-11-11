@@ -1,9 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=train_PD
-#--output=/home/a_morelli/vscode_projects/model_training/results/train_PD_pretraining.out
-#--error=/home/a_morelli/vscode_projects/model_training/results/train_PD_pretraining.err
-#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train_PD.out
-#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train_PD.err
+#SBATCH --output=/home/a_morelli/vscode_projects/model_training/results/train/train_PD.out
+#SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train/train_PD.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
 #SBATCH --cpus-per-task=16             # Number of CPU cores per task
@@ -42,7 +40,7 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.train_PD_model \
-    --config $HOME_DIR/configs/PD/custom.yaml \
+    --config $HOME_DIR/configs/PD/test_no_random.yaml \
     --num_workers 16
 echo "PYTORCH_CUDA_ALLOC_CONF=$PYTORCH_CUDA_ALLOC_CONF"
 nvidia-smi --query-gpu=name,memory.total --format=csv

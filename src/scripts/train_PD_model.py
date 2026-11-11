@@ -136,10 +136,10 @@ def main():
     val_exclusion_set = override_val_exclusion(train_df, val_exclusion_set, exp_params)
     
     #get_memory_usage(grid_dict, train_df, exclusion_set)
-    train_loader,val_loader,_,_= get_loaders_helper(worker,prefetch_factor,exp_params,
+    train_loader,val_loader = get_loaders_helper(worker,prefetch_factor,exp_params,
                        exclusion_set,val_exclusion_set, grid_dict, 
                        transform,SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val,
-                       train_df=train_df, merge_shards=exp_params['merge_shards'], view_groups=view_groups)
+                       train_df=train_df, merge_shards=exp_params['merge_shards'])
     
     '''p = psutil.Process(os.getpid())
     for i, batch in enumerate(train_loader):
@@ -494,11 +494,13 @@ def model_initialization(write_log,exp_params, verbose=True,val=False, n_local=0
     print("############# Model backbone loaded! #############")
     transform = get_transforms(exp_params, transform)
 
-    if hasattr(exp_params, 'representation_dim'):
+    if exp_params.get('representation_dim',None) is not None:
         in_features = exp_params['representation_dim']
+        print(f"[INFO] Using representation_dim from loaded file: {in_features}")
     else:
         out=test_output(exp_params['input_size'], backbone, channels=exp_params['num_channels']) #test the output of the backbone to determine the number of features for the classification head
         in_features = out.shape[1]  
+        print(f"[INFO] Determined in_features from backbone output: {in_features}")
 
     if lora_tuning:
         target = getattr(backbone, 'lora_target_modules', None)

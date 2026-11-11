@@ -16,11 +16,12 @@ from scipy.stats import norm
 from src.utils.data_loading import prepare_exclusion_sets_PD, return_file_paths, return_dt_path
 from src.utils.evaluation import  analyze_results, plot_probability_trajectories, roc_auc_over_time
 from sklearn.inspection import permutation_importance
-from src.debug.PD_model_evaluation import tee_stdout
+from src.utils.file_utils import tee_stdout
 from src.scripts.t_on_representations import balance_data, reshape_features, mask_features, add_info_to_df
 from src.utils.evaluation.helpers import build_modality_names
 from src.utils.longitudinal_analysis import run_discrimination
 from src.utils.longitudinal_analysis import run_analysis, compare_models, compare_range
+from src.utils.evaluation.binned_metrics import binned_metrics, plot_binned_metrics
 
 HOME_PATH = "/home/a_morelli/models/model_training_logs/PD/"
 def get_input_file_path(name):
@@ -29,7 +30,7 @@ def get_input_file_path(name):
     elif name=="trained_features":
         input_file = os.path.join(HOME_PATH, "feature_extraction/17092026/trained_models/xgb/v_13/results_per_step.csv")
     elif name=="trained_deep":
-        input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_24/all/per_step_predictions.csv")
+        input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_27/all/per_step_predictions.csv")
         #input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_27")
         #input_file = os.path.join(HOME_PATH, "resnet18_model_results/checkpoints/v_36/per_step_predictions.csv")
         #input_file = os.path.join(HOME_PATH, "convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv")
@@ -37,7 +38,7 @@ def get_input_file_path(name):
 
 params = {
     #input info
-    "input_file":get_input_file_path("statistics"), #statistics, trained_features, trained_deep
+    "input_file":get_input_file_path("trained_deep"), #statistics, trained_features, trained_deep
     "force_case_dt": True, #if True it will force the case_dt to the value in the time_df, if False it will use the case_dt in the input_file
     "per_modality": ['all','X_window','digit_window','text_window'], #if "all_combinations" combinations are built
     #this is used if the file path is a directory -> i have per modality results
@@ -69,7 +70,10 @@ params = {
     'n_form': 'log', #form of the n_quest term: 'log', 'linear', 'cat'
     'type_of_analysis': 'compare_models', #'compare_steps', 'single_model', 'compare_models'
 }
-
+VERBOSE = True
+SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/time_series_analysis"
+EXPERIMENT = "binned_metrics" #"time_resolved_discrimination","statistical_analysis" #"time_series_comparison" #"plot_property" , 
+#binned_metrics, 
 params['list_of_ids_paths'], params['data_folder'], params['grid_dict_path'] = return_file_paths('PD', 
                                                                                                  False, False)
 
@@ -83,11 +87,6 @@ def get_type_of_input(params):
         out = "ML_on_features"
     return out
 params["type_of_input"] = get_type_of_input(params)
-
-
-VERBOSE = True
-SAVE_PATH = "/home/a_morelli/vscode_projects/model_training/data/time_series_analysis"
-EXPERIMENT = "statistical_analysis" #"time_resolved_discrimination","statistical_analysis" #"time_series_comparison" #"plot_property" 
 os.makedirs(SAVE_PATH, exist_ok=True)
 
 def main(path=None):
@@ -166,18 +165,18 @@ def main(path=None):
     else:
         max_time = df['case_dt'].max()
 
+    if path is not None:
+        local_save_path = os.path.dirname(path)
+    else:
+        local_save_path = os.path.dirname(params['input_file'])
+
     print(EXPERIMENT)
     if EXPERIMENT == "time_series_comparison":
-        local_save_path = os.path.dirname(params['input_file'])
         n=5
         compare_signals(df, signal_columns=properties, n_steps=n, step_is_years=False,
                     class_names=("negative", "positive"), min_count=1, power=2,
                     save_path=local_save_path, save_name=f"signal_comparison_{n}", only_common_rows=False)
     elif EXPERIMENT == "plot_property":
-        if path is not None:
-            local_save_path = os.path.dirname(path)
-        else:
-            local_save_path = os.path.dirname(params['input_file'])
         for n in [5, 10]:
             statistics,diff = plot_probability_trajectories(df, n_steps=n, ax=None,
                                                 class_names=("negative", "positive"),
@@ -193,11 +192,11 @@ def main(path=None):
                 df, step=2,window=2, pred_col=params['signal_column'], true_col="true_label",
                 save_path=local_save_path, save_name="roc_auc_over_time.png",percentiles=(5, 99)
             )
+    elif EXPERIMENT == "binned_metrics":
+        res = binned_metrics(df, n_steps=2,step_is_years=True, group_column="set",
+                     threshold=0.44, alpha=0.05, n_boot=2000)
+        plot_binned_metrics(res, save_path=local_save_path, save_name=f"binned_metrics_{min_str}_{max_str}_{params['signal_column']}")
     elif EXPERIMENT == "time_resolved_discrimination":
-        if path is not None:
-            local_save_path = os.path.dirname(path)
-        else:
-            local_save_path = os.path.dirname(params['input_file'])
         table, info = run_discrimination(df, time_sign=-1, t_min=0, t_max=-min_time, width=3, step=1,
                                          path=os.path.join(local_save_path, f"time_resolved_discrimination_{min_str}_{0}_{params['signal_column']}.png"))
     elif EXPERIMENT == "statistical_analysis": 
@@ -207,7 +206,7 @@ def main(path=None):
         print(f"Min value of {params['signal_column']}: {min_value}")
         print(f"Max value of {params['signal_column']}: {max_value}")
         return'''
-        plot_save_path = os.path.dirname(params['input_file'])
+        plot_save_path = local_save_path
         dof_spline = params['dof_spline']
         #title=f"slot_results_LMM_{params['time_model']}_{dof_spline}_{params['censor_time']}"
         title=f"{params['type_of_analysis']}_{min_str}_{max_str}_{params['time_model']}_{dof_spline}"

@@ -415,6 +415,7 @@ def prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set,val_exclu
         train_input = SHARD_PATTERN_train
         val_input   = SHARD_PATTERN_val
 
+    force_val = exp_params.get('force_deterministic_sampling',False)
     train_dataset = prepare_PD_dataset(train_input, exclusion_set=exclusion_set,train_df=train_df, exp_params=exp_params, 
                                        partial_batch=partial_batch, is_val=force_val, **common_kwargs) 
     train_loader = DataLoader(
