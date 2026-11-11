@@ -24,6 +24,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from .pd_dataloaders import collate_variable_sequences_PD   
+from .pd_shared_helpers import questionnaires_to_keep
 
 
 # --------------------------------------------------------------------------- helpers
@@ -218,7 +219,7 @@ class RepSequenceDataset(Dataset):
 
 # --------------------------------------------------------------------------- builder
 
-def prepare_rep_dataloaders(table_path, view_groups, batch_size=4, splits=('train', 'val', 'test'),
+def prepare_rep_dataloaders(table_path, train_df, exp_params, view_groups, batch_size=4, splits=('train', 'val', 'test'),
                             split_col='split', subject_col='subject_id', label_col='label',
                             labels=None, q_col='q', modality_col='modality', rep_col='rep',
                             exclusion_set=(), num_workers=0, partial_batch=True, debug=False,
@@ -226,7 +227,13 @@ def prepare_rep_dataloaders(table_path, view_groups, batch_size=4, splits=('trai
     """Returns {split: DataLoader}. `table` is a path (.csv/.parquet/.pkl) or a DataFrame.
     Train is shuffled and samples among extra reps per cell; val/test are deterministic
     and never drop the last partial batch."""
-    df = read_table(table_path)
+    repr_df = read_table(table_path)
+
+    # filter using the same logic as the image pipeline, so the model sees the same subjects
+    get_meta = meta_getter_from_df(train_df, id_col='unique_id')
+    df = filter_by_questionnaires(repr_df, questionnaires_to_keep, get_meta, 
+                                                exp_params['censor_time'], train_df=train_df)
+    
     if collate_fn is None:
         collate_fn = partial(collate_variable_sequences_PD, debug=debug)
 

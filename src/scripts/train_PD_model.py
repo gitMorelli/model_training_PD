@@ -213,13 +213,8 @@ def get_loaders_helper(worker,prefetch_factor,exp_params,
     repr_file_path = exp_params.get('representation_file_path',None)
     view_groups = _build_view_groups(exp_params['data_modality']) if exp_params['model_parameters'].get('use_view_groups', False) else None
     if repr_file_path is not None:
-        from src.utils.data_loading.rep_dataloaders import meta_getter_from_df, read_table, filter_by_questionnaires
-        from src.utils.data_loading import questionnaires_to_keep
-        get_meta = meta_getter_from_df(train_df, id_col='unique_id')
-        repr_df = read_table(repr_file_path)
-        repr_df_filtered = filter_by_questionnaires(repr_df, questionnaires_to_keep, get_meta, 
-                                                    exp_params['censor_time'], train_df=train_df)
-        loaders = prepare_rep_dataloaders(repr_file_path, view_groups, batch_size=exp_params.get('batch_size', 16), num_workers=worker)
+        loaders = prepare_rep_dataloaders(repr_file_path, train_df, exp_params, 
+                                          view_groups, batch_size=exp_params.get('batch_size', 16), num_workers=worker)
         train_loader = loaders['train']
         val_loader = loaders['val']
     else:
