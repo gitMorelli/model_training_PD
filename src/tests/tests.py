@@ -1420,4 +1420,4 @@ def prepare_case_dt_datasets():
     return
 
 if __name__ == "__main__":
-    inspect_representation_files()
+    inspect_matched_data()

@@ -54,10 +54,77 @@ def read_table(path_or_df):
         return pd.read_pickle(p)
     return pd.read_csv(p)
 
+# --------------------------------------------------------------------------- questionnaire filtering
+ 
+META_KEYS = ('last_avail_q', 'questionnaire_info', 'case_grid_pattern', 'rempli_seulq12')
+META_DEFAULTS = dict(last_avail_q=None, questionnaire_info={}, case_grid_pattern=None, rempli_seulq12=1)
+ 
+def meta_getter_from_df(meta_df, id_col='unique_id'):
+    """{subject -> metadata dict} lookup from a table with one row per subject and columns
+    last_avail_q, questionnaire_info, case_grid_pattern, rempli_seulq12 (the fields the webdataset
+    json carried). questionnaire_info stored as a JSON string (CSV) is decoded."""
+    import json
+    cols = [c for c in META_KEYS if c in meta_df.columns]
+    table = meta_df.drop_duplicates(id_col).set_index(id_col)[cols]
+    table.index = table.index.astype(str)
+    lookup = table.to_dict('index')
+ 
+    def get_meta(sid):
+        m = dict(META_DEFAULTS)
+        m.update({k: v for k, v in lookup.get(str(sid), {}).items()
+                  if not (np.isscalar(v) and pd.isna(v))})
+        m['questionnaire_info'] = [] #placeholder, to change if you want to filter by case_dt (eg train only on 5 years before diagnosis)
+        return m
+    return get_meta
+
+ 
+def filter_by_questionnaires(df, keep_fn, get_meta, censor_time, train_df=None,
+                             subject_col='subject_id', q_col='q', drop_on_error=False,
+                             verbose=True):
+    """Keep only the rows whose q is among the steps `keep_fn` returns for their subject.
+ 
+    keep_fn          : your questionnaires_to_keep(last_avail_q, censor_time, questionnaire_info,
+                       train_df, subject_id, subject_images, case_grid_pattern, rempli_seulq12)
+                       -> iterable of q (same indexing as the q column). None or empty drops
+                       the subject, like build_sequence returning None in the image pipeline.
+    get_meta         : subject_id -> dict with the META_KEYS (e.g. meta_getter_from_df(...)).
+    subject_images_fn: builds the `subject_images` argument from the subject's rows; default
+                       {q: [modalities]}. Swap it if your function expects another structure.
+    """
+    keep_pairs, dropped, errors = [], [], []
+    subject_images = [q for q in range(14)]
+    for sid, g in df.groupby(subject_col, sort=False):
+        m = get_meta(sid)
+        try:
+            qs = keep_fn(m['last_avail_q'], censor_time, m['questionnaire_info'], train_df, sid,
+                         subject_images,
+                         m['case_grid_pattern'], m['rempli_seulq12'])
+        except Exception as e:
+            if not drop_on_error:
+                raise RuntimeError(f'questionnaires_to_keep failed for subject {sid}') from e
+            errors.append((sid, repr(e)))
+            continue
+        qs = [] if qs is None else [int(q) for q in qs]
+        if not qs:
+            dropped.append(sid)
+            continue
+        keep_pairs.extend((sid, q) for q in qs)
+ 
+    keep = pd.MultiIndex.from_tuples(keep_pairs, names=[subject_col, q_col])
+    idx = pd.MultiIndex.from_arrays([df[subject_col], df[q_col].astype(int)])
+    out = df[idx.isin(keep)].reset_index(drop=True)
+ 
+    if verbose:
+        n_subj = df[subject_col].nunique()
+        print(f'[filter_by_questionnaires] censor_time={censor_time!r}: '
+              f'rows {len(df)} -> {len(out)}, subjects {n_subj} -> {out[subject_col].nunique()} '
+              f'({len(dropped)} with no step kept, {len(errors)} errors)')
+    return out
+
 
 # --------------------------------------------------------------------------- dataset
 
-class RepSequenceDataset(Dataset):
+class RepSequenceDataset(Dataset): 
     """
     view_groups : {modality: n_views}, e.g. {'modA': 1, 'modB': 2, 'modC': 1}. Must be the
                   SAME dict (same order) passed to the model. k = sum(n_views).

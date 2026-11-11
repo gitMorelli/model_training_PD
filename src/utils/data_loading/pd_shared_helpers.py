@@ -522,7 +522,10 @@ def questionnaires_to_keep(last_q, censor_time, questionnaire_info, train_df,sub
     '''take case_grid_pattern, the case_dt_q for each questionnaire, the training_df and the filtering modality to decide
     which questionnaires to sample for training
     case_grid_pattern is between 1 and 13 ,
-    case_dt can be missing (NaN) or numeric (remember is for the case only)'''
+    case_dt can be missing (NaN) or numeric (remember is for the case only)
+    
+    subject_images is a dictionary with the images, the q key is present only if there are files for the questionnaire
+    '''
     if train_df is None and censor_time != 'pre_diagnosis':
         raise ValueError("train_df must be provided for censor_time other than 'pre_diagnosis' ")
     else:

@@ -71,7 +71,7 @@ def main():
     exp_params['custom_pre_trained_weights'] = pre_trained_weights(exp_params.get('custom_pre_trained_weights_name', None))
     exp_params['synthetic_proportions'] = [1/len(ALL_SYNTHETIC_TRANSFORMS) for _ in range(len(ALL_SYNTHETIC_TRANSFORMS))]
 
-    SOURCE_PATH = get_source_path()
+    SOURCE_PATH = get_source_path(exp_params)
     # Authomatic settings
     exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths(exp_params['problem'], exp_params['grouped'], exp_params['pre_training'])
     exp_params = set_automatic_hyperparameters(exp_params)
@@ -193,7 +193,7 @@ def main():
 
 
 #### HELPER FUCNTIONS #### 
-def get_source_path():
+def get_source_path(exp_params=None):
     if exp_params['problem'] == 'PD' and not exp_params['pre_training']:
         return "/home/a_morelli/models/model_training_logs/PD/"
         #return "/mnt/beegfs02/scratch/a_morelli/model_training/PD/"
@@ -213,6 +213,12 @@ def get_loaders_helper(worker,prefetch_factor,exp_params,
     repr_file_path = exp_params.get('representation_file_path',None)
     view_groups = _build_view_groups(exp_params['data_modality']) if exp_params['model_parameters'].get('use_view_groups', False) else None
     if repr_file_path is not None:
+        from src.utils.data_loading.rep_dataloaders import meta_getter_from_df, read_table, filter_by_questionnaires
+        from src.utils.data_loading import questionnaires_to_keep
+        get_meta = meta_getter_from_df(train_df, id_col='unique_id')
+        repr_df = read_table(repr_file_path)
+        repr_df_filtered = filter_by_questionnaires(repr_df, questionnaires_to_keep, get_meta, 
+                                                    exp_params['censor_time'], train_df=train_df)
         loaders = prepare_rep_dataloaders(repr_file_path, view_groups, batch_size=exp_params.get('batch_size', 16), num_workers=worker)
         train_loader = loaders['train']
         val_loader = loaders['val']
