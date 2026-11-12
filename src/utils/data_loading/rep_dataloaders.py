@@ -24,7 +24,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 from .pd_dataloaders import collate_variable_sequences_PD   
-from .pd_shared_helpers import questionnaires_to_keep
+from .pd_shared_helpers import questionnaires_to_keep, SubjectBatch
 
 
 # --------------------------------------------------------------------------- helpers
@@ -138,9 +138,9 @@ class RepSequenceDataset(Dataset):
     def __init__(self, df, view_groups, subject_col='subject_id', label_col='label', labels=None,
                  q_col='q', modality_col='modality', rep_col='rep',
                  exclusion_set=(), random_pick=False, verbose=True):
-        self.names = list(view_groups)
-        self.n_per = [int(view_groups[m]) for m in self.names]
-        self.offsets = [int(o) for o in np.cumsum([0] + self.n_per)[:-1]]
+        self.names = list(view_groups) # ['X', 'digit', 'text']
+        self.n_per = [int(view_groups[m]) for m in self.names] # [3,2,1]
+        self.offsets = [int(o) for o in np.cumsum([0] + self.n_per)[:-1]] #[0, 3, 4] #starting indexes
         self.k = sum(self.n_per)
         self.random_pick = random_pick
         # modality name of each of the k view positions, e.g. ['modA', 'modB', 'modB', 'modC']
@@ -159,7 +159,7 @@ class RepSequenceDataset(Dataset):
         self.reps = torch.from_numpy(np.stack(reps))              # (n_rows, D)
         self.feat_dim = self.reps.shape[1]
 
-        df = df.assign(_row=np.arange(len(df)),
+        df = df.assign(_row=np.arange(len(df)), #_row is an index that i will use to match back to the representations (which remains in the same order in self.reps)
                        _mod=df[modality_col].map({m: i for i, m in enumerate(self.names)}),
                        _q=df[q_col].astype(int))
 
@@ -233,6 +233,7 @@ def prepare_rep_dataloaders(table_path, train_df, exp_params, view_groups, batch
     get_meta = meta_getter_from_df(train_df, id_col='unique_id')
     df = filter_by_questionnaires(repr_df, questionnaires_to_keep, get_meta, 
                                                 exp_params['censor_time'], train_df=train_df)
+
     
     if collate_fn is None:
         collate_fn = partial(collate_variable_sequences_PD, debug=debug)

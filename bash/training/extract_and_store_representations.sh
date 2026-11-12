@@ -4,7 +4,7 @@
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/results/train/extract_representations.err
 #SBATCH --nodes=1                      # Run on a single node
 #SBATCH --ntasks=1                     # Run a single task
-#SBATCH --cpus-per-task=16              # Number of CPU cores per task
+#SBATCH --cpus-per-task=24              # Number of CPU cores per task
 #SBATCH --mem=64G                      # Job memory request
 #SBATCH --time=01:00:00                # Time limit hrs:min:sec
 #--partition=shortq
@@ -37,5 +37,5 @@ HOME_DIR="/home/a_morelli/vscode_projects/model_training"
 cd $HOME_DIR
 # --- Execution ---
 $ENV_PYTHON -m src.scripts.representation_extraction \
-    --config $HOME_DIR/configs/representation_extraction/convnext.yaml \
-    --num_workers 15
+    --config $HOME_DIR/configs/representation_extraction/clip-vit.yaml \
+    --num_workers 23

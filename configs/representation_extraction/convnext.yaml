@@ -40,7 +40,7 @@ experiment:
 
   # model definition
   model: convnext_tiny  # convnext_tiny
-  data_modality_name: window_view_5
+  data_modality_name: window_3x_2d_1t
   custom_pre_trained_weights: null  # was pre_trained_weights(None) -- resolve in code
   load_full_model: false  # if true loads backbone+head, if false only the backbone (the head is initialized randomly)
   pretrained: true  # e.g. for resnet if true loads the imagenet weights for the backbone, if false loads the backbone with random weights

@@ -1003,21 +1003,75 @@ def inspect_matched_data():
 def inspect_representation_files():
     from src.utils.data_loading.rep_dataloaders import read_table, parse_rep
     from src.utils.data_loading import get_representation_file_path
-    model_name = "convnext_tiny"
+    model_name = "convnext_tiny_window_5"
     representation_file_path = get_representation_file_path(model_name)
     df = read_table(representation_file_path)
+
     print(f"Columns in the representation dataframe: {df.columns.tolist()}")
 
-    rep_col = "rep"
-    n_check = 5
-    cells = df[rep_col].head(n_check)
-    for i, cell in enumerate(cells):
-        arr = parse_rep(cell)
-        id = df.iloc[i]["subject_id"]
-        print(f"Row {i}: subject_id: {id}")
-        print(f"Row {i}: shape of parsed representation: {arr.shape}")
-        print(f"Row {i}: first 5 elements of parsed representation: {arr.flatten()[:5]}")
-        print("" + "-" * 40)
+    columns_of_interest = ['q', 'modality', 'label', 'split']
+
+    #check if representations are the same
+    def all_same(s):
+        return len(s) > 1 and all(np.array_equal(s.iloc[0], r) for r in s.iloc[1:])
+
+    dup = df.groupby(['subject_id', 'modality'])['rep'].apply(all_same)
+    print(f'{dup.mean():.1%} of subject×modality groups have identical reps across all q')
+    print(df['modality'].value_counts())   # single letters here = the string case
+
+    def explore(df):
+        for col in columns_of_interest:
+            if col not in df.columns:
+                print(f"--- {col}: not found in DataFrame ---\n")
+                continue
+
+            counts = df[col].value_counts(dropna=False)
+            print(f"--- {col} ---")
+            print(f"Unique values ({df[col].nunique(dropna=False)}): {df[col].unique().tolist()}")
+            print(counts.to_string())
+            print()
+
+        rep_col = "rep"
+        n_check = 5
+        cells = df[rep_col].head(n_check)
+        for i, cell in enumerate(cells):
+            arr = parse_rep(cell)
+            id = df.iloc[i]["subject_id"]
+            print(f"Row {i}: subject_id: {id}")
+            print(f"Row {i}: shape of parsed representation: {arr.shape}")
+            print(f"Row {i}: first 5 elements of parsed representation: {arr.flatten()[:5]}")
+            print("" + "-" * 40)
+
+        filt_df = df[df['split']=='train']
+        first_id = filt_df["subject_id"].iloc[0]
+        #first_id = "A5M4D6V9_0910"
+        with pd.option_context("display.max_rows", None, "display.max_columns", None):
+            print(filt_df[filt_df["subject_id"] == first_id][columns_of_interest])
+
+        with pd.option_context("display.max_rows", None, "display.max_columns", None):
+            print(filt_df[filt_df["subject_id"] == first_id]['rep'])
+
+    explore(df)
+
+    #after filtering
+    from src.utils.data_loading.rep_dataloaders import meta_getter_from_df, filter_by_questionnaires
+    from src.utils.data_loading import questionnaires_to_keep
+    from src.utils.data_loading import return_file_paths
+    exp_params = {
+        'censor_time': 'pre_diagnosis'
+    }
+    exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths('PD', False, False)
+    train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
+    check_label_match(train_df,df)
+    '''
+    get_meta = meta_getter_from_df(train_df, id_col='unique_id')
+    df_filtered = filter_by_questionnaires(df, questionnaires_to_keep, get_meta, 
+                                                exp_params['censor_time'], train_df=train_df)
+    '''
+    
+
+    #explore(df_filtered)
+    
 
 
 # MARK: per_stepanalysis
@@ -1241,6 +1295,43 @@ def class_distrib_per_questionnaire(force=True):
     #plot distribution of case_dt in each slot class
     _plot_dt_dist_by_slot(df, normalize=True, filename=os.path.join(save_path, "dt_dist_by_slot" + suffix + ".png"))
 
+# MARK: test dataloaders
+def test_csv_loader():
+    from src.utils.data_loading import prepare_exclusion_sets_PD, prepare_rep_dataloaders, get_representation_file_path, return_file_paths
+    from src.scripts.train_PD_model import _build_view_groups
+    from src.utils.training_utils import get_input_modality
+    from src.utils.visualization import debug_print_batch_meta
+    exp_params = {
+        'censor_time': 'all_matched',
+        'class_col': 'diag_park_final1_quest',
+        'data_modality': get_input_modality('window_3x_2d_1t'),
+        'grouped': False,
+    }
+    exp_params['list_of_ids_paths'], exp_params['data_folder'], exp_params['grid_dict_path'] = return_file_paths('PD', False, False)
+
+    #exclusion_set, val_exclusion_set, counts = prepare_exclusion_sets_PD(exp_params,verbose=False,class_col=exp_params['class_col'])
+    train_df = pd.read_parquet(exp_params['list_of_ids_paths'])
+
+    model_name = "convnext_tiny_window_321"
+    repr_file_path = get_representation_file_path(model_name)
+    
+    view_groups = _build_view_groups(exp_params['data_modality']) 
+    if repr_file_path is not None:
+        loaders = prepare_rep_dataloaders(repr_file_path, train_df, exp_params, 
+                                            view_groups, batch_size=exp_params.get('batch_size', 16), num_workers=4)
+        train_loader = loaders['train']
+        val_loader = loaders['val']
+    
+
+    batch = next(iter(train_loader))              # one batch
+    debug_print_batch_meta_this(batch, subject_ids=None, slot_to_q=None, max_subjects=None)
+    
+    for i, batch in enumerate(train_loader):      # all batches
+        seq, label = batch[0], batch[1]
+        print(i, type(seq), getattr(seq, 'shape', None), label)
+        if i == 2:
+            break
+
 #ROC and PR-auc curve
 def plot_roc_pr_curves():
     from src.utils.evaluation.plotting_helpers import _load_roc_curve, _draw_roc_curves, _load_pr_curve, _draw_pr_curves
@@ -1420,5 +1511,127 @@ def prepare_case_dt_datasets():
     print(f"Dataframe with case_dt columns saved to {save_path}")
     return
 
+
+# MARK: others
+import torch
+def debug_print_batch_meta_this(batch, subject_ids=None, slot_to_q=None, max_subjects=None):
+    """
+    Print all non-image elements of a batch from collate_variable_sequences.
+
+    batch : (frames, seq_ids, slot_ids, lengths, labels, resizing_factors, subjects)
+        frames is skipped; everything else is printed.
+    subject_ids : optional list[str] (used if batch doesn't already carry it)
+    slot_to_q   : optional dict/callable slot->label (else "q{slot+1}")
+    """
+    # unpack, tolerating the 5- or 6-element variant
+    frames, seq_ids, slot_ids, lengths, labels, resizing_factors,subject_ids, modalities, *_ = batch
+    global_properties = getattr(batch, "global_properties", None)   # None instead of an error
+    local_properties  = getattr(batch, "local_properties", None)    # None instead of an error
+    mask_properties   = getattr(batch, "view_mask", None)     # None instead of an error
+
+ 
+    seq_ids  = seq_ids.cpu()
+    slot_ids = slot_ids.cpu()
+    lengths  = lengths.cpu()
+    B = lengths.size(0)
+    N = seq_ids.size(0)
+
+    if slot_to_q is None:
+        slot_name = lambda s: f"q{s + 1}"
+    elif callable(slot_to_q):
+        slot_name = slot_to_q
+    else:
+        slot_name = lambda s: slot_to_q.get(s, f"q{s + 1}")
+
+    print("=" * 60)
+    print(f"BATCH META   B={B} subjects   N={N} frames   "
+          f"frames.shape={tuple(frames.shape)}")
+    print("-" * 60)
+
+    # raw collated arrays (everything that isn't the image tensor)
+    print(f"lengths   ({tuple(lengths.shape)}): {lengths.tolist()}")
+    print(f"labels    ({tuple(labels.shape)}): "
+          f"{labels.tolist() if torch.is_tensor(labels) else labels}")
+    print(f"seq_ids   ({tuple(seq_ids.shape)}): {seq_ids.tolist()}")
+    print(f"slot_ids  ({tuple(slot_ids.shape)}): {slot_ids.tolist()}")
+    print(f"resizing_factors ({len(resizing_factors)}): {resizing_factors}")
+    print(f"subject_ids ({len(subject_ids)}): {list(subject_ids)}")
+    print(f"modalities ({len(modalities)}): {modalities}")
+    if global_properties is not None:
+        print(f"global_properties ({global_properties.shape}): {global_properties}")
+    if local_properties is not None:
+        print(f"local_properties ({local_properties.shape}): {local_properties}")
+    if mask_properties is not None:
+        #print(f"view_mask ({mask_properties.shape}): {mask_properties[:2]} ...")
+        print(f"view_mask ({mask_properties.shape}): ...")
+        for i, mask in  enumerate(mask_properties):
+            print(i, "-> ", mask)
+    else:
+        print("view_mask: None")
+
+    # consistency check: lengths must match the frame counts implied by seq_ids
+    counts = torch.bincount(seq_ids, minlength=B)
+    mismatch = (counts != lengths).nonzero(as_tuple=True)[0].tolist()
+    print("-" * 60)
+    print(f"frames per subject (from seq_ids): {counts.tolist()}")
+    if mismatch:
+        print(f"  ** WARNING: lengths != seq_id counts at subjects {mismatch} **")
+    else:
+        print("  lengths consistent with seq_ids ✓")
+
+    # per-subject breakdown
+    print("-" * 60)
+    n_show = B if max_subjects is None else min(B, max_subjects)
+    for b in range(n_show):
+        sel = (seq_ids == b).nonzero(as_tuple=True)[0]
+        sel = sel[torch.argsort(slot_ids[sel])]            # slot order
+        slots = slot_ids[sel].tolist()
+        qs    = [slot_name(s) for s in slots]
+
+        sid = subject_ids[b] if subject_ids is not None else f"subject_{b}"
+        lab = labels[b].item() if torch.is_tensor(labels) else labels[b]
+
+        dup = len(slots) != len(set(slots))
+        print(f"[{b}] {sid}  label={lab}  T={len(slots)}  "
+              f"slots={slots}  questionnaires={qs}"
+              + ("   ** DUPLICATE SLOT **" if dup else ""))
+    print("=" * 60)
+
+def check_label_match(df1,df2):
+    df1 = df1.rename(columns={'unique_id': 'subject_id'})
+    import pandas as pd
+
+    key = 'subject_id'
+
+    # one value per subject on each side (and catch subjects with conflicting values)
+    def per_subject(df, col):
+        n = df.groupby(key)[col].nunique(dropna=True)
+        if (n > 1).any():
+            print(f'{col}: {int((n > 1).sum())} subjects with >1 distinct value:',
+                n[n > 1].index.tolist()[:10])
+        return df.groupby(key)[col].first()
+
+    a = per_subject(df1, 'diag_park_final1_quest')
+    b = per_subject(df2, 'label')
+
+    # make the keys the same type (e.g. 12 vs '12')
+    a.index = a.index.astype(str)
+    b.index = b.index.astype(str)
+
+    m = pd.concat([a, b], axis=1, join='outer')
+    m.columns = ['diag', 'label']
+
+    both = m.dropna()
+    same = both['diag'].astype(int) == both['label'].astype(int)  # drop astype(int) if not numeric
+
+    print(f'subjects only in df1: {m["label"].isna().sum()}, only in df2: {m["diag"].isna().sum()}')
+    print(f'compared: {len(both)}, matching: {same.sum()}, mismatching: {(~same).sum()}')
+    print('identical:', bool(same.all()) and len(both) == len(m))
+
+    mismatches = both[~same]
+    print(mismatches.head(20))
+    print(pd.crosstab(both['diag'], both['label']))   # shows how values map onto each other
+
 if __name__ == "__main__":
-    open_exp_parameters()
+    #test_csv_loader()
+    inspect_representation_files()

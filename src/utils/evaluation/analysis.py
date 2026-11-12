@@ -13,8 +13,7 @@ from .plotting_helpers import (_plot_pr_curve_binary, _plot_roc_curve_binary,
 
 
 
-def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90,
-                   target_sensitivity=0.90, target_specificity=0.90, pos_label=1):
+def pick_threshold(y_true, y_scores, strategy="f1", target=0.9, pos_label=1):
     """Choose a decision threshold for the positive class (binary only).
  
     A sample is called positive when score >= threshold.
@@ -46,12 +45,12 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90,
             # thresholds decrease and tpr is non-decreasing, so the first hit is
             # the highest threshold (lowest fpr) that reaches the target.
             # tpr ends at 1, so a hit always exists.
-            return float(thresholds[np.argmax(tpr >= target_sensitivity - eps)])
+            return float(thresholds[np.argmax(tpr >= target - eps)])
  
         if strategy == "target_specificity":
             # fpr is non-decreasing, so the last hit is the lowest threshold
             # (highest tpr) still within the allowed false-positive rate.
-            ok = np.flatnonzero(fpr <= (1 - target_specificity) + eps)
+            ok = np.flatnonzero(fpr <= (1 - target) + eps)
             return float(thresholds[ok[-1]]) if ok[-1] > 0 else float("inf")
  
         # thresholds[0] is +inf (sklearn >= 1.3) or max(score) + 1: the degenerate
@@ -75,7 +74,7 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90,
         return float(thresholds[np.argmax(f1)])
  
     if strategy == "target_recall":
-        ok = recall >= target_recall
+        ok = recall >= target
         if not ok.any():
             return float(thresholds[np.argmax(recall)])
         idx = np.where(ok)[0]
@@ -86,7 +85,7 @@ def pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90,
 
 def analyze_results(all_scores, all_labels, results_df, split="validation",
                     class_names=None, pos_label=1, threshold=None, strategy="f1",
-                    target_recall=0.90, plot=False, superimpose_on=None, out_dir_path='.'):
+                    target=0.90, plot=False, superimpose_on=None, out_dir_path='.'):
     """
     all_scores : per-sample class probabilities.
                  - binary: 1D P(pos) or 2D (N, 2)
@@ -119,15 +118,14 @@ def analyze_results(all_scores, all_labels, results_df, split="validation",
  
     if n_classes == 2:
         result = _analyze_binary(y_true, y_prob, results_df, split, class_names,
-                                 pos_label, threshold, strategy, target_recall,
+                                 pos_label, threshold, strategy, target,
                                  plot, out_dir_path, superimpose_on=superimpose_on)
     else:
         result = _analyze_multiclass(y_true, y_prob, results_df, split,
                                      class_names, plot, out_dir_path)
  
     print("=======================================================")
-    with pd.option_context("display.max_rows", None, "display.max_columns", None):
-        print(results_df.head(10))
+    
     return result
 
 # MARK: Binary
@@ -172,7 +170,7 @@ def _baseline_table_binary(y_true, pos_label=1, seed=0):
 
 
 def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
-                    threshold, strategy, target_recall, plot, out_dir_path, superimpose_on=None):
+                    threshold, strategy, target, plot, out_dir_path, superimpose_on=None):
     y_scores = y_prob[:, pos_label]
  
     # 1. threshold-free view
@@ -181,8 +179,8 @@ def _analyze_binary(y_true, y_prob, results_df, split, class_names, pos_label,
     # 2. pick / apply a threshold
     if threshold is None:
         threshold = pick_threshold(y_true, y_scores, strategy=strategy,
-                                   target_recall=target_recall, pos_label=pos_label)
-        extra = (", target_recall=%.2f" % target_recall) if strategy == "target_recall" else ""
+                                   target=target, pos_label=pos_label)
+        extra = (", target=%.2f" % target) if strategy == "target" else ""
         print(f"\nChosen threshold ({strategy}{extra}): {threshold:.3f}")
     else:
         print(f"\nUsing fixed threshold: {threshold:.3f}")

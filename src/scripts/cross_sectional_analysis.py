@@ -85,17 +85,16 @@ def main(path=None):
         local_save_path = os.path.join(os.path.dirname(params['input_file']), subfolder)
 
     all_thresholds = params['thresholds']
+    plot=True
     for t in all_thresholds:
         value = all_thresholds[t]
-        save_path = os.path.join(local_save_path,t)
-        log_path = os.path.join(save_path,'stats.txt')
+        log_path = os.path.join(local_save_path,f'stats_{t}.txt')
 
         if EXPERIMENT == "full_analysis":
             with tee_stdout(log_path):
-                selected_threshold = pick_threshold(y_true, y_scores, strategy="f1", target_recall=0.90,
-                    target_sensitivity=0.90, target_specificity=0.90, pos_label=1)
-                analyze_results(all_probs, all_labels, df, split=params['split_to_examine'],threshold=, plot=True, 
-                                out_dir_path=save_path)
+                analyze_results(all_probs, all_labels, df, split=params['split_to_examine'],target=value, strategy=t, plot=plot, 
+                                out_dir_path=local_save_path)
+                plot = False
 
 
 

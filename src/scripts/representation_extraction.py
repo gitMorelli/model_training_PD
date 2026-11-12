@@ -102,14 +102,13 @@ def _read_and_release(make_loader, model,create_row, max_batches, split):
 def create_row(qs, sid, smodalities, srepresentations, label=None):
     rows = []
     for i, q in enumerate(qs):
-        for modality, rep in zip(smodalities[i], srepresentations):
-            row = {"subject_id": sid}
-            row["q"] = q
-            row["modality"] = modality
-            row["rep"] = rep.numpy()  # Convert tensor to 1dim numpy array
-            row["label"] = label.item() #same for each modality and q given the sid
-            #print(f"Subject {sid}: representations shape: {rep.shape}")
-            rows.append(row)
+        mods = smodalities[i]
+        if isinstance(mods, str):
+            mods = [mods]
+        for modality, rep in zip(mods, srepresentations[i], strict=True):   # <- [i]
+            rows.append({"subject_id": sid, "q": q, "modality": modality,
+                         "rep": rep.numpy(),
+                         "label": None if label is None else label.item()})
     return rows
 
 def extract_loader(model, loader, create_row, slot_to_q=None, max_batches=None,
@@ -156,15 +155,23 @@ def extract_loader(model, loader, create_row, slot_to_q=None, max_batches=None,
             with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
                 representations = model(frames.flatten(0, 1))
             # .float() is a no-op when autocast is off and already fp32
-            representations = representations.detach().float().cpu()
+            representations = representations.detach().float().cpu().view(N, k, -1)   # (N, k, D)
+            
+            '''print("Representation shape:", representations.shape)
+            # raw collated arrays (everything that isn't the image tensor)
+            print(f"lengths   ({tuple(lengths.shape)}): {lengths.tolist()}")
+            print(f"seq_ids   ({tuple(seq_ids.shape)}): {seq_ids.tolist()}")
+            print(f"slot_ids  ({tuple(slot_ids.shape)}): {slot_ids.tolist()}")
+            print(f"subject_ids ({len(subject_ids)}): {list(subject_ids)}")
+            print(f"modalities ({len(modalities)}): {modalities}")'''
 
             counts = torch.bincount(seq_ids, minlength=B)
             mismatch = (counts != lengths).nonzero(as_tuple=True)[0].tolist()
             if mismatch:
                 raise ValueError(f"Length mismatch for subjects {mismatch}: "
                                  f"lengths={lengths} vs counts={counts.tolist()}")
-
             for b in range(B):
+                #print("Subject: ", b)
                 sel = (seq_ids == b).nonzero(as_tuple=True)[0]
                 sel = sel[torch.argsort(slot_ids[sel])]
                 slots = slot_ids[sel].tolist()
@@ -179,6 +186,8 @@ def extract_loader(model, loader, create_row, slot_to_q=None, max_batches=None,
                 label = labels[b] if labels is not None else None
                 smodalities = [modalities[s] for s in sel.tolist()]
                 srepresentations = representations[sel]
+                #print('smodalities:', smodalities)
+                #print('srepresentations',srepresentations.shape)
                 row = create_row(qs, sid, smodalities, srepresentations, label=label)
                 if isinstance(row, list):
                     list_of_rows.extend(row)

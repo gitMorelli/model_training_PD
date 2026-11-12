@@ -58,7 +58,7 @@ experiment:
   random_drop: null  # null or a float between 0 and 1; if null no random drop is applied, if float random drop is applied with the given probability to each questionnaire
 
   # training params definition
-  batch_size: 2
+  batch_size: 4
   seed: 42
   accumulate_grad_batches: 16  # effective batch = batch_size * accumulate_grad_batches, or null
 

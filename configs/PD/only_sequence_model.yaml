@@ -1,7 +1,7 @@
 experiment:
   problem: PD  # handedness, PD
   debug: false
-  from_representation_file: convnext_tiny  # null, convnext, clip-vit-large-patch14-inter, overrides the model definition
+  from_representation_file: convnext_tiny_window_321 # null, convnext, clip-vit-large-patch14-inter, overrides the model definition
 
   # debugging
   debugging_callbacks: true
@@ -18,7 +18,7 @@ experiment:
 
   # experiment parameters
   merge_shards: false  # automatically set to true if you use handedness as label
-  data_modality_name: window_view_5  #should change so that is authomatically detected from csv
+  data_modality_name: window_3x_2d_1t #should change so that is authomatically detected from csv
   num_tiles: 3
   use_grid: true
 

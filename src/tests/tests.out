@@ -1,110 +1,381 @@
-Experiment Parameters:
-problem: PD
-debug: False
-from_representation_file: convnext_tiny
-debugging_callbacks: True
-fast_dev_run: False
-pass_example_input_array: False
-grouped: False
-pre_training: False
-bce_aux_weight: 0.3
-synthetic: None
-selected_properties: []
-global_fusion: late
-merge_shards: False
-data_modality_name: window_view_5
-num_tiles: 15
-use_grid: True
-label_smoothing: 0.0
-use_balanced_weights: False
-loss_name: standard
-loss_kwargs: {'pi': 0.03, 'learnable_pi': False}
-balancing_factor: 10
-balanced_data: False
-balance_validation: False
-majority_class_id: 0
-threshold_num: 1
-num_classes: 1
-filter_missing: all
-censor_time: all_matched
-filter_modality: digit
-model: identity
-custom_pre_trained_weights_name: None
-load_full_model: False
-pretrained: True
-model_structure: ModularModel
-val_check_interval: None
-align_train_metrics_to_val: False
-min_window_steps: 50
-model_parameters: {'use_view_groups': True, 'modalities': None, 'view_agg': 'attention', 'view_kwargs': {'intra': 'attention', 'inter': 'attention', 'modality_dropout': 0.1, 'view_dropout': 0.1, 'dropout_level': 'subject', 'view_pos': True, 'modality_emb': True, 'modality_norm': True}, 'd_model': 128, 'n_heads': 4, 'n_layers': 1, 'ff_mult': 2, 'dropout': 0.4, 'count_norm': 2, 'use_spread': False, 'use_count_feature': False, 'use_attention_pool': False, 'seq_model': 'gru', 'bidirectional': True}
-custom_transform: None
-input_size: 32
-norm_mu: [0.5]
-norm_std: [0.5]
-apply_augmentation: None
-invert_color: True
-to_grayscale: True
-image_pixel_space_augmentations: None
-random_drop: None
-lora_tuning: False
-use_opt_groups: True
-lr_decay: 0.2
-lr_backbone: 0.0001
-lr_classifier_head: 0.001
-lr_scheduling: cosine
-stage1_fraction: 0.1
-stage1_lr_names: ['lr_head']
-batch_size: 8
-scale_lr_with_batch_size: False
-num_epochs: 100
-max_steps: -1
-patience: 30
-stopping_metric: val/pr_auc
-eta_min_cosine: 1e-06
-weight_decay: 0.01
-warmup_fraction: 0.05
-layers_to_unfreeze: ['all']
-seed: 42
-accumulate_grad_batches: 8
-precision: 16-mixed
-gradient_clip_val: 1.0
-prefetch_factor: 4
-data_modality: ['X_window', 'X_window', 'X_window', 'X_window', 'X_window', 'text_window', 'text_window', 'text_window', 'text_window', 'text_window', 'digit_window', 'digit_window', 'digit_window', 'digit_window', 'digit_window']
-custom_pre_trained_weights: None
-synthetic_proportions: [0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333, 0.08333333333333333]
-list_of_ids_paths: /home/a_morelli/models/model_training_logs/PD/identity_model_results/checkpoints/v_4/PD_training_set_20_07_26.parquet
-data_folder: /mnt/beegfs02/scratch/a_morelli/model_training/shards/PD/final_png_whitebg_21_07_26
-grid_dict_path: /home/a_morelli/datasets/id_lists/h5/PD_data_h5
-class_col: diag_park_final1_quest
-representation_file_path: /home/a_morelli/models/model_training_logs/PD/representation_extraction/convnext_tiny/10112026_183319/representations_PD.parquet
-debug_imgs: True
-representation_dim: 768
-num_channels: 1
-huggingface_transform: False
-CHECKPOINT_PATH: /home/a_morelli/models/model_training_logs/PD/identity_model_results/checkpoints
-OUTPUT_PATH: /home/a_morelli/models/model_training_logs/PD/identity_model_results
-SOURCE_PATH: /home/a_morelli/models/model_training_logs/PD/
-timestamp: 2026-11-11 18:13:38
-best_epoch: 37
-best_val_loss: 0.34359171986579895
-best_val_acc: 0.8899999856948853
-best_train_acc: 0.9105319380760193
-current_version: 4
-optimization_groups: {'names': ['classifier'], 'lr': 0.001, 'lr_name': 'lr_head'}
+Columns in the representation dataframe: ['subject_id', 'q', 'modality', 'rep', 'label', 'split', 'rep_idx']
+11.1% of subject×modality groups have identical reps across all q
+modality
+X_window        482673
+text_window     380478
+digit_window     71080
+Name: count, dtype: int64
+--- q ---
+Unique values (13): ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13']
+q
+6     92094
+7     90055
+2     88434
+3     85832
+1     82205
+8     78982
+5     76512
+9     74814
+10    72828
+4     65473
+11    60282
+12    44890
+13    21830
+
+--- modality ---
+Unique values (3): ['X_window', 'text_window', 'digit_window']
+modality
+X_window        482673
+text_window     380478
+digit_window     71080
+
+--- label ---
+Unique values (2): [0, 1]
+label
+0    832915
+1    101316
+
+--- split ---
+Unique values (3): ['train', 'val', 'test']
+split
+train    736360
+test     121050
+val       76821
+
+Row 0: subject_id: A2J2U2V5_0541
+Row 0: shape of parsed representation: (768,)
+Row 0: first 5 elements of parsed representation: [-0.12854835 -0.82144004 -0.39331067 -0.03948717  0.23590776]
+----------------------------------------
+Row 1: subject_id: A2J2U2V5_0541
+Row 1: shape of parsed representation: (768,)
+Row 1: first 5 elements of parsed representation: [-0.2816421  -0.8424506  -0.39795426 -0.0915234   0.29013258]
+----------------------------------------
+Row 2: subject_id: A2J2U2V5_0541
+Row 2: shape of parsed representation: (768,)
+Row 2: first 5 elements of parsed representation: [-0.340817   -0.7905488  -0.51563746 -0.07263721  0.21141376]
+----------------------------------------
+Row 3: subject_id: A2J2U2V5_0541
+Row 3: shape of parsed representation: (768,)
+Row 3: first 5 elements of parsed representation: [-0.44546166 -0.8633681  -0.45093203 -0.21200736  0.04504282]
+----------------------------------------
+Row 4: subject_id: A2J2U2V5_0541
+Row 4: shape of parsed representation: (768,)
+Row 4: first 5 elements of parsed representation: [-0.24316543 -1.07558    -0.48749572 -0.12273655  0.10115869]
+----------------------------------------
+      q      modality  label  split
+0     1      X_window      0  train
+1     1      X_window      0  train
+2     1      X_window      0  train
+3     1      X_window      0  train
+4     1      X_window      0  train
+5     1   text_window      0  train
+6     1   text_window      0  train
+7     1   text_window      0  train
+8     1   text_window      0  train
+9     1   text_window      0  train
+10    1  digit_window      0  train
+11    1  digit_window      0  train
+12    2      X_window      0  train
+13    2      X_window      0  train
+14    2      X_window      0  train
+15    2      X_window      0  train
+16    2      X_window      0  train
+17    2   text_window      0  train
+18    2   text_window      0  train
+19    2   text_window      0  train
+20    2   text_window      0  train
+21    2   text_window      0  train
+22    2  digit_window      0  train
+23    2  digit_window      0  train
+24    3      X_window      0  train
+25    3      X_window      0  train
+26    3      X_window      0  train
+27    3      X_window      0  train
+28    3      X_window      0  train
+29    3   text_window      0  train
+30    3   text_window      0  train
+31    3   text_window      0  train
+32    3   text_window      0  train
+33    3   text_window      0  train
+34    3  digit_window      0  train
+35    3  digit_window      0  train
+36    4      X_window      0  train
+37    4      X_window      0  train
+38    4      X_window      0  train
+39    4      X_window      0  train
+40    4      X_window      0  train
+41    4   text_window      0  train
+42    4   text_window      0  train
+43    4   text_window      0  train
+44    4   text_window      0  train
+45    4   text_window      0  train
+46    4  digit_window      0  train
+47    4  digit_window      0  train
+48    5      X_window      0  train
+49    5      X_window      0  train
+50    5      X_window      0  train
+51    5      X_window      0  train
+52    5      X_window      0  train
+53    5   text_window      0  train
+54    5   text_window      0  train
+55    5   text_window      0  train
+56    5   text_window      0  train
+57    5   text_window      0  train
+58    5  digit_window      0  train
+59    5  digit_window      0  train
+60    6      X_window      0  train
+61    6      X_window      0  train
+62    6      X_window      0  train
+63    6      X_window      0  train
+64    6      X_window      0  train
+65    6   text_window      0  train
+66    6   text_window      0  train
+67    6   text_window      0  train
+68    6   text_window      0  train
+69    6   text_window      0  train
+70    6  digit_window      0  train
+71    6  digit_window      0  train
+72    7      X_window      0  train
+73    7      X_window      0  train
+74    7      X_window      0  train
+75    7      X_window      0  train
+76    7      X_window      0  train
+77    7   text_window      0  train
+78    7   text_window      0  train
+79    7   text_window      0  train
+80    7   text_window      0  train
+81    7   text_window      0  train
+82    7  digit_window      0  train
+83    7  digit_window      0  train
+84    8      X_window      0  train
+85    8      X_window      0  train
+86    8      X_window      0  train
+87    8      X_window      0  train
+88    8      X_window      0  train
+89    8   text_window      0  train
+90    8   text_window      0  train
+91    8   text_window      0  train
+92    8   text_window      0  train
+93    8   text_window      0  train
+94    8  digit_window      0  train
+95    8  digit_window      0  train
+96    9      X_window      0  train
+97    9      X_window      0  train
+98    9      X_window      0  train
+99    9      X_window      0  train
+100   9      X_window      0  train
+101   9   text_window      0  train
+102   9   text_window      0  train
+103   9   text_window      0  train
+104   9   text_window      0  train
+105   9   text_window      0  train
+106   9  digit_window      0  train
+107   9  digit_window      0  train
+108  10      X_window      0  train
+109  10      X_window      0  train
+110  10      X_window      0  train
+111  10      X_window      0  train
+112  10      X_window      0  train
+113  10   text_window      0  train
+114  10   text_window      0  train
+115  10   text_window      0  train
+116  10   text_window      0  train
+117  10   text_window      0  train
+118  10  digit_window      0  train
+119  10  digit_window      0  train
+120  11      X_window      0  train
+121  11      X_window      0  train
+122  11      X_window      0  train
+123  11      X_window      0  train
+124  11      X_window      0  train
+125  11   text_window      0  train
+126  11   text_window      0  train
+127  11   text_window      0  train
+128  11   text_window      0  train
+129  11   text_window      0  train
+130  11  digit_window      0  train
+131  11  digit_window      0  train
+132  12      X_window      0  train
+133  12      X_window      0  train
+134  12      X_window      0  train
+135  12      X_window      0  train
+136  12      X_window      0  train
+137  12   text_window      0  train
+138  12   text_window      0  train
+139  12   text_window      0  train
+140  12   text_window      0  train
+141  12   text_window      0  train
+142  12  digit_window      0  train
+143  12  digit_window      0  train
+0      [-0.12854835, -0.82144004, -0.39331067, -0.039...
+1      [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+2      [-0.340817, -0.7905488, -0.51563746, -0.072637...
+3      [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+4      [-0.24316543, -1.07558, -0.48749572, -0.122736...
+5      [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+6      [0.60258263, -0.4493281, -0.24828151, 0.377645...
+7      [0.52786875, -1.0587311, -0.20256378, 0.319038...
+8      [0.53418845, -1.0873345, -0.08879985, 0.150667...
+9      [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+10     [0.19317427, 0.24348348, -0.30950794, 0.047908...
+11     [0.2759826, -0.06715556, -0.32740974, -0.06702...
+12     [-0.12854835, -0.82144004, -0.39331067, -0.039...
+13     [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+14     [-0.340817, -0.7905488, -0.51563746, -0.072637...
+15     [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+16     [-0.24316543, -1.07558, -0.48749572, -0.122736...
+17     [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+18     [0.60258263, -0.4493281, -0.24828151, 0.377645...
+19     [0.52786875, -1.0587311, -0.20256378, 0.319038...
+20     [0.53418845, -1.0873345, -0.08879985, 0.150667...
+21     [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+22     [0.19317427, 0.24348348, -0.30950794, 0.047908...
+23     [0.2759826, -0.06715556, -0.32740974, -0.06702...
+24     [-0.12854835, -0.82144004, -0.39331067, -0.039...
+25     [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+26     [-0.340817, -0.7905488, -0.51563746, -0.072637...
+27     [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+28     [-0.24316543, -1.07558, -0.48749572, -0.122736...
+29     [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+30     [0.60258263, -0.4493281, -0.24828151, 0.377645...
+31     [0.52786875, -1.0587311, -0.20256378, 0.319038...
+32     [0.53418845, -1.0873345, -0.08879985, 0.150667...
+33     [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+34     [0.19317427, 0.24348348, -0.30950794, 0.047908...
+35     [0.2759826, -0.06715556, -0.32740974, -0.06702...
+36     [-0.12854835, -0.82144004, -0.39331067, -0.039...
+37     [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+38     [-0.340817, -0.7905488, -0.51563746, -0.072637...
+39     [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+40     [-0.24316543, -1.07558, -0.48749572, -0.122736...
+41     [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+42     [0.60258263, -0.4493281, -0.24828151, 0.377645...
+43     [0.52786875, -1.0587311, -0.20256378, 0.319038...
+44     [0.53418845, -1.0873345, -0.08879985, 0.150667...
+45     [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+46     [0.19317427, 0.24348348, -0.30950794, 0.047908...
+47     [0.2759826, -0.06715556, -0.32740974, -0.06702...
+48     [-0.12854835, -0.82144004, -0.39331067, -0.039...
+49     [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+50     [-0.340817, -0.7905488, -0.51563746, -0.072637...
+51     [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+52     [-0.24316543, -1.07558, -0.48749572, -0.122736...
+53     [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+54     [0.60258263, -0.4493281, -0.24828151, 0.377645...
+55     [0.52786875, -1.0587311, -0.20256378, 0.319038...
+56     [0.53418845, -1.0873345, -0.08879985, 0.150667...
+57     [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+58     [0.19317427, 0.24348348, -0.30950794, 0.047908...
+59     [0.2759826, -0.06715556, -0.32740974, -0.06702...
+60     [-0.12854835, -0.82144004, -0.39331067, -0.039...
+61     [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+62     [-0.340817, -0.7905488, -0.51563746, -0.072637...
+63     [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+64     [-0.24316543, -1.07558, -0.48749572, -0.122736...
+65     [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+66     [0.60258263, -0.4493281, -0.24828151, 0.377645...
+67     [0.52786875, -1.0587311, -0.20256378, 0.319038...
+68     [0.53418845, -1.0873345, -0.08879985, 0.150667...
+69     [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+70     [0.19317427, 0.24348348, -0.30950794, 0.047908...
+71     [0.2759826, -0.06715556, -0.32740974, -0.06702...
+72     [-0.12854835, -0.82144004, -0.39331067, -0.039...
+73     [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+74     [-0.340817, -0.7905488, -0.51563746, -0.072637...
+75     [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+76     [-0.24316543, -1.07558, -0.48749572, -0.122736...
+77     [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+78     [0.60258263, -0.4493281, -0.24828151, 0.377645...
+79     [0.52786875, -1.0587311, -0.20256378, 0.319038...
+80     [0.53418845, -1.0873345, -0.08879985, 0.150667...
+81     [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+82     [0.19317427, 0.24348348, -0.30950794, 0.047908...
+83     [0.2759826, -0.06715556, -0.32740974, -0.06702...
+84     [-0.12854835, -0.82144004, -0.39331067, -0.039...
+85     [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+86     [-0.340817, -0.7905488, -0.51563746, -0.072637...
+87     [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+88     [-0.24316543, -1.07558, -0.48749572, -0.122736...
+89     [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+90     [0.60258263, -0.4493281, -0.24828151, 0.377645...
+91     [0.52786875, -1.0587311, -0.20256378, 0.319038...
+92     [0.53418845, -1.0873345, -0.08879985, 0.150667...
+93     [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+94     [0.19317427, 0.24348348, -0.30950794, 0.047908...
+95     [0.2759826, -0.06715556, -0.32740974, -0.06702...
+96     [-0.12854835, -0.82144004, -0.39331067, -0.039...
+97     [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+98     [-0.340817, -0.7905488, -0.51563746, -0.072637...
+99     [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+100    [-0.24316543, -1.07558, -0.48749572, -0.122736...
+101    [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+102    [0.60258263, -0.4493281, -0.24828151, 0.377645...
+103    [0.52786875, -1.0587311, -0.20256378, 0.319038...
+104    [0.53418845, -1.0873345, -0.08879985, 0.150667...
+105    [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+106    [0.19317427, 0.24348348, -0.30950794, 0.047908...
+107    [0.2759826, -0.06715556, -0.32740974, -0.06702...
+108    [-0.12854835, -0.82144004, -0.39331067, -0.039...
+109    [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+110    [-0.340817, -0.7905488, -0.51563746, -0.072637...
+111    [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+112    [-0.24316543, -1.07558, -0.48749572, -0.122736...
+113    [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+114    [0.60258263, -0.4493281, -0.24828151, 0.377645...
+115    [0.52786875, -1.0587311, -0.20256378, 0.319038...
+116    [0.53418845, -1.0873345, -0.08879985, 0.150667...
+117    [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+118    [0.19317427, 0.24348348, -0.30950794, 0.047908...
+119    [0.2759826, -0.06715556, -0.32740974, -0.06702...
+120    [-0.12854835, -0.82144004, -0.39331067, -0.039...
+121    [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+122    [-0.340817, -0.7905488, -0.51563746, -0.072637...
+123    [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+124    [-0.24316543, -1.07558, -0.48749572, -0.122736...
+125    [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+126    [0.60258263, -0.4493281, -0.24828151, 0.377645...
+127    [0.52786875, -1.0587311, -0.20256378, 0.319038...
+128    [0.53418845, -1.0873345, -0.08879985, 0.150667...
+129    [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+130    [0.19317427, 0.24348348, -0.30950794, 0.047908...
+131    [0.2759826, -0.06715556, -0.32740974, -0.06702...
+132    [-0.12854835, -0.82144004, -0.39331067, -0.039...
+133    [-0.2816421, -0.8424506, -0.39795426, -0.09152...
+134    [-0.340817, -0.7905488, -0.51563746, -0.072637...
+135    [-0.44546166, -0.8633681, -0.45093203, -0.2120...
+136    [-0.24316543, -1.07558, -0.48749572, -0.122736...
+137    [0.37385973, -1.0007071, -0.5277575, 0.2896708...
+138    [0.60258263, -0.4493281, -0.24828151, 0.377645...
+139    [0.52786875, -1.0587311, -0.20256378, 0.319038...
+140    [0.53418845, -1.0873345, -0.08879985, 0.150667...
+141    [0.4313324, -1.1385887, -0.5686641, 0.24840571...
+142    [0.19317427, 0.24348348, -0.30950794, 0.047908...
+143    [0.2759826, -0.06715556, -0.32740974, -0.06702...
+Name: rep, dtype: object
+subjects only in df1: 203, only in df2: 0
+compared: 11840, matching: 11840, mismatching: 0
+identical: False
+Empty DataFrame
+Columns: [diag, label]
+Index: []
+label    0.0   1.0
+diag              
+0      10660     0
+1          0  1180
 
 ----------------------------------------------
 |                SLURM EPILOG                |
 ----------------------------------------------
-Job ID: 6339031
+Job ID: 6343621
 Cluster: flamingo
 User/Group: a_morelli/gs_hpc_u1018
-Nodelist: n22
+Nodelist: n19
 Nodes: 1
 Cores per node: 4
-Job started at: 2026-11-11 22:05:32
-Job ended at:   2026-11-11 22:05:43
-Job Wall-clock time: 00:00:11
-CPU Utilized: 00:00:08
-CPU Efficiency: 18.18% of 00:00:44 core-walltime
-Memory Utilized: 1.37 MB
-Memory Efficiency: 0.01% of 16.00 GB
+Job started at: 2026-11-12 17:24:24
+Job ended at:   2026-11-12 17:25:02
+Job Wall-clock time: 00:00:38
+CPU Utilized: 00:00:23
+CPU Efficiency: 15.13% of 00:02:32 core-walltime
+Memory Utilized: 11.11 GB
+Memory Efficiency: 69.47% of 16.00 GB
