@@ -100,6 +100,7 @@ def main(path=None):
 
 
 
+
 def get_args():
     import argparse
     parser = argparse.ArgumentParser(description="I/O Benchmark for Multi-Tar Dataset")

@@ -13,6 +13,45 @@ from .plotting_helpers import (_plot_pr_curve_binary, _plot_roc_curve_binary,
 
 
 
+def get_threshold_from_results_df(df, split='val', strategy="f1", target=0.9, pos_label=1, threshold=None):
+    """Pick a threshold from a results DataFrame (from analyze_results) for a given split.
+    Returns None if the split is not present in the DataFrame.
+    """
+    #if df is a path, read it as a csv
+    if isinstance(df, str):
+        df = pd.read_csv(df)
+
+    #select split to consider
+    df = df[df['split']==split]
+    #count the rows with missing values in the predicted_label column for the two 'true_label' classes
+    missing_predicted_label = df[df['predicted_label'].isna()].groupby('true_label').size()
+    print(f"Missing predicted_label counts by true_label:\n{missing_predicted_label} -> dropped")
+    #drop rows with missing predicted_label values
+    df = df.dropna(subset=['predicted_label'])
+
+    #get the probabilities and labels
+    all_probs = df[['probability_0', 'probability_1']].values
+    all_labels = df['true_label'].values
+
+    y_true = all_labels.numpy() if hasattr(all_labels, "numpy") else np.asarray(all_labels)
+    y_true = y_true.astype(int).ravel()
+    scores = all_probs.numpy() if hasattr(all_probs, "numpy") else all_probs
+    y_prob = _as_prob_matrix(scores)
+
+    y_scores = y_prob[:, pos_label]
+     
+    
+    # 2. pick / apply a threshold
+    if threshold is None:
+        threshold = pick_threshold(y_true, y_scores, strategy=strategy,
+                                    target=target, pos_label=pos_label)
+        extra = (", target=%.2f" % target) if strategy == "target" else ""
+        print(f"\nChosen threshold ({strategy}{extra}): {threshold:.3f}")
+    else:
+        print(f"\nUsing fixed threshold: {threshold:.3f}")
+    
+    return threshold
+
 def pick_threshold(y_true, y_scores, strategy="f1", target=0.9, pos_label=1):
     """Choose a decision threshold for the positive class (binary only).
  

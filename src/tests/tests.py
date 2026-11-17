@@ -999,6 +999,12 @@ def inspect_matched_data():
         print(f"Diagnosis 1 IDs: {diag_1}")
         print(f"Control IDs: {case_control_0}")
         print(f"Diagnosis 0 IDs: {diag_0}")
+    specific_id = "A4W2V8A1_0150"
+    print(f"Inspecting row for unique_id={specific_id}")
+    specific_row = csv_data[csv_data['unique_id'] == specific_id]
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        if not specific_row.empty:
+            print(f"Row for unique_id={specific_id}:\n{specific_row}")
     
 def inspect_representation_files():
     from src.utils.data_loading.rep_dataloaders import read_table, parse_rep
@@ -1072,7 +1078,35 @@ def inspect_representation_files():
 
     #explore(df_filtered)
     
+def inspect_id_shard_files():
+    load_path = "/home/a_morelli/datasets/id_lists/ids_to_shards/final_png_whitebg_21_07_26_id_to_shard_offsets.csv" 
+    csv_data = pd.read_csv(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(f"Dataframe head:\n{csv_data.head()}")
+    specific_id = "A4W2V8A1_0150"
+    print(f"Inspecting row for unique_id={specific_id}")
+    specific_row = csv_data[csv_data['unique_id'] == specific_id]
+    if not specific_row.empty:
+        print(f"Row for unique_id={specific_id}:\n{specific_row}")
 
+def inspect_predictions():
+    load_path = "/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_27/all/predictions.csv" 
+    csv_data = pd.read_csv(load_path)
+    columns = csv_data.columns
+    for col in columns:
+        print(f"Column: {col}")
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(f"Dataframe head:\n{csv_data.head()}")
+    specific_id = "A4W2V8A1_0150"
+    print(f"Inspecting row for unique_id={specific_id}")
+    specific_row = csv_data[csv_data['unique_id'] == specific_id]
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        if not specific_row.empty:
+            print(f"Row for unique_id={specific_id}:\n{specific_row}")
+    
 
 # MARK: per_stepanalysis
 def _prepare_dt_df(force=True,preds_path="/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_21/per_step_predictions.csv"):
@@ -1633,4 +1667,5 @@ def check_label_match(df1,df2):
     print(pd.crosstab(both['diag'], both['label']))   # shows how values map onto each other
 
 if __name__ == "__main__":
-    test_csv_loader()
+    inspect_matched_data()
+    inspect_predictions()

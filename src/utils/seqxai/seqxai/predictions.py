@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 
 
-def load_predictions(path_or_df, id_col: str = 'id', label_col: str = 'label',
-                     prob_cols: Union[str, Sequence[str]] = 'prob',
+def load_predictions(path_or_df, id_col: str = 'unique_id', label_col: str = 'true_label',
+                     prob_cols: Union[str, Sequence[str]] = 'probability_1',
                      pred_col: Optional[str] = None, threshold: float = 0.5) -> pd.DataFrame:
     """Return a DataFrame indexed by seq_id (str) with standard columns:
 

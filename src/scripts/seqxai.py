@@ -20,6 +20,7 @@ from src.utils.file_utils import get_last_best_checkpoint
 from src.scripts.train_PD_model import model_initialization
 from src.debug.PD_model_evaluation import litmodel_initialization_from_checkpoint
 from src.utils.data_loading.map_style_dataset.pd_indexed import build_pd_dataset, make_pd_collate, make_seqxai_adapter
+from src.utils.evaluation.analysis import get_threshold_from_results_df
 
 
 VERBOSE = True
@@ -31,6 +32,10 @@ def main():
         'workers': cl_args.num_workers,
         'model_name': 'convnext_tiny',
         'version': '27',
+
+        'strategy_threshold': 'youden',  # or 'youden' or 'target_sensitivity'
+        'threshold_target': 0.9,  # used only if strategy_threshold == 'target_sensitivity'
+        'fixed_threshold': None,  # used only if strategy_threshold == 'fixed'
     }
     args['checkpoint_dir'] = f"/home/a_morelli/models/model_training_logs/PD/{args['model_name']}_model_results/checkpoints"
     args['checkpoint_file'] = os.path.join(args['checkpoint_dir'],get_last_best_checkpoint(args['checkpoint_dir'], args['version']))
@@ -38,7 +43,6 @@ def main():
     args['out_dir'] = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", "xai_results")
     args['stages'] = STAGES
     args['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
-
 
     params_path = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", "exp_params.pkl")
     with open(params_path, 'rb') as f:
@@ -59,15 +63,19 @@ def main():
                             args['prediction_file'], id_col='unique_id', val_prefix=VAL_PREFIX)
     #i can leave set empty because i will call only the data i have in the predictions csv 
     
-    pipe = Pipeline(build_model(model, exp_params), adapter, args['prediction_file'],
-                    build_config(args['out_dir'], args['device']))
+    args['threshold'] = get_threshold_from_results_df(args['prediction_file'], split=VAL_PREFIX[:-1], 
+                                                      strategy=args['strategy_threshold'], target=args['threshold_target'], 
+                                                      pos_label=1, threshold=args['fixed_threshold'])
+    print(f"[INFO] Using threshold: {args['threshold']}", flush=True)
+    pipe = Pipeline(build_model(model, exp_params, args), adapter, args['prediction_file'],
+                    build_config(args))
     pipe.run(args['stages'])
 
 
 # ---------------------------------------------------------------- model
-def build_model(model,exp_params):
+def build_model(model,exp_params, args):
     before = {k: v.detach().clone() for k, v in model.state_dict().items()}
-    lit_model = litmodel_initialization_from_checkpoint(model, exp_params['checkpoint_file'], exp_params)
+    lit_model = litmodel_initialization_from_checkpoint(model, args['checkpoint_file'], exp_params)
     net = lit_model.model                               # attribute name inside PDClassificationModule
     net.eval()
 
@@ -85,8 +93,14 @@ def build_model(model,exp_params):
 def build_adapter(args,exp_params, transform, grid_dict, val_exclusion_set, train_df,
                   predictions_csv, id_col, val_prefix):
     # serve exactly the subjects that have a prediction
-    ids = (pd.read_csv(predictions_csv, dtype={id_col: str})[id_col]
-           .drop_duplicates().tolist())
+    predictions_df = pd.read_csv(predictions_csv, dtype={id_col: str})
+    split_data = predictions_df[predictions_df['split'] == val_prefix[:-1]]  # remove trailing slash
+    #remove rows with predicted_label NaN and print a warning if any were dropped
+    if split_data['predicted_label'].isna().any():
+        num_dropped = split_data['predicted_label'].isna().sum()
+        print(f"[warning] Dropping {num_dropped} rows with NaN predicted_label from {predictions_csv}")
+    split_data = split_data.dropna(subset=['predicted_label'])
+    ids = (split_data[id_col].drop_duplicates().tolist())
 
     ds = build_pd_dataset(args['index_csv'], exp_params['data_folder'], exp_params, transform, grid_dict,
                           exclusion_set=val_exclusion_set, train_df=train_df,
@@ -102,18 +116,18 @@ def build_adapter(args,exp_params, transform, grid_dict, val_exclusion_set, trai
     return make_seqxai_adapter(ds, collate, to_display=to_display)
 
 # ---------------------------------------------------------------- settings
-def build_config(out_dir, device):
+def build_config(args):
     return Config(
-        out_dir=out_dir,
-        device=device,
-        id_col='subject_id',          # TODO: columns of your predictions CSV
-        label_col='label',
-        prob_cols='prob',             # binary: P(class 1); multiclass: ['p0', 'p1', ...]
-        threshold=0.5,
+        out_dir=args['out_dir'],
+        device=args['device'],
+        id_col='unique_id',          
+        label_col='true_label',
+        prob_cols='probability_1',             # binary: P(class 1); multiclass: ['p0', 'p1', ...]
+        threshold=args['threshold'],
         target_layer=None,            # e.g. 'layer4'; None = last Conv2d of vision_model
         pixel_baseline='blur',        # or the normalized value of a blank page
         selection=SelectionRule(n_per_cell=8, n_random=20, n_clusters=8),
-        num_workers=4,
+        num_workers=args['workers'],
         # metadata_csv='subjects_meta.csv',
         # concepts_csv='concepts.csv',
     )
