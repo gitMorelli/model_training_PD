@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=tests
 #SBATCH --nodes=1                     # 1 Node per array task
-#SBATCH --cpus-per-task=4          
+#SBATCH --cpus-per-task=10          
 #SBATCH --mem=16G                     # Request enough RAM for 16 parallel processes
-#SBATCH --time=00:10:00               # Estimated time for 500 images
+#SBATCH --time=00:30:00               # Estimated time for 500 images
 #SBATCH --partition=shortq
 #SBATCH --output=/home/a_morelli/vscode_projects/model_training/src/tests/tests.out
 #SBATCH --error=/home/a_morelli/vscode_projects/model_training/src/tests/tests.err

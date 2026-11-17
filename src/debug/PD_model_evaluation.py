@@ -18,16 +18,8 @@ from src.utils.training_utils import PDClassificationModule, load_legacy_state_d
 from src.scripts.train_PD_model import model_initialization
 from src.utils.tabular_data_utils import preprocess_PD_csv
 from src.utils.evaluation import analyze_results, plot_probability_trajectories
-from src.utils.file_utils import tee_stdout
- 
+from src.utils.file_utils import tee_stdout, get_last_best_checkpoint
 
-def get_last_best_checkpoint(checkpoint_dir,version):
-    checkpoint_files = glob.glob(os.path.join(checkpoint_dir,f"v_{version}", "*best*.ckpt"))
-    checkpoint_to_load = max(checkpoint_files, key=os.path.getctime) if checkpoint_files else None
-    checkpoint_name = os.path.basename(checkpoint_to_load) if checkpoint_to_load else None
-    checkpoint_to_load=f"v_{version}/{checkpoint_name}" if checkpoint_name else None
-    print(f"Checkpoint to load: {checkpoint_name}", flush=True)
-    return checkpoint_to_load
 
 experiment = "PD" #"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
@@ -56,9 +48,9 @@ else:
     exp_params['matched_validation'] = True 
 
 #PATHS
-SOURCE_PATTERN = os.path.join(SOURCE_PATH,exp_params['data_folder'])
-SHARD_PATTERN_val = os.path.join(SOURCE_PATTERN,"val/worker*_shard-*.tar")
-SHARD_PATTERN_train = os.path.join(SOURCE_PATTERN,"train/worker*_shard-*.tar")
+#SOURCE_PATTERN = os.path.join(SOURCE_PATH,exp_params['data_folder'])
+SHARD_PATTERN_val = os.path.join(exp_params['data_folder'],"val/worker*_shard-*.tar")
+SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shard-*.tar")
 
 VERBOSE = False
 CLASS_COL = exp_params['class_col'] 

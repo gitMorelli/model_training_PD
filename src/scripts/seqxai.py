@@ -1,0 +1,128 @@
+"""Single-file entry point: model, data and settings all live here.
+
+    python main.py                                   # all stages
+    python main.py --stages spatial,report           # re-run some stages
+    python main.py --predictions other.csv --out xai_run2 --device cuda:1
+
+Fill in the TODO blocks; nothing else needs a separate setup file.
+"""
+import argparse
+import os
+import pandas as pd
+
+import numpy as np
+import torch
+
+from src.utils.data_loading import prepare_exclusion_sets_PD, load_grid_dict
+from src.utils.image_processing import  get_mu_std
+from src.utils.seqxai.seqxai import STAGES, Config, Pipeline, SelectionRule, SequenceSample, TorchDatasetAdapter
+from src.utils.file_utils import get_last_best_checkpoint
+from src.scripts.train_PD_model import model_initialization
+from src.debug.PD_model_evaluation import litmodel_initialization_from_checkpoint
+from src.utils.data_loading.map_style_dataset.pd_indexed import build_pd_dataset, make_pd_collate, make_seqxai_adapter
+
+
+VERBOSE = True
+
+# ---------------------------------------------------------------- run
+def main():
+    cl_args = get_args()
+    args = {
+        'workers': cl_args.num_workers,
+        'model_name': 'convnext_tiny',
+        'version': '27',
+    }
+    args['checkpoint_dir'] = f"/home/a_morelli/models/model_training_logs/PD/{args['model_name']}_model_results/checkpoints"
+    args['checkpoint_file'] = os.path.join(args['checkpoint_dir'],get_last_best_checkpoint(args['checkpoint_dir'], args['version']))
+    args['prediction_file'] = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", "all", "predictions.csv")
+    args['out_dir'] = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", "xai_results")
+    args['stages'] = STAGES
+    args['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
+    params_path = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", "exp_params.pkl")
+    with open(params_path, 'rb') as f:
+        exp_params = pd.read_pickle(f) 
+    SHARD_PATTERN_val = os.path.join(exp_params['data_folder'],"val/worker*_shard-*.tar")
+    SHARD_PATTERN_train = os.path.join(exp_params['data_folder'],"train/worker*_shard-*.tar")
+    args['index_csv']= '/home/a_morelli/datasets/id_lists/ids_to_shards/final_png_whitebg_21_07_26_id_to_shard_offsets.csv'
+    VAL_PREFIX = 'val/'     # the folder of your validation shards, relative to data_folder path
+
+    #load grid_files for selecting chunks from the images during the dataloading
+    grid_dict = load_grid_dict(exp_params)
+    csv_data = pd.read_parquet(exp_params['list_of_ids_paths']) #if dataset is synthetic the list_of_ids_paths
+    exp_params['norm_mu'],exp_params['norm_std'] = get_mu_std(exp_params, verbose=VERBOSE)
+
+    model, transform = model_initialization(None,exp_params,verbose=VERBOSE,val=True, **exp_params['model_parameters'])
+
+    adapter = build_adapter(args,exp_params, transform, grid_dict, set(), csv_data,
+                            args['prediction_file'], id_col='unique_id', val_prefix=VAL_PREFIX)
+    #i can leave set empty because i will call only the data i have in the predictions csv 
+    
+    pipe = Pipeline(build_model(model, exp_params), adapter, args['prediction_file'],
+                    build_config(args['out_dir'], args['device']))
+    pipe.run(args['stages'])
+
+
+# ---------------------------------------------------------------- model
+def build_model(model,exp_params):
+    before = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    lit_model = litmodel_initialization_from_checkpoint(model, exp_params['checkpoint_file'], exp_params)
+    net = lit_model.model                               # attribute name inside PDClassificationModule
+    net.eval()
+
+    # strict=False and the legacy path can both skip weights silently: list what stayed at init
+    after = net.state_dict()
+    unchanged = [k for k, v in before.items()
+                 if v.is_floating_point() and torch.equal(v, after[k].cpu())]
+    if unchanged:
+        print(f'[warning] {len(unchanged)}/{len(before)} tensors still equal their random init, e.g.:')
+        print('   ', unchanged[:10])
+    return net
+
+
+# ---------------------------------------------------------------- data
+def build_adapter(args,exp_params, transform, grid_dict, val_exclusion_set, train_df,
+                  predictions_csv, id_col, val_prefix):
+    # serve exactly the subjects that have a prediction
+    ids = (pd.read_csv(predictions_csv, dtype={id_col: str})[id_col]
+           .drop_duplicates().tolist())
+
+    ds = build_pd_dataset(args['index_csv'], exp_params['data_folder'], exp_params, transform, grid_dict,
+                          exclusion_set=val_exclusion_set, train_df=train_df,
+                          shard_prefix=val_prefix, ids=ids)
+    collate = make_pd_collate(exp_params)
+
+    def to_display(img):
+        # TODO: check one figure; this assumes input_range='ink_pm1' with ink = +1
+        x = img.detach().float().cpu().numpy()
+        x = x[0] if x.shape[0] == 1 else x.transpose(1, 2, 0) if x.shape[0] == 3 else x.mean(0)
+        return np.clip(1 - (x + 1) / 2, 0, 1)      # ink dark on white
+
+    return make_seqxai_adapter(ds, collate, to_display=to_display)
+
+# ---------------------------------------------------------------- settings
+def build_config(out_dir, device):
+    return Config(
+        out_dir=out_dir,
+        device=device,
+        id_col='subject_id',          # TODO: columns of your predictions CSV
+        label_col='label',
+        prob_cols='prob',             # binary: P(class 1); multiclass: ['p0', 'p1', ...]
+        threshold=0.5,
+        target_layer=None,            # e.g. 'layer4'; None = last Conv2d of vision_model
+        pixel_baseline='blur',        # or the normalized value of a blank page
+        selection=SelectionRule(n_per_cell=8, n_random=20, n_clusters=8),
+        num_workers=4,
+        # metadata_csv='subjects_meta.csv',
+        # concepts_csv='concepts.csv',
+    )
+
+def get_args():
+    import argparse
+    parser = argparse.ArgumentParser(description="I/O Benchmark for Multi-Tar Dataset")
+    parser.add_argument("--num_workers", type=int, default=8, help="Number of DataLoader workers")
+    return parser.parse_args()
+
+if __name__ == '__main__':
+    main()

@@ -1,4 +1,5 @@
 import contextlib
+import glob
 import os
 from pathlib import Path
 import sys
@@ -80,3 +81,11 @@ def get_id_data_from_h5_file(file_path, target_id):
                 id_data[q_name][class_key] = (scalar_val, array_val)
                 
     return id_data
+
+def get_last_best_checkpoint(checkpoint_dir,version):
+    checkpoint_files = glob.glob(os.path.join(checkpoint_dir,f"v_{version}", "*best*.ckpt"))
+    checkpoint_to_load = max(checkpoint_files, key=os.path.getctime) if checkpoint_files else None
+    checkpoint_name = os.path.basename(checkpoint_to_load) if checkpoint_to_load else None
+    checkpoint_to_load=f"v_{version}/{checkpoint_name}" if checkpoint_name else None
+    print(f"Checkpoint to load: {checkpoint_name}", flush=True)
+    return checkpoint_to_load

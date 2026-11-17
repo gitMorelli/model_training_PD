@@ -1,7 +1,7 @@
 experiment:
   problem: PD  # handedness, PD
   debug: false
-  from_representation_file: convnext_tiny_window_321 # null, convnext, clip-vit-large-patch14-inter, overrides the model definition
+  from_representation_file: clip-vit-large-patch14-un_window_321 # null, convnext, clip-vit-large-patch14-inter, overrides the model definition
 
   # debugging
   debugging_callbacks: true

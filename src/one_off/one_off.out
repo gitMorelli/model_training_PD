@@ -1,0 +1,17 @@
+
+----------------------------------------------
+|                SLURM EPILOG                |
+----------------------------------------------
+Job ID: 6380068
+Cluster: flamingo
+User/Group: a_morelli/gs_hpc_u1018
+Nodelist: n12
+Nodes: 1
+Cores per node: 10
+Job started at: 2026-11-17 11:23:37
+Job ended at:   2026-11-17 11:23:58
+Job Wall-clock time: 00:00:21
+CPU Utilized: 00:01:53
+CPU Efficiency: 53.81% of 00:03:30 core-walltime
+Memory Utilized: 57.10 MB
+Memory Efficiency: 0.35% of 16.00 GB

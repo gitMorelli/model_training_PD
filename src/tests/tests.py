@@ -1633,5 +1633,4 @@ def check_label_match(df1,df2):
     print(pd.crosstab(both['diag'], both['label']))   # shows how values map onto each other
 
 if __name__ == "__main__":
-    #test_csv_loader()
-    inspect_representation_files()
+    test_csv_loader()
