@@ -1,0 +1,2 @@
+/home/a_morelli/vscode_projects/model_training/src/tests/tests.py:1376: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  print(r.groupby(pd.qcut(r['T'], 5, duplicates='drop'))['csv_vs_cache_maxdiff']

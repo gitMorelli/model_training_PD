@@ -21,6 +21,7 @@ import torch
 from .indexed_shards import IndexedShardDataset, compare_with_webdataset, load_offset_index
 
 from src.utils.data_loading.pd_dataloaders import _get_collate, _get_compose, modalities_map
+from src.utils.image_processing import get_augmentation_transform
 
 # position of subject_id in the tuple flatten_samples yields:
 # (sequence, label, subject_id, questionnaires, modalities, resized_list,
@@ -34,7 +35,7 @@ def pd_subject_of(item):
 
 # --------------------------------------------------------------------------- processing
 def make_pd_compose(exp_params, transform, grid_dict, exclusion_set=frozenset(), train_df=None,
-                    augmentation_transform=None, is_val=True, debug=False):
+                    augmentation_transform=None, is_val=True, debug=False): 
     """The flatten_samples function prepare_PD_dataset builds, with the validation
     settings. Pass `augmentation_transform` exactly as your validation loader does if
     you want to reproduce its predictions bit for bit; explanations need it to have no
@@ -42,6 +43,7 @@ def make_pd_compose(exp_params, transform, grid_dict, exclusion_set=frozenset(),
     modality = exp_params['data_modality']
     if not isinstance(modality, list):
         raise ValueError('prepare_PD_dataset only supports a list of modalities in this branch')
+    augmentation_transform = get_augmentation_transform(exp_params)
     base = [m.split('_')[0] for m in modality]
     modality_string = [modalities_map[m] for m in base if m in modalities_map]
     filter_modality = modalities_map.get(exp_params['filter_modality'])
@@ -81,14 +83,12 @@ class _ConvertedCollate:
 # --------------------------------------------------------------------------- dataset
 def build_pd_dataset(index_csv, shard_root, exp_params, transform, grid_dict,
                      exclusion_set=frozenset(), train_df=None, shard_prefix='val/',
-                     ids: Optional[Sequence[str]] = None, augmentation_transform=None,
-                     on_split='error', verify_headers=True) -> IndexedShardDataset:
+                     ids: Optional[Sequence[str]] = None, on_split='error', verify_headers=True) -> IndexedShardDataset:
     """ids: the subjects to serve (e.g. the ids in your predictions CSV). Default: every
     id in the selected shards; some of them may be dropped by compose (see ds.scan())."""
     index = load_offset_index(index_csv, shard_root, ids=ids, shard_prefix=shard_prefix)
     print('[pd_indexed]', index.summary())
-    process = make_pd_compose(exp_params, transform, grid_dict, exclusion_set, train_df,
-                              augmentation_transform=augmentation_transform)
+    process = make_pd_compose(exp_params, transform, grid_dict, exclusion_set, train_df)
     return IndexedShardDataset(index, process, ids=ids, id_of=pd_subject_of,
                                on_split=on_split, verify_headers=verify_headers)
 

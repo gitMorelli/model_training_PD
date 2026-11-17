@@ -8,6 +8,7 @@ import random
 import sys
 import pickle
 from itertools import combinations
+import numpy as np
 
 import sys, os, contextlib
 
@@ -20,12 +21,15 @@ from src.utils.tabular_data_utils import preprocess_PD_csv
 from src.utils.evaluation import analyze_results, plot_probability_trajectories
 from src.utils.file_utils import tee_stdout, get_last_best_checkpoint
 
+from src.utils.data_loading.map_style_dataset.pd_indexed import build_pd_dataset, make_pd_collate
+from torch.utils.data import DataLoader
+
 
 experiment = "PD" #"pre_trained_models/E3N" # "PD"
 SOURCE_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/"
-model_name = 'ConvEncoder_dae_32'#'resnet18_32' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
+model_name = 'convnext_tiny'#'resnet18_32' #efficientnet_v2_s' #convnext_tiny'#'resnet50'#'FiveStageResidualStridedConvNet' #"FiveStageResidualStridedConvNet"
 CHECKPOINT_PATH = f"/home/a_morelli/models/model_training_logs/{experiment}/{model_name}_model_results/checkpoints"
-version='3'
+version='27'
 old_run=False
 params_path = os.path.join(CHECKPOINT_PATH,f"v_{version}", "exp_params.pkl")
 #get the most recent ckpt file with best in the name 
@@ -144,6 +148,12 @@ def main(exp_params):
 
     #run model forward
     outputs = trainer.predict(lit_model, dataloaders=val_loader)
+
+    compare_w_seqxai(outputs, val_loader, lit_model, trainer, exp_params, save_path, VERBOSE, CLASS_COL, 
+                          SHARD_PATTERN_train, SHARD_PATTERN_val, grid_dict, transform, exclusion_set, 
+                          val_exclusion_set, train_df, worker, prefetch_factor, need_causal_pass)
+    return
+
     lit_model.predict_causal = False #for the predict on train
     results = get_result_dfs_per_group(outputs, class_names=None)
 
@@ -165,7 +175,7 @@ def main(exp_params):
         #exclude controls from the training if i want to reduce the asimmetry of the dataset (for example if i want to have a 1:1 ratio between cases and controls)
         
         exclusion_set_temp, val_exclusion_set_temp, counts = prepare_exclusion_sets_PD(exp_params_temp,verbose=VERBOSE,class_col=CLASS_COL)
-        _,val_loader_temp,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params,exclusion_set_temp,val_exclusion_set_temp, grid_dict, transform, 
+        _,val_loader_temp,_,_= prepare_loaders_PD(worker,prefetch_factor,exp_params_temp,exclusion_set_temp,val_exclusion_set_temp, grid_dict, transform, 
                                                         SHARD_PATTERN_train=SHARD_PATTERN_train, SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df,
                                                         running_eval=True)
         outputs_temp = trainer.predict(lit_model, dataloaders=val_loader_temp)
@@ -436,6 +446,95 @@ def get_args():
 
 
 
+def check_for_determinism(outputs, val_loader, lit_model, trainer, exp_params, save_path, VERBOSE, CLASS_COL, 
+                          SHARD_PATTERN_train, SHARD_PATTERN_val, grid_dict, transform, exclusion_set, 
+                          val_exclusion_set, train_df, worker, prefetch_factor, need_causal_pass):
+    def _probs(outputs, group='all'):
+        df = get_result_dfs_per_group(outputs, class_names=None)[group][0]
+        dup = df['unique_id'].duplicated().sum()
+        if dup:
+            print(f'[check] {dup} duplicated subject ids in one run', flush=True)
+        return df.drop_duplicates('unique_id').set_index('unique_id')
+
+
+    def _compare(a, b, name_a, name_b, out_dir):
+        pcols = [c for c in a.columns if c.startswith('probability_')]
+        j = a[pcols].join(b[pcols], lsuffix='_a', rsuffix='_b', how='outer')
+        only = j.isna().any(axis=1)
+        d = np.abs(j.loc[~only, [c + '_a' for c in pcols]].values
+                - j.loc[~only, [c + '_b' for c in pcols]].values).max(1)
+        print(f'[check] {name_a} vs {name_b}: {len(d)} common subjects, {int(only.sum())} in only one run; '
+            f'max |dp| {d.max():.3g}, median {np.median(d):.3g}, >1e-3: {(d > 1e-3).sum()}', flush=True)
+        j.assign(maxdiff=pd.Series(d, index=j.index[~only])).to_csv(
+            os.path.join(out_dir, f'check_{name_a}_vs_{name_b}.csv'))
+
+
+    out_dir = os.path.join(save_path, 'reproducibility')
+    os.makedirs(out_dir, exist_ok=True)
+    lit_model.predict_causal = need_causal_pass
+
+    # A and B: same loader, same model, two passes (RNG state advances in between)
+    run_a = _probs(outputs)                                        # the pass you already ran
+    run_b = _probs(trainer.predict(lit_model, dataloaders=val_loader))
+    _compare(run_a, run_b, 'run_a', 'run_b', out_dir)
+
+    # C: batch size 1 (no batch-mates, no padding to other subjects)
+    exp_bs1 = {**exp_params, 'batch_size': 1}
+    _, val_loader_bs1, _, _ = prepare_loaders_PD(worker, prefetch_factor, exp_bs1, exclusion_set, val_exclusion_set,
+                                                grid_dict, transform, SHARD_PATTERN_train=SHARD_PATTERN_train,
+                                                SHARD_PATTERN_val=SHARD_PATTERN_val, train_df=train_df,
+                                                running_eval=True)
+    run_c = _probs(trainer.predict(lit_model, dataloaders=val_loader_bs1))
+    _compare(run_a, run_c, 'run_a', 'batch1', out_dir)
+
+    # D: plain forward instead of the causal-prefix pass (what seqxai uses)
+    lit_model.predict_causal = False
+    run_d = _probs(trainer.predict(lit_model, dataloaders=val_loader))
+    _compare(run_a, run_d, 'run_a', 'plain_forward', out_dir)
+    lit_model.predict_causal = need_causal_pass
+    return
+
+def compare_w_seqxai(outputs, val_loader, lit_model, trainer, exp_params, save_path, VERBOSE, CLASS_COL, 
+                          SHARD_PATTERN_train, SHARD_PATTERN_val, grid_dict, transform, exclusion_set, 
+                          val_exclusion_set, train_df, worker, prefetch_factor, need_causal_pass):
+    def _probs(outputs, group='all'):
+        df = get_result_dfs_per_group(outputs, class_names=None)[group][0]
+        dup = df['unique_id'].duplicated().sum()
+        if dup:
+            print(f'[check] {dup} duplicated subject ids in one run', flush=True)
+        return df.drop_duplicates('unique_id').set_index('unique_id')
+
+
+    def _compare(a, b, name_a, name_b, out_dir):
+        pcols = [c for c in a.columns if c.startswith('probability_')]
+        j = a[pcols].join(b[pcols], lsuffix='_a', rsuffix='_b', how='outer')
+        only = j.isna().any(axis=1)
+        d = np.abs(j.loc[~only, [c + '_a' for c in pcols]].values
+                - j.loc[~only, [c + '_b' for c in pcols]].values).max(1)
+        print(f'[check] {name_a} vs {name_b}: {len(d)} common subjects, {int(only.sum())} in only one run; '
+            f'max |dp| {d.max():.3g}, median {np.median(d):.3g}, >1e-3: {(d > 1e-3).sum()}', flush=True)
+        j.assign(maxdiff=pd.Series(d, index=j.index[~only])).to_csv(
+            os.path.join(out_dir, f'check_{name_a}_vs_{name_b}.csv'))
+
+    VAL_PREFIX = "val/"
+    INDEX_CSV = '/home/a_morelli/datasets/id_lists/ids_to_shards/final_png_whitebg_21_07_26_id_to_shard_offsets.csv'
+    from src.utils.image_processing import get_augmentation_transform
+    out_dir = os.path.join(save_path, 'reproducibility')
+    os.makedirs(out_dir, exist_ok=True)
+    lit_model.predict_causal = need_causal_pass
+
+    # A and B: same loader, same model, two passes (RNG state advances in between)
+    run_a = _probs(outputs)                                        # the pass you already ran
+    ds = build_pd_dataset(INDEX_CSV, exp_params['data_folder'], exp_params, transform, grid_dict,
+                      exclusion_set=val_exclusion_set, train_df=train_df, shard_prefix=VAL_PREFIX,
+                      ids=run_a.index.tolist())
+    loader_e = DataLoader(ds, batch_size=exp_params['batch_size'], collate_fn=make_pd_collate(exp_params),
+                        num_workers=worker)
+    lit_model.predict_causal = False
+    run_e = _probs(trainer.predict(lit_model, dataloaders=loader_e))
+    _compare(run_a, run_e, 'run_a', 'indexed', out_dir)
+
+    return
 
 
 def store_results(csv_data, results_df, results_df_pre, ckpt_path,params, group_name=None):

@@ -8,6 +8,7 @@ Fill in the TODO blocks; nothing else needs a separate setup file.
 """
 import argparse
 import os
+import shutil
 import pandas as pd
 
 import numpy as np
@@ -27,11 +28,13 @@ VERBOSE = True
 
 # ---------------------------------------------------------------- run
 def main():
+    delete_folder = False
     cl_args = get_args()
     args = {
         'workers': cl_args.num_workers,
         'model_name': 'convnext_tiny',
         'version': '27',
+        'test_on': 'pre', # or 'all'
 
         'strategy_threshold': 'youden',  # or 'youden' or 'target_sensitivity'
         'threshold_target': 0.9,  # used only if strategy_threshold == 'target_sensitivity'
@@ -39,8 +42,14 @@ def main():
     }
     args['checkpoint_dir'] = f"/home/a_morelli/models/model_training_logs/PD/{args['model_name']}_model_results/checkpoints"
     args['checkpoint_file'] = os.path.join(args['checkpoint_dir'],get_last_best_checkpoint(args['checkpoint_dir'], args['version']))
-    args['prediction_file'] = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", "all", "predictions.csv")
-    args['out_dir'] = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", "xai_results")
+    suffix_pre_all=''
+    if args['test_on'] == 'pre':
+        suffix_pre_all='_pre'
+    args['prediction_file'] = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", "all", f"predictions{suffix_pre_all}.csv")
+    args['out_dir'] = os.path.join(args['checkpoint_dir'],f"v_{args['version']}", f"xai_results{suffix_pre_all}")
+    if delete_folder:
+        shutil.rmtree(args['out_dir'], ignore_errors=True)
+    os.makedirs(args['out_dir'], exist_ok=True)
     args['stages'] = STAGES
     args['device'] = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -52,6 +61,9 @@ def main():
     args['index_csv']= '/home/a_morelli/datasets/id_lists/ids_to_shards/final_png_whitebg_21_07_26_id_to_shard_offsets.csv'
     VAL_PREFIX = 'val/'     # the folder of your validation shards, relative to data_folder path
 
+    print(f"[INFO] Model was trained with censor time: {exp_params['censor_time']}",
+          f"[INFO] XAI evaluation is made on {args['test_on']}",
+          f"Expect mismateches if they differ.", flush=True)
     #load grid_files for selecting chunks from the images during the dataloading
     grid_dict = load_grid_dict(exp_params)
     csv_data = pd.read_parquet(exp_params['list_of_ids_paths']) #if dataset is synthetic the list_of_ids_paths

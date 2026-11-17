@@ -22,6 +22,11 @@ def load_predictions(path_or_df, id_col: str = 'unique_id', label_col: str = 'tr
     and a warning is printed: the pipeline explains whole sequences.
     """
     df = pd.read_csv(path_or_df) if not isinstance(path_or_df, pd.DataFrame) else path_or_df.copy()
+    #check how many nans are in the prob_cols and print a warning if any are found
+    if df[prob_cols].isna().any().any():
+        n_nans = df[prob_cols].isna().sum().sum()
+        print(f"[warning] Found {n_nans} NaN values in probability columns {prob_cols}. Dropping these rows.")
+        df = df.dropna(subset=prob_cols)
     cols = [prob_cols] if isinstance(prob_cols, str) else list(prob_cols)
     missing = [c for c in [id_col, label_col, *cols] if c not in df.columns]
     if missing:

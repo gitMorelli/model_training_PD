@@ -1366,6 +1366,20 @@ def test_csv_loader():
         if i == 2:
             break
 
+# MARK: test xai
+def inspect_xai_cache():
+    import pandas as pd
+    from sklearn.metrics import roc_auc_score
+    r = pd.read_csv('/home/a_morelli/models/model_training_logs/PD/convnext_tiny_model_results/checkpoints/v_27/xai_results_pre/cache/recomputed.csv')
+    d = r['csv_vs_cache_maxdiff']
+    print(d.describe(percentiles=[.5, .75, .9, .95, .99]))         # mostly tiny (precision) or large?
+    print(r.groupby(pd.qcut(r['T'], 5, duplicates='drop'))['csv_vs_cache_maxdiff']
+        .agg(['median', lambda x: (x > 1e-3).mean()]))           # depends on sequence length?
+    print(r.groupby((r['csv_prob_1'] - 0.5).abs().round(1))['csv_vs_cache_maxdiff'].median())  # only uncertain ones?
+    print('corr', r[['rprob_1', 'csv_prob_1']].corr().iloc[0, 1],
+        'AUC now', roc_auc_score(r['label'], r['rprob_1']),
+        'AUC csv', roc_auc_score(r['label'], r['csv_prob_1']))
+
 #ROC and PR-auc curve
 def plot_roc_pr_curves():
     from src.utils.evaluation.plotting_helpers import _load_roc_curve, _draw_roc_curves, _load_pr_curve, _draw_pr_curves
@@ -1667,5 +1681,4 @@ def check_label_match(df1,df2):
     print(pd.crosstab(both['diag'], both['label']))   # shows how values map onto each other
 
 if __name__ == "__main__":
-    inspect_matched_data()
-    inspect_predictions()
+    inspect_xai_cache()
